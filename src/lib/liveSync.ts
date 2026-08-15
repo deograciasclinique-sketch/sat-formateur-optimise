@@ -58,16 +58,30 @@ export function subscribeToCloudKey(
 /**
  * Pousse la valeur d'une clé de données vers Firestore.
  * Retourne une Promise qui se résout une fois l'écriture confirmée.
+ *
+ * Note : Firestore refuse catégoriquement toute valeur `undefined` dans un
+ * document (même imbriquée). On passe donc la valeur par un aller-retour
+ * JSON (stringify/parse), qui élimine naturellement tous les champs
+ * `undefined` sans toucher aux autres types de données (null, dates en
+ * chaîne, tableaux, etc. restent intacts).
  */
 export function pushToCloudKey(key: string, value: any): Promise<void> {
   if (!db) return Promise.resolve();
+
+  let sanitized: any;
+  try {
+    sanitized = value === undefined ? null : JSON.parse(JSON.stringify(value));
+  } catch (err) {
+    console.error(`[liveSync] Impossible de préparer "${key}" pour l'envoi:`, err);
+    return Promise.reject(err);
+  }
 
   return db
     .collection(COLLECTION)
     .doc(key)
     .set(
       {
-        data: value,
+        data: sanitized,
         updatedAt: Date.now(),
       },
       { merge: true }
