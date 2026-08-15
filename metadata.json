@@ -1,0 +1,10 @@
+{
+  "name": "système de sante intégré 2.2 DEO GRACIAS",
+  "description": "application de deo gracias pour la bonne gestion DES CENTRES DE SANTE PRIVE",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
