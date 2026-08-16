@@ -4,10 +4,28 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DEO GRACIAS - Système de Santé Intégré</title>
-    <link rel="icon" href="/icon-192.png" type="image/png" />
-    <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#0d9488" />
+    <link rel="icon" id="app-favicon" href="/icon-192.png" type="image/png" />
+    <link rel="apple-touch-icon" id="app-apple-icon" href="/icon-192.png" />
+    <link rel="manifest" id="app-manifest" href="/manifest.json" />
+    <meta name="theme-color" id="app-theme-color" content="#0d9488" />
+    <script>
+      // Si le lien est ouvert en mode "patient" (portail public de prise de
+      // RDV), on bascule le manifest/icônes/titre AVANT le rendu React, pour
+      // que l'installation sur l'écran d'accueil du téléphone crée une icône
+      // distincte ("DEO GRACIAS RDV") de celle de l'app du personnel.
+      (function () {
+        try {
+          var params = new URLSearchParams(window.location.search);
+          if (params.get("mode") === "patient") {
+            document.title = "DEO GRACIAS - Prise de RDV";
+            document.getElementById("app-manifest").setAttribute("href", "/manifest-patient.json");
+            document.getElementById("app-favicon").setAttribute("href", "/icon-patient-192.png");
+            document.getElementById("app-apple-icon").setAttribute("href", "/icon-patient-192.png");
+            document.getElementById("app-theme-color").setAttribute("content", "#2563eb");
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
