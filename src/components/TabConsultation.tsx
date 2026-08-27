@@ -30,14 +30,14 @@ interface TabConsultationProps {
   onUpdateHospitalisations?: (hosps: Hospitalisation[]) => void;
   urgences?: PatientUrgence[];
   onUpdateUrgences?: (urgences: PatientUrgence[]) => void;
-  // Cahier des charges point 6.3 : déduction automatique du stock à chaque
+  // Cahier des charges point 6.3 : déduction automatique du stock pour chaque
   // médicament prescrit en consultation.
   onUpdateMedicaments?: (meds: Medicament[]) => void;
   mouvements?: MouvementStock[];
   onUpdateMouvements?: (movs: MouvementStock[]) => void;
 }
 
-function TabConsultation({
+export default function TabConsultation({
   consultations,
   medicaments,
   staff,
@@ -142,6 +142,7 @@ function TabConsultation({
   const [consPlainte, setConsPlainte] = useState("");
   const [consExamen, setConsExamen] = useState("");
   const [consDiagnostic, setConsDiagnostic] = useState("");
+  const [consDiagnosticFinal, setConsDiagnosticFinal] = useState("");
 
   // AI Assistant states
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -157,12 +158,64 @@ function TabConsultation({
   const [presQuantite, setPresQuantite] = useState("1");
 
   const [searchQuery, setSearchQuery] = useState("");
-  // Pagination du registre des consultations : c'est la liste qui grossit
-  // le plus vite (une entrée par visite patient), donc la plus exposée au
-  // ralentissement si on rend tout le tableau d'un coup.
-  const [consultPage, setConsultPage] = useState(1);
-  const CONSULT_PAGE_SIZE = 50;
   const [selectedConsultation, setSelectedConsultation] = useState<Consultation | null>(null);
+
+  // --- Mode édition d'un dossier déjà enregistré ---
+  const [isEditingDetail, setIsEditingDetail] = useState(false);
+  const [editPlainte, setEditPlainte] = useState("");
+  const [editExamenPhysique, setEditExamenPhysique] = useState("");
+  const [editDiagnostic, setEditDiagnostic] = useState("");
+  const [editDiagnosticFinal, setEditDiagnosticFinal] = useState("");
+  const [editObservations, setEditObservations] = useState("");
+
+  const startEditingDetail = () => {
+    if (!selectedConsultation) return;
+    setEditPlainte(selectedConsultation.plainte || "");
+    setEditExamenPhysique(selectedConsultation.examenPhysique || "");
+    setEditDiagnostic(selectedConsultation.diagnostic || "");
+    setEditDiagnosticFinal(selectedConsultation.diagnosticFinal || "");
+    setEditObservations(selectedConsultation.observations || "");
+    setIsEditingDetail(true);
+  };
+
+  const cancelEditingDetail = () => {
+    setIsEditingDetail(false);
+  };
+
+  const handleSaveEditedConsultation = () => {
+    if (!selectedConsultation) return;
+
+    if (!editDiagnostic.trim()) {
+      alert("Le diagnostic de présomption ne peut pas être vide.");
+      return;
+    }
+
+    const hasLaboPrescrit = !!(selectedConsultation.labResults && selectedConsultation.labResults.length > 0);
+    if (hasLaboPrescrit && !editDiagnosticFinal.trim()) {
+      alert("Un examen de laboratoire a été prescrit pour ce dossier : le diagnostic final / de sortie est obligatoire avant de valider.");
+      return;
+    }
+
+    const updatedCons: Consultation = {
+      ...selectedConsultation,
+      plainte: editPlainte.trim(),
+      examenPhysique: editExamenPhysique.trim(),
+      diagnostic: editDiagnostic.trim(),
+      diagnosticFinal: editDiagnosticFinal.trim() || undefined,
+      observations: editObservations.trim()
+    };
+
+    const updatedList = consultations.map((c) => c.id === selectedConsultation.id ? updatedCons : c);
+    onUpdateConsultations(updatedList);
+    setSelectedConsultation(updatedCons);
+    setIsEditingDetail(false);
+    logActivity(
+      "Modification de fiche (Consultation)",
+      "modification",
+      `Modification du dossier de consultation du patient ${updatedCons.patient}.`
+    );
+    alert("Dossier mis à jour avec succès.");
+  };
 
   // Practitioner search states
   const [praticienSearchQuery, setPraticienSearchQuery] = useState("");
@@ -513,7 +566,12 @@ function TabConsultation({
 
   const handleSaveConsultation = () => {
     if (!consPatient.trim() || !consPlainte.trim() || !consDiagnostic.trim()) {
-      alert("Veuillez renseigner le nom du patient, le motif de consultation, et le diagnostic posé.");
+      alert("Veuillez renseigner le nom du patient, le motif de consultation, et le diagnostic de présomption.");
+      return;
+    }
+
+    if (tempLabResults.length > 0 && !consDiagnosticFinal.trim()) {
+      alert("Des résultats de laboratoire sont liés à cette consultation : veuillez renseigner le diagnostic de certitude / final avant d'enregistrer.");
       return;
     }
 
@@ -553,6 +611,7 @@ function TabConsultation({
       plainte: consPlainte.trim(),
       examenPhysique: consExamen.trim(),
       diagnostic: consDiagnostic.trim(),
+      diagnosticFinal: consDiagnosticFinal.trim() || undefined,
       ordonnance: [...presLines],
       photos: [...tempPhotos],
       labResults: [...tempLabResults],
@@ -579,6 +638,7 @@ function TabConsultation({
         medecin: medecinNomForDecision,
         motif: newCons.plainte,
         notesInitiales: `Diagnostic (Consultation Générale) : ${newCons.diagnostic}${newCons.examenPhysique ? "\nExamen clinique : " + newCons.examenPhysique : ""}`,
+        typeAdmission: newCons.decision === "Mise en observation" ? "Mise en Observation (72h)" : "Hospitalisation",
         statut: "En cours",
         dateSortie: "",
         statutSortie: "",
@@ -670,6 +730,7 @@ function TabConsultation({
     setConsPlainte("");
     setConsExamen("");
     setConsDiagnostic("");
+    setConsDiagnosticFinal("");
     setPresLines([]);
     setTempPhotos([]);
     setTempLabResults([]);
@@ -980,12 +1041,29 @@ function TabConsultation({
     doc.setFont("Helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(13, 148, 136);
-    doc.text("DIAGNOSTIC FINAL POSÉ :", margin + 3, y + 4.5);
+    doc.text("DIAGNOSTIC DE PRÉSOMPTION :", margin + 3, y + 4.5);
 
     doc.setFont("Helvetica", "bold");
     doc.setFontSize(10);
     doc.setTextColor(15, 23, 42);
     doc.text(cons.diagnostic, margin + 3, y + 9);
+    y += 14;
+
+    doc.setFillColor(240, 253, 250);
+    doc.rect(margin, y, contentWidth, 11, "F");
+    doc.setDrawColor(13, 148, 136);
+    doc.setLineWidth(0.3);
+    doc.rect(margin, y, contentWidth, 11, "S");
+
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(13, 148, 136);
+    doc.text("DIAGNOSTIC FINAL / DE SORTIE :", margin + 3, y + 4.5);
+
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(15, 23, 42);
+    doc.text(cons.diagnosticFinal || "Non renseigné", margin + 3, y + 9);
     y += 17;
 
     // Prescription Section
@@ -1133,20 +1211,15 @@ function TabConsultation({
   ).size;
 
   const effectiveQuery = filterPatientQuery || searchQuery;
-  // Mémoïsé : c'est la liste qui grossit le plus vite (une entrée par visite
-  // patient) — sans ça, chaque clic sur "page suivante" relance un filtre +
-  // tri sur tout l'historique de consultations.
-  const filteredConsultationsList = useMemo(() => {
-    return consultations
-      .filter((c) => {
-        const eq = effectiveQuery.toLowerCase().trim();
-        return c.patient.toLowerCase().includes(eq) ||
-               c.diagnostic.toLowerCase().includes(eq) ||
-               c.id.toLowerCase().includes(eq) ||
-               (c.contact && c.contact.includes(eq));
-      })
-      .sort((a, b) => b.date.localeCompare(a.date));
-  }, [consultations, effectiveQuery]);
+  const filteredConsultationsList = consultations
+    .filter((c) => {
+      const eq = effectiveQuery.toLowerCase().trim();
+      return c.patient.toLowerCase().includes(eq) || 
+             c.diagnostic.toLowerCase().includes(eq) || 
+             c.id.toLowerCase().includes(eq) ||
+             (c.contact && c.contact.includes(eq));
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
 
   return (
     <div className="space-y-6">
@@ -1663,7 +1736,7 @@ function TabConsultation({
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block">Diagnostic (11) *</label>
+                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block">Diagnostic de Présomption (11) *</label>
                 <button
                   type="button"
                   onClick={() => startDictation("diagnostic")}
@@ -1681,43 +1754,9 @@ function TabConsultation({
                 onChange={(e) => setConsDiagnostic(e.target.value)}
                 className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
               />
-            </div>
-
-            {/* Décision de Consultation Générale (cahier des charges, points 1-3) */}
-            <div className="pt-3 border-t border-stone-100">
-              <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-2">
-                ⚕️ Décision de la Consultation Générale
-              </label>
-              <select
-                value={consDecision}
-                onChange={(e) => setConsDecision(e.target.value as NonNullable<Consultation["decision"]>)}
-                className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
-              >
-                <option value="Retour à domicile">🏠 Retour à domicile</option>
-                <option value="Mise en observation">🛏️ Mise en observation</option>
-                <option value="Hospitalisation">🏥 Hospitalisation</option>
-                <option value="Référer vers un autre service">↗️ Référer vers un autre service</option>
-                <option value="Admission aux urgences">🚨 Admettre aux urgences</option>
-              </select>
-              {consDecision === "Référer vers un autre service" && (
-                <input
-                  type="text"
-                  placeholder="Ex: Maternité, CMA, Chirurgie..."
-                  value={consReferenceService}
-                  onChange={(e) => setConsReferenceService(e.target.value)}
-                  className="w-full mt-2 text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
-                />
-              )}
-              {(consDecision === "Hospitalisation" || consDecision === "Mise en observation") && (
-                <p className="text-2xs text-info-700 bg-info-50 border border-info-100 rounded-lg px-2.5 py-1.5 mt-2">
-                  Un dossier sera automatiquement créé dans le module Hospitalisation avec les données de ce patient.
-                </p>
-              )}
-              {consDecision === "Admission aux urgences" && (
-                <p className="text-2xs text-info-700 bg-info-50 border border-info-100 rounded-lg px-2.5 py-1.5 mt-2">
-                  Un dossier sera automatiquement créé dans le module Urgences avec les données de ce patient.
-                </p>
-              )}
+              <p className="text-xs text-stone-500 dark:text-stone-400 italic mt-1">
+                Le diagnostic final / de sortie pourra être ajouté plus tard depuis le dossier (bouton "Modifier"), une fois les résultats du laboratoire disponibles.
+              </p>
             </div>
 
             {/* Direct Camera module during consultation creation */}
@@ -1941,6 +1980,63 @@ function TabConsultation({
                 </div>
               </div>
             )}
+
+            {/* Diagnostic de certitude / final, après examens du labo */}
+            <div className="pt-3 border-t border-stone-100">
+              <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">
+                Diagnostic de Certitude / Final
+                {tempLabResults.length > 0 && (
+                  <span className="text-danger-600 ml-1">* (obligatoire : examen labo lié à cette consultation)</span>
+                )}
+              </label>
+              <input
+                type="text"
+                placeholder="Ex: Paludisme simple confirmé (GE positive) — à remplir une fois le diagnostic confirmé"
+                value={consDiagnosticFinal}
+                onChange={(e) => setConsDiagnosticFinal(e.target.value)}
+                className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
+              />
+              <p className="text-xs text-stone-500 dark:text-stone-400 italic mt-1">
+                Si les résultats du labo ne sont pas encore disponibles, laisse ce champ vide : tu pourras le compléter plus tard depuis le dossier (bouton "Modifier").
+              </p>
+            </div>
+
+            {/* Décision de Consultation Générale (cahier des charges, points 1-3) */}
+            <div className="pt-3 border-t border-stone-100">
+              <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-2">
+                ⚕️ Décision de la Consultation Générale
+              </label>
+              <select
+                value={consDecision}
+                onChange={(e) => setConsDecision(e.target.value as NonNullable<Consultation["decision"]>)}
+                className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
+              >
+                <option value="Retour à domicile">🏠 Retour à domicile</option>
+                <option value="Mise en observation">🛏️ Mise en observation</option>
+                <option value="Hospitalisation">🏥 Hospitalisation</option>
+                <option value="Référer vers un autre service">↗️ Référer vers un autre service</option>
+                <option value="Admission aux urgences">🚨 Admettre aux urgences</option>
+              </select>
+              {consDecision === "Référer vers un autre service" && (
+                <input
+                  type="text"
+                  placeholder="Ex: Maternité, CMA, Chirurgie..."
+                  value={consReferenceService}
+                  onChange={(e) => setConsReferenceService(e.target.value)}
+                  className="w-full mt-2 text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
+                />
+              )}
+              {(consDecision === "Hospitalisation" || consDecision === "Mise en observation") && (
+                <p className="text-2xs text-info-700 bg-info-50 border border-info-100 rounded-lg px-2.5 py-1.5 mt-2">
+                  Un dossier sera automatiquement créé dans le module Hospitalisation avec les données de ce patient.
+                </p>
+              )}
+              {consDecision === "Admission aux urgences" && (
+                <p className="text-2xs text-info-700 bg-info-50 border border-info-100 rounded-lg px-2.5 py-1.5 mt-2">
+                  Un dossier sera automatiquement créé dans le module Urgences avec les données de ce patient.
+                </p>
+              )}
+            </div>
           </div>
         </div>
 
@@ -2106,7 +2202,7 @@ function TabConsultation({
               type="text"
               placeholder="Rechercher patient ou diagnostic..."
               value={searchQuery}
-              onChange={(e) => { setSearchQuery(e.target.value); setConsultPage(1); }}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full text-xs border border-stone-200 rounded-lg pl-9 pr-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
             />
           </div>
@@ -2120,14 +2216,7 @@ function TabConsultation({
           </div>
         ) : filteredConsultationsList.length === 0 ? (
           <p className="text-xs text-stone-500 dark:text-stone-400 py-6 text-center italic">Aucun dossier clinique enregistré.</p>
-        ) : (() => {
-            const totalConsultPages = Math.max(1, Math.ceil(filteredConsultationsList.length / CONSULT_PAGE_SIZE));
-            const consultPageClamped = Math.min(consultPage, totalConsultPages);
-            const consultPageItems = filteredConsultationsList.slice(
-              (consultPageClamped - 1) * CONSULT_PAGE_SIZE,
-              consultPageClamped * CONSULT_PAGE_SIZE
-            );
-            return (
+        ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -2147,7 +2236,7 @@ function TabConsultation({
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {consultPageItems.map((c) => {
+                {filteredConsultationsList.map((c) => {
                   const mName = staff.find((s) => s.id === c.medecinId)?.nom || "Généraliste";
                   const vit = c.vitals;
 
@@ -2239,7 +2328,7 @@ function TabConsultation({
                         <div className="flex flex-col gap-1 items-center">
                           <button
                             type="button"
-                            onClick={() => setSelectedConsultation(c)}
+                            onClick={() => { setSelectedConsultation(c); setIsEditingDetail(false); }}
                             className="bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold px-2 py-1 rounded-lg border border-primary-200 transition-all inline-flex items-center gap-1 w-full justify-center"
                           >
                             <Eye className="w-3 h-3" /> Dossier
@@ -2291,34 +2380,8 @@ function TabConsultation({
                 })}
               </tbody>
             </table>
-            {totalConsultPages > 1 && (
-              <div className="flex items-center justify-between gap-3 pt-3 text-xs text-stone-500">
-                <span>
-                  Page {consultPageClamped} / {totalConsultPages} — {filteredConsultationsList.length} dossier{filteredConsultationsList.length > 1 ? "s" : ""}
-                </span>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setConsultPage((p) => Math.max(1, p - 1))}
-                    disabled={consultPageClamped <= 1}
-                    className="px-2.5 py-1 rounded-lg border border-stone-200 font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone-50"
-                  >
-                    Précédent
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConsultPage((p) => Math.min(totalConsultPages, p + 1))}
-                    disabled={consultPageClamped >= totalConsultPages}
-                    className="px-2.5 py-1 rounded-lg border border-stone-200 font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone-50"
-                  >
-                    Suivant
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
-            );
-          })()}
+        )}
       </div>
 
       {/* Consultation Detail Modal (Printable) */}
@@ -2336,25 +2399,53 @@ function TabConsultation({
                 <h3 className="font-serif font-bold text-base">Rapport Clinique & Dossier Patient</h3>
               </div>
               <div className="flex items-center gap-2">
+                {!isEditingDetail ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={startEditingDetail}
+                      className="bg-warning-600 hover:bg-warning-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    >
+                      ✏️ Modifier
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadPDF(selectedConsultation)}
+                      className="bg-success-600 hover:bg-success-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" />
+                      Télécharger le PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs"
+                    >
+                      <Printer className="w-4 h-4" />
+                      Imprimer le dossier
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleSaveEditedConsultation}
+                      className="bg-success-600 hover:bg-success-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    >
+                      ✅ Enregistrer les modifications
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEditingDetail}
+                      className="bg-stone-200 hover:bg-stone-300 text-stone-700 text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    >
+                      Annuler
+                    </button>
+                  </>
+                )}
                 <button
                   type="button"
-                  onClick={() => handleDownloadPDF(selectedConsultation)}
-                  className="bg-success-600 hover:bg-success-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  Télécharger le PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs"
-                >
-                  <Printer className="w-4 h-4" />
-                  Imprimer le dossier
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedConsultation(null)}
+                  onClick={() => { setSelectedConsultation(null); setIsEditingDetail(false); }}
                   className="p-1.5 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-all cursor-pointer"
                 >
                   <X className="w-5 h-5 text-stone-500" />
@@ -2505,19 +2596,39 @@ function TabConsultation({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800 border-b pb-1 mb-2">3. Motif de Consultation / Plaintes</h3>
-                    <p className={`text-xs p-3 rounded-xl border italic min-h-[80px] ${
-                      theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-100 text-stone-700"
-                    }`}>
-                      "{selectedConsultation.plainte}"
-                    </p>
+                    {isEditingDetail ? (
+                      <textarea
+                        value={editPlainte}
+                        onChange={(e) => setEditPlainte(e.target.value)}
+                        className={`w-full text-xs p-3 rounded-xl border min-h-[80px] focus:outline-none focus:ring-1 focus:ring-primary-500 ${
+                          theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-200 text-stone-700"
+                        }`}
+                      />
+                    ) : (
+                      <p className={`text-xs p-3 rounded-xl border italic min-h-[80px] ${
+                        theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-100 text-stone-700"
+                      }`}>
+                        "{selectedConsultation.plainte}"
+                      </p>
+                    )}
                   </div>
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800 border-b pb-1 mb-2">4. Examen Clinique Physique</h3>
-                    <p className={`text-xs p-3 rounded-xl border min-h-[80px] ${
-                      theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-100 text-stone-700"
-                    }`}>
-                      {selectedConsultation.examenPhysique || "—"}
-                    </p>
+                    {isEditingDetail ? (
+                      <textarea
+                        value={editExamenPhysique}
+                        onChange={(e) => setEditExamenPhysique(e.target.value)}
+                        className={`w-full text-xs p-3 rounded-xl border min-h-[80px] focus:outline-none focus:ring-1 focus:ring-primary-500 ${
+                          theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-200 text-stone-700"
+                        }`}
+                      />
+                    ) : (
+                      <p className={`text-xs p-3 rounded-xl border min-h-[80px] ${
+                        theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-100 text-stone-700"
+                      }`}>
+                        {selectedConsultation.examenPhysique || "—"}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -2525,8 +2636,60 @@ function TabConsultation({
                 <div className={`p-4 rounded-xl border ${
                   theme === "dark" ? "bg-primary-950/20 border-primary-900 text-primary-200" : "bg-primary-50/50 border-primary-150 text-primary-900"
                 }`}>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800 mb-1">5. Conclusion Clinique & Diagnostic Final</h3>
-                  <p className="text-sm font-semibold">{selectedConsultation.diagnostic}</p>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800 mb-1">5. Conclusion Clinique & Diagnostic</h3>
+                  {isEditingDetail ? (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Diagnostic de Présomption *</label>
+                        <input
+                          type="text"
+                          value={editDiagnostic}
+                          onChange={(e) => setEditDiagnostic(e.target.value)}
+                          className="w-full text-sm font-semibold border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">
+                          Diagnostic Final / de Sortie
+                          {selectedConsultation.labResults && selectedConsultation.labResults.length > 0 && (
+                            <span className="text-danger-600 ml-1">* (obligatoire : examen labo prescrit)</span>
+                          )}
+                        </label>
+                        <input
+                          type="text"
+                          value={editDiagnosticFinal}
+                          onChange={(e) => setEditDiagnosticFinal(e.target.value)}
+                          placeholder="Ex: Paludisme simple confirmé (GE positive)"
+                          className="w-full text-sm font-semibold border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Observations / Conseils</label>
+                        <textarea
+                          value={editObservations}
+                          onChange={(e) => setEditObservations(e.target.value)}
+                          className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-primary-500 min-h-[60px]"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div>
+                        <span className="text-xs uppercase font-semibold tracking-wider text-primary-700/70">Diagnostic de Présomption :</span>
+                        <p className="text-sm font-semibold">{selectedConsultation.diagnostic}</p>
+                      </div>
+                      <div>
+                        <span className="text-xs uppercase font-semibold tracking-wider text-primary-700/70">Diagnostic Final / de Sortie :</span>
+                        <p className="text-sm font-semibold">
+                          {selectedConsultation.diagnosticFinal || (
+                            <span className="italic font-normal text-stone-500">
+                              Non renseigné {selectedConsultation.labResults && selectedConsultation.labResults.length > 0 ? "— examen labo en attente" : ""}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Prescription Section */}
@@ -2835,7 +2998,3 @@ function TabConsultation({
     </div>
   );
 }
-
-// Mémoïsé : évite de re-rendre tout cet onglet (souvent 1000+ lignes de JSX)
-// quand seul un autre onglet ou une donnée sans rapport change dans App.tsx.
-export default React.memo(TabConsultation);

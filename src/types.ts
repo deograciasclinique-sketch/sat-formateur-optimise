@@ -177,6 +177,7 @@ export interface Hospitalisation {
   medecin: string;
   motif: string;
   notesInitiales?: string;
+  typeAdmission?: "Hospitalisation" | "Mise en Observation (72h)";
   statut: "En cours" | "Sorti(e) guéri(e)" | "Transféré(e)" | "Sortie contre avis médical" | "Décès";
   dateSortie: string;
   statutSortie: string;
@@ -189,6 +190,25 @@ export interface Evolution {
   hospId: string;
   date: string;
   note: string;
+  createdAt: string;
+}
+
+export interface FicheReference {
+  id: string;
+  hospId?: string;
+  patient: string;
+  age?: number;
+  sexe?: string;
+  contact?: string;
+  serviceActuel: string;
+  structureDestination: string;
+  serviceDestination?: string;
+  motifTransfert: string;
+  etatClinique: "Stable" | "Sérieux" | "Critique" | "Urgence vitale";
+  observationsCliniques?: string;
+  medecinReferent?: string;
+  dateReference: string;
+  heureReference?: string;
   createdAt: string;
 }
 
@@ -205,6 +225,13 @@ export interface Vaccination {
   agent: string;
   prochainRappel: string;
   effets: string;
+  poidsActuel?: number;
+  temperature?: number;
+  etatGeneral?: "Bien portant" | "Malade / Fébrile" | "";
+  contreIndication?: boolean;
+  contreIndicationDetail?: string;
+  consentementParent?: boolean;
+  surveillance30min?: boolean;
   createdAt: string;
 }
 
@@ -406,6 +433,17 @@ export interface DocumentAdministratif {
   createdAt: string;
 }
 
+export interface EchographieCPN {
+  id: string;
+  date: string;
+  sa?: number;
+  resultat?: string;
+  fileName?: string;
+  fileType?: string;
+  base64Data?: string;
+  createdAt: string;
+}
+
 export interface ConsultationPrenatale {
   id: string;
   patient: string;
@@ -414,7 +452,33 @@ export interface ConsultationPrenatale {
   sa: number;
   dpa: string;
   dateVisite: string;
-  numeroVisite: "CPN 1" | "CPN 2" | "CPN 3" | "CPN 4";
+  numeroVisite: "CPN 1" | "CPN 2" | "CPN 3" | "CPN 4" | "CPN 5" | "CPN 6" | "CPN 7" | "CPN 8";
+  gestite?: number;
+  parite?: number;
+  avortements?: number;
+  groupeSanguin?: string;
+  rhesus?: string;
+  serologieVIH?: string;
+  serologieSyphilis?: string;
+  serologieHepatiteB?: string;
+  hemoglobine?: number;
+  glycosurie?: string;
+  hauteurUterine?: number;
+  bcf?: string;
+  bcfFrequence?: number;
+  mafPresents?: boolean;
+  presentation?: string;
+  oedemesMembres?: boolean;
+  palleurConjonctivale?: boolean;
+  vatDoses?: number;
+  tpiDoses?: number;
+  dangerSaignement?: boolean;
+  dangerCephalees?: boolean;
+  dangerVisionFloue?: boolean;
+  dangerDouleurEpigastrique?: boolean;
+  dangerFievre?: boolean;
+  dangerDiminutionMAF?: boolean;
+  prochainRdv?: string;
   poids: number;
   ta: string;
   albuminurie: string;
@@ -422,6 +486,7 @@ export interface ConsultationPrenatale {
   mild: boolean;
   agentId?: string;
   notes: string;
+  echographies?: EchographieCPN[];
   createdAt: string;
 }
 
@@ -442,8 +507,12 @@ export interface PatientUrgence {
 export interface FichePediatrique {
   id: string;
   patient: string;
+  sexe?: "Masculin" | "Féminin";
+  dateNaissance?: string;
   ageMois: number;
   contact: string;
+  temperature?: number;
+  motif?: string;
   poids: number;
   taille?: number;
   pc?: number;
@@ -453,6 +522,54 @@ export interface FichePediatrique {
   vaccinsAJour: boolean;
   alimentation: string;
   consultant?: string;
+
+  // Signes Généraux de Danger (PCIME)
+  dangerNePeutBoireOuTeter?: boolean;
+  dangerVomitTout?: boolean;
+  dangerConvulsions?: boolean;
+  dangerLethargiqueInconscient?: boolean;
+
+  // Toux ou difficulté à respirer
+  touxPresent?: boolean;
+  touxDureeJours?: number;
+  freqRespiratoire?: number;
+  tirageSousCostal?: boolean;
+  stridor?: boolean;
+  classificationRespiratoire?: string;
+
+  // Diarrhée
+  diarrheePresent?: boolean;
+  diarrheeDureeJours?: number;
+  diarrheeSangSelles?: boolean;
+  diarrheeLethargiqueAgite?: boolean;
+  diarrheeYeuxEnfonces?: boolean;
+  diarrheeBoitAvidement?: boolean;
+  diarrheePliCutanePersistant?: boolean;
+  classificationDiarrhee?: string;
+
+  // Fièvre
+  fievrePresent?: boolean;
+  fievreDureeJours?: number;
+  fievreTypePalu?: boolean;
+  fievreTypeRougeole?: boolean;
+  classificationFievre?: string;
+
+  // Problème d'oreille
+  oreilleDouleur?: boolean;
+  oreilleEcoulement?: boolean;
+  oreilleDureeJours?: number;
+  classificationOreille?: string;
+
+  // Malnutrition / Anémie
+  palmesPales?: boolean;
+
+  // Vaccination & Vitamine A
+  vitAAdministree?: boolean;
+  deparasitageFait?: boolean;
+
+  classificationGlobale?: string;
+  conduiteATenir?: string;
+
   diagnostic: string;
   date: string;
   createdAt: string;
@@ -497,6 +614,7 @@ export interface Consultation {
   plainte: string;
   examenPhysique?: string;
   diagnostic: string;
+  diagnosticFinal?: string;
   ordonnance: LigneOrdonnance[];
   photos?: string[];
   createdAt: string;

@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from "react";
+import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { Staff, Task, GardeAgent } from "../types";
 import { generateUid, getTodayStr, safeSet } from "../data";
 import { 
@@ -44,7 +45,7 @@ interface TabTachesProps {
   currentUser?: Staff | null;
 }
 
-function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, isResponsable = false, currentUser }: TabTachesProps) {
+export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, isResponsable = false, currentUser }: TabTachesProps) {
   // Staff form states
   const [staffNom, setStaffNom] = useState("");
   const [staffPoste, setStaffPoste] = useState("");
@@ -115,12 +116,8 @@ function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, isResponsable =
   // --- SUB-TABS NAVIGATION ---
   const [activeSubTab, setActiveSubTab] = useState<"tasks" | "gardes">("tasks");
 
-  // --- ÉTATS PORTAIL DE GARDE DES AGENTS (WEEKLY ROSTER) ---
-  const [gardes, setGardes] = useState<GardeAgent[]>(() => {
-    const saved = localStorage.getItem("dg_staff_gardes_schedule");
-    if (saved) return JSON.parse(saved);
-    return [];
-  });
+  // --- ÉTATS PORTAIL DE GARDE DES AGENTS (WEEKLY ROSTER) --- synchronisé cloud
+  const [gardes, setGardes] = useCloudSyncedState<GardeAgent[]>("dg_staff_gardes_schedule", []);
 
   const [selectedWeekDate, setSelectedWeekDate] = useState(getTodayStr());
   const [gardeViewMode, setGardeViewMode] = useState<"weekly_grid" | "monthly_calendar">("weekly_grid");
@@ -305,11 +302,8 @@ function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, isResponsable =
     return null;
   }, [gardes]);
 
-  // Securisation des codes agents (Directeur)
-  const [directorCode, setDirectorCode] = useState(() => {
-    const saved = localStorage.getItem("dg_director_code");
-    return saved || "1234";
-  });
+  // Securisation des codes agents (Directeur) — synchronisé cloud
+  const [directorCode, setDirectorCode] = useCloudSyncedState<string>("dg_director_code", "1234");
   const [isDirectorUnlocked, setIsDirectorUnlocked] = useState(false);
   const [enteredCode, setEnteredCode] = useState("");
   const [unlockError, setUnlockError] = useState("");
@@ -326,7 +320,6 @@ function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, isResponsable =
 
   const saveGardes = (newGardes: GardeAgent[]) => {
     setGardes(newGardes);
-    localStorage.setItem("dg_staff_gardes_schedule", JSON.stringify(newGardes));
   };
 
   const handleUnlockDirector = (e: React.FormEvent) => {
@@ -1998,7 +1991,3 @@ function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, isResponsable =
     </div>
   );
 }
-
-// Mémoïsé : évite de re-rendre tout cet onglet (souvent 1000+ lignes de JSX)
-// quand seul un autre onglet ou une donnée sans rapport change dans App.tsx.
-export default React.memo(TabTaches);
