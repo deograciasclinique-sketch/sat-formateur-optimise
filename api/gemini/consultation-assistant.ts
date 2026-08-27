@@ -5,7 +5,7 @@
 
 // Fonction serverless Vercel : POST /api/gemini/consultation-assistant
 
-import { generateConsultationAssistant } from "../_lib/geminiCore";
+import { generateConsultationAssistant } from "../_lib/geminiCore.js";
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {

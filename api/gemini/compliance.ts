@@ -8,7 +8,7 @@
 // ce mécanisme qui manquait auparavant (les routes vivaient uniquement dans un
 // serveur Express classique, jamais démarré par Vercel en production).
 
-import { generateComplianceReport } from "../_lib/geminiCore";
+import { generateComplianceReport } from "../_lib/geminiCore.js";
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {

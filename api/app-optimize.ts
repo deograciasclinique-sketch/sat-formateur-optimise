@@ -5,7 +5,7 @@
 
 // Fonction serverless Vercel : POST /api/app-optimize
 
-import { generateOptimizationReport } from "./_lib/geminiCore";
+import { generateOptimizationReport } from "./_lib/geminiCore.js";
 
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {

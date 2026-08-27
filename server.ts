@@ -6,7 +6,7 @@ import {
   generateComplianceReport,
   generateOptimizationReport,
   generateConsultationAssistant,
-} from "./api/_lib/geminiCore";
+} from "./api/_lib/geminiCore.js";
 
 // NOTE IMPORTANTE : ce serveur Express sert uniquement au développement local
 // (npm run dev) et à un hébergement de type Node classique (Render, Cloud Run,
