@@ -2074,13 +2074,26 @@ export default function TabConsultation({
                   className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
                 >
                   <option value="">— Choisir de la pharmacie —</option>
-                  {medicaments
-                    .filter((m) => m.stock > 0)
-                    .map((m) => (
-                      <option key={m.id} value={`id:${m.id}`}>
-                        {m.nom} {m.dosage} (Reste : {m.stock})
-                      </option>
-                    ))}
+                  <optgroup label="💊 Médicaments (A → Z)">
+                    {medicaments
+                      .filter((m) => m.stock > 0 && (m.typeArticle || "Médicament") === "Médicament")
+                      .sort((a, b) => a.nom.localeCompare(b.nom, "fr"))
+                      .map((m) => (
+                        <option key={m.id} value={`id:${m.id}`}>
+                          {m.nom} {m.dosage} (Reste : {m.stock})
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="📦 Consommables (A → Z)">
+                    {medicaments
+                      .filter((m) => m.stock > 0 && m.typeArticle === "Consommable")
+                      .sort((a, b) => a.nom.localeCompare(b.nom, "fr"))
+                      .map((m) => (
+                        <option key={m.id} value={`id:${m.id}`}>
+                          {m.nom} {m.dosage} (Reste : {m.stock})
+                        </option>
+                      ))}
+                  </optgroup>
                   <option value="custom">— Autre médicament (Saisie libre) —</option>
                 </select>
                 {presCustomMode && (

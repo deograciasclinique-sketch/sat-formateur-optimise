@@ -4,22 +4,18 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { ExamenLabo, Staff, Consultation, Medicament } from "../types";
+import { ExamenLabo, Staff, Consultation } from "../types";
 import { generateUid, getTodayStr } from "../data";
-import { Plus, Trash2, Printer, MessageCircle, Search, FlaskConical, CheckCircle, FileText, X, Beaker, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Printer, MessageCircle, Search, FlaskConical, CheckCircle, FileText, X } from "lucide-react";
 
 interface TabLaboProps {
   consultations?: Consultation[];
   examens: ExamenLabo[];
   staff: Staff[];
   onUpdateExamens: (examens: ExamenLabo[]) => void;
-  // Cahier des charges point 6.2 : les réactifs/consommables de laboratoire
-  // sont gérés dans le même stock que la pharmacie, mais listés ici pour le
-  // labo (lecture seule — la gestion des entrées/seuils reste en Pharmacie).
-  medicaments?: Medicament[];
 }
 
-export default function TabLabo({ examens, staff, onUpdateExamens, consultations = [], medicaments = [] }: TabLaboProps) {
+export default function TabLabo({ examens, staff, onUpdateExamens, consultations = [] }: TabLaboProps) {
   // Load dynamic clinic profile from LocalStorage safely
   
   const [showUrgentAlert, setShowUrgentAlert] = useState(false);
@@ -106,16 +102,7 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
   const [examInterpretation, setExamInterpretation] = useState("");
 
     const [searchQuery, setSearchQuery] = useState("");
-  const [viewMode, setViewMode] = useState<"operations" | "historique" | "reactifs">("operations");
-
-  // Liste des réactifs/consommables de laboratoire, triée par ordre alphabétique
-  // (cahier des charges : les réactifs du labo doivent être listés au niveau du
-  // laboratoire, séparément des médicaments/consommables prescrits en consultation).
-  const reactifsLabo = React.useMemo(() => {
-    return medicaments
-      .filter((m) => m.typeArticle === "Réactif de laboratoire")
-      .sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
-  }, [medicaments]);
+  const [viewMode, setViewMode] = useState<"operations" | "historique">("operations");
   const [historySearchQuery, setHistorySearchQuery] = useState("");
   const [viewingConsultation, setViewingConsultation] = useState<Consultation | null>(null);
   const [modalActiveTab, setModalActiveTab] = useState<"contexte" | "historique">("contexte");
@@ -399,19 +386,9 @@ ${examen.analyses || "Aucune analyse spécifiée"}
         >
           Historique des examens
         </button>
-        <button
-          onClick={() => setViewMode("reactifs")}
-          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-            viewMode === "reactifs" 
-            ? "bg-white text-primary-800 shadow-xs" 
-            : "text-stone-500 hover:text-stone-700"
-          }`}
-        >
-          Réactifs & Consommables
-        </button>
       </div>
 
-      {viewMode === "operations" && (
+      {viewMode === "operations" ? (
         <>
           {/* KPI Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -818,8 +795,7 @@ ${examen.analyses || "Aucune analyse spécifiée"}
         )}
       </div>
         </>
-      )}
-      {viewMode === "historique" && (
+      ) : (
         <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
@@ -905,70 +881,6 @@ ${examen.analyses || "Aucune analyse spécifiée"}
               </tbody>
             </table>
           </div>
-        </div>
-      )}
-
-      {viewMode === "reactifs" && (
-        <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
-              <Beaker className="w-5 h-5 text-primary-700" />
-              Réactifs & Consommables de Laboratoire
-            </h3>
-            <span className="text-xs text-stone-500">
-              {reactifsLabo.length} référence{reactifsLabo.length > 1 ? "s" : ""}
-            </span>
-          </div>
-
-          <p className="text-xs text-stone-500 dark:text-stone-400 mb-4">
-            Cette liste est gérée depuis la Pharmacie (ajout, seuils d'alerte, entrées de stock). Elle est affichée ici pour référence rapide au laboratoire, triée par ordre alphabétique.
-          </p>
-
-          {reactifsLabo.length === 0 ? (
-            <p className="text-xs text-stone-500 dark:text-stone-400 py-6 text-center italic">
-              Aucun réactif ou consommable de laboratoire enregistré pour l'instant. Ajoutez-en depuis l'onglet Pharmacie en choisissant le type d'article "Réactif de laboratoire".
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-stone-50 text-stone-600 font-semibold tracking-wider uppercase border-b border-stone-200 text-xs">
-                    <th className="p-3">Désignation</th>
-                    <th className="p-3">Présentation</th>
-                    <th className="p-3 text-center">Stock disponible</th>
-                    <th className="p-3 text-center">Seuil d'alerte</th>
-                    <th className="p-3">Fournisseur</th>
-                    <th className="p-3 text-center">Statut</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-stone-100">
-                  {reactifsLabo.map((m) => {
-                    const isLow = m.stock <= m.seuil;
-                    return (
-                      <tr key={m.id} className={isLow ? "bg-danger-50/50" : ""}>
-                        <td className="p-3 font-bold text-stone-800">{m.nom}</td>
-                        <td className="p-3 text-stone-600">{[m.forme, m.dosage].filter(Boolean).join(" ") || "—"}</td>
-                        <td className={`p-3 text-center font-bold ${isLow ? "text-danger-700" : "text-stone-700"}`}>{m.stock}</td>
-                        <td className="p-3 text-center text-stone-500">{m.seuil}</td>
-                        <td className="p-3 text-stone-500">{m.fournisseur || "—"}</td>
-                        <td className="p-3 text-center">
-                          {isLow ? (
-                            <span className="inline-flex items-center gap-1 text-danger-700 font-bold text-2xs bg-danger-100 px-2 py-1 rounded-lg">
-                              <AlertTriangle className="w-3 h-3" /> Stock bas
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-success-700 font-bold text-2xs bg-success-100 px-2 py-1 rounded-lg">
-                              OK
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
         </div>
       )}
 
