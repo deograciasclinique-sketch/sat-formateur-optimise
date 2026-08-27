@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { jsPDF } from "jspdf";
 import { logActivity } from "../lib/activityLogger";
-import { Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo } from "../types";
+import { Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff} from "lucide-react";
 import CameraCapture from "./CameraCapture";
@@ -23,9 +23,21 @@ interface TabConsultationProps {
   laboExamens?: ExamenLabo[];
   rdvs?: any[];
   onUpdateLaboExamens?: (examens: ExamenLabo[]) => void;
+  // Cahier des charges points 1-3 : la décision d'hospitalisation/mise en
+  // observation/admission aux urgences se prend en Consultation Générale, et
+  // doit créer automatiquement le dossier correspondant dans le bon module.
+  hospitalisations?: Hospitalisation[];
+  onUpdateHospitalisations?: (hosps: Hospitalisation[]) => void;
+  urgences?: PatientUrgence[];
+  onUpdateUrgences?: (urgences: PatientUrgence[]) => void;
+  // Cahier des charges point 6.3 : déduction automatique du stock à chaque
+  // médicament prescrit en consultation.
+  onUpdateMedicaments?: (meds: Medicament[]) => void;
+  mouvements?: MouvementStock[];
+  onUpdateMouvements?: (movs: MouvementStock[]) => void;
 }
 
-export default function TabConsultation({
+function TabConsultation({
   consultations,
   medicaments,
   staff,
@@ -37,6 +49,13 @@ export default function TabConsultation({
   onUpdateLaboExamens,
   isLoading,
   rdvs = [],
+  hospitalisations = [],
+  onUpdateHospitalisations,
+  urgences = [],
+  onUpdateUrgences,
+  onUpdateMedicaments,
+  mouvements = [],
+  onUpdateMouvements,
 }: TabConsultationProps) {
   // Load dynamic clinic profile from LocalStorage safely
   const profile = (() => {
@@ -77,6 +96,9 @@ export default function TabConsultation({
   const [consObservations, setConsObservations] = useState("");
   const [consDate, setConsDate] = useState(getTodayStr());
   const [consMedecin, setConsMedecin] = useState(currentUser?.id || "");
+  // Décision de Consultation Générale (cahier des charges, points 1-3)
+  const [consDecision, setConsDecision] = useState<NonNullable<Consultation["decision"]>>("Retour à domicile");
+  const [consReferenceService, setConsReferenceService] = useState("");
 
   useEffect(() => {
     if (currentUser?.id && !consMedecin) {
@@ -120,7 +142,6 @@ export default function TabConsultation({
   const [consPlainte, setConsPlainte] = useState("");
   const [consExamen, setConsExamen] = useState("");
   const [consDiagnostic, setConsDiagnostic] = useState("");
-  const [consDiagnosticFinal, setConsDiagnosticFinal] = useState("");
 
   // AI Assistant states
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -129,68 +150,19 @@ export default function TabConsultation({
   // Prescription builder states
   const [presLines, setPresLines] = useState<LigneOrdonnance[]>([]);
   const [presMedName, setPresMedName] = useState("");
+  const [presMedId, setPresMedId] = useState<string | undefined>(undefined);
+  const [presCustomMode, setPresCustomMode] = useState(false);
   const [presPosologie, setPresPosologie] = useState("");
   const [presDuree, setPresDuree] = useState("");
+  const [presQuantite, setPresQuantite] = useState("1");
 
   const [searchQuery, setSearchQuery] = useState("");
+  // Pagination du registre des consultations : c'est la liste qui grossit
+  // le plus vite (une entrée par visite patient), donc la plus exposée au
+  // ralentissement si on rend tout le tableau d'un coup.
+  const [consultPage, setConsultPage] = useState(1);
+  const CONSULT_PAGE_SIZE = 50;
   const [selectedConsultation, setSelectedConsultation] = useState<Consultation | null>(null);
-
-  // --- Mode édition d'un dossier déjà enregistré ---
-  const [isEditingDetail, setIsEditingDetail] = useState(false);
-  const [editPlainte, setEditPlainte] = useState("");
-  const [editExamenPhysique, setEditExamenPhysique] = useState("");
-  const [editDiagnostic, setEditDiagnostic] = useState("");
-  const [editDiagnosticFinal, setEditDiagnosticFinal] = useState("");
-  const [editObservations, setEditObservations] = useState("");
-
-  const startEditingDetail = () => {
-    if (!selectedConsultation) return;
-    setEditPlainte(selectedConsultation.plainte || "");
-    setEditExamenPhysique(selectedConsultation.examenPhysique || "");
-    setEditDiagnostic(selectedConsultation.diagnostic || "");
-    setEditDiagnosticFinal(selectedConsultation.diagnosticFinal || "");
-    setEditObservations(selectedConsultation.observations || "");
-    setIsEditingDetail(true);
-  };
-
-  const cancelEditingDetail = () => {
-    setIsEditingDetail(false);
-  };
-
-  const handleSaveEditedConsultation = () => {
-    if (!selectedConsultation) return;
-
-    if (!editDiagnostic.trim()) {
-      alert("Le diagnostic de présomption ne peut pas être vide.");
-      return;
-    }
-
-    const hasLaboPrescrit = !!(selectedConsultation.labResults && selectedConsultation.labResults.length > 0);
-    if (hasLaboPrescrit && !editDiagnosticFinal.trim()) {
-      alert("Un examen de laboratoire a été prescrit pour ce dossier : le diagnostic final / de sortie est obligatoire avant de valider.");
-      return;
-    }
-
-    const updatedCons: Consultation = {
-      ...selectedConsultation,
-      plainte: editPlainte.trim(),
-      examenPhysique: editExamenPhysique.trim(),
-      diagnostic: editDiagnostic.trim(),
-      diagnosticFinal: editDiagnosticFinal.trim() || undefined,
-      observations: editObservations.trim()
-    };
-
-    const updatedList = consultations.map((c) => c.id === selectedConsultation.id ? updatedCons : c);
-    onUpdateConsultations(updatedList);
-    setSelectedConsultation(updatedCons);
-    setIsEditingDetail(false);
-    logActivity(
-      "Modification de fiche (Consultation)",
-      "modification",
-      `Modification du dossier de consultation du patient ${updatedCons.patient}.`
-    );
-    alert("Dossier mis à jour avec succès.");
-  };
 
   // Practitioner search states
   const [praticienSearchQuery, setPraticienSearchQuery] = useState("");
@@ -300,15 +272,25 @@ export default function TabConsultation({
       return;
     }
 
+    const qte = parseFloat(presQuantite) || 0;
+
     const newLine: LigneOrdonnance = {
       id: generateUid(),
       medicamentNom: presMedName.trim(),
       posologie: presPosologie.trim(),
-      duree: presDuree.trim() || "5 jours"
+      duree: presDuree.trim() || "5 jours",
+      // Rattaché à un article de la pharmacie uniquement si sélectionné dans la
+      // liste (pas en saisie libre) : c'est ce qui permet la déduction
+      // automatique du stock à la sauvegarde de la consultation.
+      medicamentId: presMedId,
+      quantitePrescrite: presMedId ? qte : undefined
     };
 
     setPresLines([...presLines, newLine]);
     setPresMedName("");
+    setPresMedId(undefined);
+    setPresCustomMode(false);
+    setPresQuantite("1");
     setPresPosologie("");
     setPresDuree("");
   };
@@ -365,18 +347,79 @@ export default function TabConsultation({
     }
   };
 
+  // Normalise un nom pour la comparaison (casse, accents, espaces multiples) :
+  // évite qu'une simple variation de saisie ("Jean Dupont" vs "jean  dupont")
+  // crée ce qui ressemble à un doublon de dossier (cahier des charges, point 5).
+  const normalizePatientName = (name: string): string =>
+    name
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ");
+
+  const normalizePhone = (phone: string): string => phone.replace(/\D/g, "");
+
+  // Distance de Levenshtein simple, utilisée uniquement pour détecter des noms
+  // "presque identiques" (faute de frappe) et suggérer de continuer le dossier
+  // existant plutôt que d'en ouvrir un nouveau.
+  const levenshteinDistance = (a: string, b: string): number => {
+    if (a === b) return 0;
+    if (a.length === 0) return b.length;
+    if (b.length === 0) return a.length;
+    const matrix: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+    for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
+    for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      for (let j = 1; j <= b.length; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] + cost
+        );
+      }
+    }
+    return matrix[a.length][b.length];
+  };
+
   const knownPatientProfiles = useMemo(() => {
     const map = new Map<string, Consultation>();
     // Sort consultations to have the most recent ones first
     const sortedCons = [...consultations].sort((a, b) => b.id.localeCompare(a.id));
     sortedCons.forEach(c => {
       const name = c.patient.trim();
-      if (name && !map.has(name)) {
-        map.set(name, c);
+      const key = normalizePatientName(name);
+      if (key && !map.has(key)) {
+        map.set(key, c);
       }
     });
     return Array.from(map.values());
   }, [consultations]);
+
+  // Doublon quasi-certain : même nom normalisé OU même numéro de téléphone.
+  const findExactPatientMatch = (name: string, phone?: string): Consultation | undefined => {
+    const normName = normalizePatientName(name);
+    const normPhone = phone ? normalizePhone(phone) : "";
+    return knownPatientProfiles.find((p) => {
+      if (normName && normalizePatientName(p.patient) === normName) return true;
+      if (normPhone && normPhone.length >= 8 && normalizePhone(p.contact || "") === normPhone) return true;
+      return false;
+    });
+  };
+
+  // Doublon probable : nom très proche (faute de frappe) mais pas identique.
+  const findSimilarPatientMatch = (name: string): Consultation | undefined => {
+    const normName = normalizePatientName(name);
+    if (normName.length < 4) return undefined;
+    return knownPatientProfiles.find((p) => {
+      const otherNorm = normalizePatientName(p.patient);
+      if (otherNorm === normName) return false; // déjà un match exact, pas "similaire"
+      return levenshteinDistance(normName, otherNorm) <= 2;
+    });
+  };
+
+  const [similarPatientSuggestion, setSimilarPatientSuggestion] = useState<Consultation | null>(null);
 
   const handleContinuerDossier = (c: Consultation) => {
     setConsPatient(c.patient);
@@ -385,6 +428,7 @@ export default function TabConsultation({
     setConsContact(c.contact || "");
     setConsProfession(c.profession || "");
     setConsFemmeEnceinte(c.femmeEnceinte || false);
+    setSimilarPatientSuggestion(null);
     // Focus the form
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -469,12 +513,7 @@ export default function TabConsultation({
 
   const handleSaveConsultation = () => {
     if (!consPatient.trim() || !consPlainte.trim() || !consDiagnostic.trim()) {
-      alert("Veuillez renseigner le nom du patient, le motif de consultation, et le diagnostic de présomption.");
-      return;
-    }
-
-    if (tempLabResults.length > 0 && !consDiagnosticFinal.trim()) {
-      alert("Des résultats de laboratoire sont liés à cette consultation : veuillez renseigner le diagnostic de certitude / final avant d'enregistrer.");
+      alert("Veuillez renseigner le nom du patient, le motif de consultation, et le diagnostic posé.");
       return;
     }
 
@@ -514,13 +553,99 @@ export default function TabConsultation({
       plainte: consPlainte.trim(),
       examenPhysique: consExamen.trim(),
       diagnostic: consDiagnostic.trim(),
-      diagnosticFinal: consDiagnosticFinal.trim() || undefined,
       ordonnance: [...presLines],
       photos: [...tempPhotos],
       labResults: [...tempLabResults],
       createdAt: new Date().toISOString(),
-      agentCode: currentUser?.codeEntree || "0000"
+      agentCode: currentUser?.codeEntree || "0000",
+      decision: consDecision,
+      referenceService: consDecision === "Référer vers un autre service" ? consReferenceService.trim() : undefined
     };
+
+    const medecinNomForDecision = staff.find((s) => s.id === consMedecin)?.nom || currentUser?.nom || "";
+    const nowTime = new Date().toTimeString().slice(0, 5);
+
+    // Cahier des charges points 1-3 : la décision prise ici en Consultation
+    // Générale crée automatiquement le dossier correspondant, sans ressaisie.
+    if ((newCons.decision === "Hospitalisation" || newCons.decision === "Mise en observation") && onUpdateHospitalisations) {
+      const newHosp: Hospitalisation = {
+        id: generateUid(),
+        patient: newCons.patient,
+        contact: newCons.contact,
+        dateAdmission: newCons.date || getTodayStr(),
+        heureAdmission: nowTime,
+        service: newCons.decision === "Mise en observation" ? "Observation" : "Hospitalisation",
+        chambre: "",
+        medecin: medecinNomForDecision,
+        motif: newCons.plainte,
+        notesInitiales: `Diagnostic (Consultation Générale) : ${newCons.diagnostic}${newCons.examenPhysique ? "\nExamen clinique : " + newCons.examenPhysique : ""}`,
+        statut: "En cours",
+        dateSortie: "",
+        statutSortie: "",
+        diagnosticSortie: "",
+        createdAt: new Date().toISOString()
+      };
+      newCons.linkedHospitalisationId = newHosp.id;
+      onUpdateHospitalisations([newHosp, ...hospitalisations]);
+    } else if (newCons.decision === "Admission aux urgences" && onUpdateUrgences) {
+      const newUrg: PatientUrgence = {
+        id: generateUid(),
+        patient: newCons.patient,
+        contact: newCons.contact,
+        severite: "Urgent (Jaune)",
+        plainte: newCons.plainte,
+        constantes: `T°: ${newCons.vitals.temperature}°C | TA: ${newCons.vitals.tensionArterielle} | Pouls: ${newCons.vitals.pouls} | Glycémie: ${newCons.vitals.glycemie}`,
+        medecinId: consMedecin,
+        dateArrivee: newCons.date || getTodayStr(),
+        heureArrivee: nowTime,
+        statut: "En attente de médecin",
+        createdAt: new Date().toISOString()
+      };
+      newCons.linkedUrgenceId = newUrg.id;
+      onUpdateUrgences([newUrg, ...urgences]);
+    }
+
+    // Cahier des charges point 6.3 : déduction automatique du stock pharmacie
+    // pour chaque ligne d'ordonnance rattachée à un article de la pharmacie.
+    let stockShortfallWarnings: string[] = [];
+    if (onUpdateMedicaments && onUpdateMouvements) {
+      const workingStock = [...medicaments];
+      const newStockMovements: MouvementStock[] = [];
+
+      newCons.ordonnance.forEach((line) => {
+        if (!line.medicamentId || !line.quantitePrescrite || line.quantitePrescrite <= 0) return;
+        const idx = workingStock.findIndex((m) => m.id === line.medicamentId);
+        if (idx === -1) return;
+
+        const med = workingStock[idx];
+        const deduction = Math.min(line.quantitePrescrite, med.stock);
+        if (deduction < line.quantitePrescrite) {
+          stockShortfallWarnings.push(
+            `${med.nom} : ${line.quantitePrescrite} demandé(s), seulement ${med.stock} disponible(s) en stock.`
+          );
+        }
+        if (deduction <= 0) return;
+
+        workingStock[idx] = { ...med, stock: med.stock - deduction };
+
+        newStockMovements.push({
+          id: generateUid(),
+          medId: med.id,
+          type: "sortie",
+          qte: deduction,
+          motif: `Prescription en consultation — Patient : ${newCons.patient}`,
+          prixUnitaire: med.prixVente || 0,
+          montant: (med.prixVente || 0) * deduction,
+          date: newCons.date || getTodayStr(),
+          createdAt: new Date().toISOString()
+        });
+      });
+
+      if (newStockMovements.length > 0) {
+        onUpdateMedicaments(workingStock);
+        onUpdateMouvements([...newStockMovements, ...mouvements]);
+      }
+    }
 
     onUpdateConsultations([newCons, ...consultations]);
 
@@ -545,12 +670,27 @@ export default function TabConsultation({
     setConsPlainte("");
     setConsExamen("");
     setConsDiagnostic("");
-    setConsDiagnosticFinal("");
     setPresLines([]);
     setTempPhotos([]);
     setTempLabResults([]);
     setShowFormCamera(false);
-    alert("Consultation enregistrée avec succès pour : " + newCons.patient);
+    setConsDecision("Retour à domicile");
+    setConsReferenceService("");
+
+    let decisionSuffix = "";
+    if (newCons.decision === "Hospitalisation" || newCons.decision === "Mise en observation") {
+      decisionSuffix = `\nUn dossier a été créé automatiquement dans le module ${newCons.decision === "Mise en observation" ? "Hospitalisation (Observation)" : "Hospitalisation"}.`;
+    } else if (newCons.decision === "Admission aux urgences") {
+      decisionSuffix = "\nUn dossier a été créé automatiquement dans le module Urgences.";
+    } else if (newCons.decision === "Référer vers un autre service" && newCons.referenceService) {
+      decisionSuffix = `\nPatient référé vers : ${newCons.referenceService}.`;
+    }
+
+    const shortfallSuffix = stockShortfallWarnings.length > 0
+      ? "\n⚠️ Stock insuffisant pour : " + stockShortfallWarnings.join(" ")
+      : "";
+
+    alert("Consultation enregistrée avec succès pour : " + newCons.patient + decisionSuffix + shortfallSuffix);
   };
 
   const handleAddPhotoToActiveConsultation = (photoBase64: string) => {
@@ -840,29 +980,12 @@ export default function TabConsultation({
     doc.setFont("Helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(13, 148, 136);
-    doc.text("DIAGNOSTIC DE PRÉSOMPTION :", margin + 3, y + 4.5);
+    doc.text("DIAGNOSTIC FINAL POSÉ :", margin + 3, y + 4.5);
 
     doc.setFont("Helvetica", "bold");
     doc.setFontSize(10);
     doc.setTextColor(15, 23, 42);
     doc.text(cons.diagnostic, margin + 3, y + 9);
-    y += 14;
-
-    doc.setFillColor(240, 253, 250);
-    doc.rect(margin, y, contentWidth, 11, "F");
-    doc.setDrawColor(13, 148, 136);
-    doc.setLineWidth(0.3);
-    doc.rect(margin, y, contentWidth, 11, "S");
-
-    doc.setFont("Helvetica", "bold");
-    doc.setFontSize(8);
-    doc.setTextColor(13, 148, 136);
-    doc.text("DIAGNOSTIC FINAL / DE SORTIE :", margin + 3, y + 4.5);
-
-    doc.setFont("Helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(15, 23, 42);
-    doc.text(cons.diagnosticFinal || "Non renseigné", margin + 3, y + 9);
     y += 17;
 
     // Prescription Section
@@ -1010,15 +1133,20 @@ export default function TabConsultation({
   ).size;
 
   const effectiveQuery = filterPatientQuery || searchQuery;
-  const filteredConsultationsList = consultations
-    .filter((c) => {
-      const eq = effectiveQuery.toLowerCase().trim();
-      return c.patient.toLowerCase().includes(eq) || 
-             c.diagnostic.toLowerCase().includes(eq) || 
-             c.id.toLowerCase().includes(eq) ||
-             (c.contact && c.contact.includes(eq));
-    })
-    .sort((a, b) => b.date.localeCompare(a.date));
+  // Mémoïsé : c'est la liste qui grossit le plus vite (une entrée par visite
+  // patient) — sans ça, chaque clic sur "page suivante" relance un filtre +
+  // tri sur tout l'historique de consultations.
+  const filteredConsultationsList = useMemo(() => {
+    return consultations
+      .filter((c) => {
+        const eq = effectiveQuery.toLowerCase().trim();
+        return c.patient.toLowerCase().includes(eq) ||
+               c.diagnostic.toLowerCase().includes(eq) ||
+               c.id.toLowerCase().includes(eq) ||
+               (c.contact && c.contact.includes(eq));
+      })
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [consultations, effectiveQuery]);
 
   return (
     <div className="space-y-6">
@@ -1089,14 +1217,20 @@ export default function TabConsultation({
                   placeholder="Rechercher ou saisir un patient..."
                   value={consPatient}
                   onChange={(e) => {
-                     setConsPatient(e.target.value);
-                     const match = knownPatientProfiles.find(p => p.patient === e.target.value);
+                     const typedName = e.target.value;
+                     setConsPatient(typedName);
+                     // Correspondance normalisée (casse/accents/espaces) : évite qu'une
+                     // simple variation de saisie soit traitée comme un nouveau patient.
+                     const match = findExactPatientMatch(typedName, consContact);
                      if (match) {
                         setConsAge(match.age ? match.age.toString() : "");
                         setConsSexe(match.sexe);
                         if (match.contact) setConsContact(match.contact);
                         if (match.profession) setConsProfession(match.profession);
                         if (match.femmeEnceinte !== undefined) setConsFemmeEnceinte(match.femmeEnceinte);
+                        setSimilarPatientSuggestion(null);
+                     } else {
+                        setSimilarPatientSuggestion(findSimilarPatientMatch(typedName) || null);
                      }
                   }}
                   className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
@@ -1106,6 +1240,21 @@ export default function TabConsultation({
                     <option key={idx} value={p.patient} />
                   ))}
                 </datalist>
+                {similarPatientSuggestion && (
+                  <div className="mt-1.5 text-2xs bg-warning-50 border border-warning-200 text-warning-800 rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2">
+                    <span>
+                      ⚠️ Patient similaire déjà enregistré : <strong>{similarPatientSuggestion.patient}</strong>
+                      {similarPatientSuggestion.contact ? ` (${similarPatientSuggestion.contact})` : ""}. Est-ce la même personne ?
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleContinuerDossier(similarPatientSuggestion)}
+                      className="flex-shrink-0 font-bold underline hover:text-warning-900"
+                    >
+                      Continuer son dossier
+                    </button>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Age (6)</label>
@@ -1514,7 +1663,7 @@ export default function TabConsultation({
 
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block">Diagnostic de Présomption (11) *</label>
+                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block">Diagnostic (11) *</label>
                 <button
                   type="button"
                   onClick={() => startDictation("diagnostic")}
@@ -1532,9 +1681,43 @@ export default function TabConsultation({
                 onChange={(e) => setConsDiagnostic(e.target.value)}
                 className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
               />
-              <p className="text-xs text-stone-500 dark:text-stone-400 italic mt-1">
-                Le diagnostic final / de sortie pourra être ajouté plus tard depuis le dossier (bouton "Modifier"), une fois les résultats du laboratoire disponibles.
-              </p>
+            </div>
+
+            {/* Décision de Consultation Générale (cahier des charges, points 1-3) */}
+            <div className="pt-3 border-t border-stone-100">
+              <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-2">
+                ⚕️ Décision de la Consultation Générale
+              </label>
+              <select
+                value={consDecision}
+                onChange={(e) => setConsDecision(e.target.value as NonNullable<Consultation["decision"]>)}
+                className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
+              >
+                <option value="Retour à domicile">🏠 Retour à domicile</option>
+                <option value="Mise en observation">🛏️ Mise en observation</option>
+                <option value="Hospitalisation">🏥 Hospitalisation</option>
+                <option value="Référer vers un autre service">↗️ Référer vers un autre service</option>
+                <option value="Admission aux urgences">🚨 Admettre aux urgences</option>
+              </select>
+              {consDecision === "Référer vers un autre service" && (
+                <input
+                  type="text"
+                  placeholder="Ex: Maternité, CMA, Chirurgie..."
+                  value={consReferenceService}
+                  onChange={(e) => setConsReferenceService(e.target.value)}
+                  className="w-full mt-2 text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
+                />
+              )}
+              {(consDecision === "Hospitalisation" || consDecision === "Mise en observation") && (
+                <p className="text-2xs text-info-700 bg-info-50 border border-info-100 rounded-lg px-2.5 py-1.5 mt-2">
+                  Un dossier sera automatiquement créé dans le module Hospitalisation avec les données de ce patient.
+                </p>
+              )}
+              {consDecision === "Admission aux urgences" && (
+                <p className="text-2xs text-info-700 bg-info-50 border border-info-100 rounded-lg px-2.5 py-1.5 mt-2">
+                  Un dossier sera automatiquement créé dans le module Urgences avec les données de ce patient.
+                </p>
+              )}
             </div>
 
             {/* Direct Camera module during consultation creation */}
@@ -1758,26 +1941,6 @@ export default function TabConsultation({
                 </div>
               </div>
             )}
-
-            {/* Diagnostic de certitude / final, après examens du labo */}
-            <div className="pt-3 border-t border-stone-100">
-              <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">
-                Diagnostic de Certitude / Final
-                {tempLabResults.length > 0 && (
-                  <span className="text-danger-600 ml-1">* (obligatoire : examen labo lié à cette consultation)</span>
-                )}
-              </label>
-              <input
-                type="text"
-                placeholder="Ex: Paludisme simple confirmé (GE positive) — à remplir une fois le diagnostic confirmé"
-                value={consDiagnosticFinal}
-                onChange={(e) => setConsDiagnosticFinal(e.target.value)}
-                className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
-              />
-              <p className="text-xs text-stone-500 dark:text-stone-400 italic mt-1">
-                Si les résultats du labo ne sont pas encore disponibles, laisse ce champ vide : tu pourras le compléter plus tard depuis le dossier (bouton "Modifier").
-              </p>
-            </div>
           </div>
         </div>
 
@@ -1793,24 +1956,42 @@ export default function TabConsultation({
               <div className="col-span-2">
                 <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Nom du Médicament *</label>
                 <select
-                  value={presMedName}
-                  onChange={(e) => setPresMedName(e.target.value)}
+                  value={presMedId ? `id:${presMedId}` : (presCustomMode ? "custom" : "")}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.startsWith("id:")) {
+                      const medId = val.slice(3);
+                      const med = medicaments.find((m) => m.id === medId);
+                      setPresMedId(medId);
+                      setPresCustomMode(false);
+                      setPresMedName(med ? `${med.nom} ${med.dosage}`.trim() : "");
+                    } else if (val === "custom") {
+                      setPresMedId(undefined);
+                      setPresCustomMode(true);
+                      setPresMedName("");
+                    } else {
+                      setPresMedId(undefined);
+                      setPresCustomMode(false);
+                      setPresMedName("");
+                    }
+                  }}
                   className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
                 >
                   <option value="">— Choisir de la pharmacie —</option>
                   {medicaments
                     .filter((m) => m.stock > 0)
                     .map((m) => (
-                      <option key={m.id} value={`${m.nom} ${m.dosage}`}>
+                      <option key={m.id} value={`id:${m.id}`}>
                         {m.nom} {m.dosage} (Reste : {m.stock})
                       </option>
                     ))}
                   <option value="custom">— Autre médicament (Saisie libre) —</option>
                 </select>
-                {presMedName === "custom" && (
+                {presCustomMode && (
                   <input
                     type="text"
                     placeholder="Saisir nom médicament"
+                    value={presMedName}
                     onChange={(e) => setPresMedName(e.target.value)}
                     className="w-full text-xs border border-stone-200 rounded-lg px-2.5 py-1.5 mt-1.5 bg-white focus:outline-none"
                   />
@@ -1845,6 +2026,23 @@ export default function TabConsultation({
                   + Ajouter
                 </button>
               </div>
+              {presMedId && (
+                <div className="col-span-4">
+                  <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">
+                    Quantité à déduire du stock pharmacie *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={presQuantite}
+                    onChange={(e) => setPresQuantite(e.target.value)}
+                    className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
+                  />
+                  <p className="text-2xs text-info-700 mt-1">
+                    Cette quantité sera automatiquement retirée du stock de la pharmacie à l'enregistrement de la consultation.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* List of lines added to current prescription */}
@@ -1908,7 +2106,7 @@ export default function TabConsultation({
               type="text"
               placeholder="Rechercher patient ou diagnostic..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => { setSearchQuery(e.target.value); setConsultPage(1); }}
               className="w-full text-xs border border-stone-200 rounded-lg pl-9 pr-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
             />
           </div>
@@ -1922,7 +2120,14 @@ export default function TabConsultation({
           </div>
         ) : filteredConsultationsList.length === 0 ? (
           <p className="text-xs text-stone-500 dark:text-stone-400 py-6 text-center italic">Aucun dossier clinique enregistré.</p>
-        ) : (
+        ) : (() => {
+            const totalConsultPages = Math.max(1, Math.ceil(filteredConsultationsList.length / CONSULT_PAGE_SIZE));
+            const consultPageClamped = Math.min(consultPage, totalConsultPages);
+            const consultPageItems = filteredConsultationsList.slice(
+              (consultPageClamped - 1) * CONSULT_PAGE_SIZE,
+              consultPageClamped * CONSULT_PAGE_SIZE
+            );
+            return (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -1942,7 +2147,7 @@ export default function TabConsultation({
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {filteredConsultationsList.map((c) => {
+                {consultPageItems.map((c) => {
                   const mName = staff.find((s) => s.id === c.medecinId)?.nom || "Généraliste";
                   const vit = c.vitals;
 
@@ -2034,7 +2239,7 @@ export default function TabConsultation({
                         <div className="flex flex-col gap-1 items-center">
                           <button
                             type="button"
-                            onClick={() => { setSelectedConsultation(c); setIsEditingDetail(false); }}
+                            onClick={() => setSelectedConsultation(c)}
                             className="bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold px-2 py-1 rounded-lg border border-primary-200 transition-all inline-flex items-center gap-1 w-full justify-center"
                           >
                             <Eye className="w-3 h-3" /> Dossier
@@ -2086,8 +2291,34 @@ export default function TabConsultation({
                 })}
               </tbody>
             </table>
+            {totalConsultPages > 1 && (
+              <div className="flex items-center justify-between gap-3 pt-3 text-xs text-stone-500">
+                <span>
+                  Page {consultPageClamped} / {totalConsultPages} — {filteredConsultationsList.length} dossier{filteredConsultationsList.length > 1 ? "s" : ""}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setConsultPage((p) => Math.max(1, p - 1))}
+                    disabled={consultPageClamped <= 1}
+                    className="px-2.5 py-1 rounded-lg border border-stone-200 font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone-50"
+                  >
+                    Précédent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConsultPage((p) => Math.min(totalConsultPages, p + 1))}
+                    disabled={consultPageClamped >= totalConsultPages}
+                    className="px-2.5 py-1 rounded-lg border border-stone-200 font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone-50"
+                  >
+                    Suivant
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+            );
+          })()}
       </div>
 
       {/* Consultation Detail Modal (Printable) */}
@@ -2105,53 +2336,25 @@ export default function TabConsultation({
                 <h3 className="font-serif font-bold text-base">Rapport Clinique & Dossier Patient</h3>
               </div>
               <div className="flex items-center gap-2">
-                {!isEditingDetail ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={startEditingDetail}
-                      className="bg-warning-600 hover:bg-warning-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-                    >
-                      ✏️ Modifier
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDownloadPDF(selectedConsultation)}
-                      className="bg-success-600 hover:bg-success-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-                    >
-                      <Download className="w-4 h-4" />
-                      Télécharger le PDF
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => window.print()}
-                      className="bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs"
-                    >
-                      <Printer className="w-4 h-4" />
-                      Imprimer le dossier
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleSaveEditedConsultation}
-                      className="bg-success-600 hover:bg-success-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-                    >
-                      ✅ Enregistrer les modifications
-                    </button>
-                    <button
-                      type="button"
-                      onClick={cancelEditingDetail}
-                      className="bg-stone-200 hover:bg-stone-300 text-stone-700 text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-                    >
-                      Annuler
-                    </button>
-                  </>
-                )}
                 <button
                   type="button"
-                  onClick={() => { setSelectedConsultation(null); setIsEditingDetail(false); }}
+                  onClick={() => handleDownloadPDF(selectedConsultation)}
+                  className="bg-success-600 hover:bg-success-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  Télécharger le PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs"
+                >
+                  <Printer className="w-4 h-4" />
+                  Imprimer le dossier
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedConsultation(null)}
                   className="p-1.5 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 transition-all cursor-pointer"
                 >
                   <X className="w-5 h-5 text-stone-500" />
@@ -2302,39 +2505,19 @@ export default function TabConsultation({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800 border-b pb-1 mb-2">3. Motif de Consultation / Plaintes</h3>
-                    {isEditingDetail ? (
-                      <textarea
-                        value={editPlainte}
-                        onChange={(e) => setEditPlainte(e.target.value)}
-                        className={`w-full text-xs p-3 rounded-xl border min-h-[80px] focus:outline-none focus:ring-1 focus:ring-primary-500 ${
-                          theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-200 text-stone-700"
-                        }`}
-                      />
-                    ) : (
-                      <p className={`text-xs p-3 rounded-xl border italic min-h-[80px] ${
-                        theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-100 text-stone-700"
-                      }`}>
-                        "{selectedConsultation.plainte}"
-                      </p>
-                    )}
+                    <p className={`text-xs p-3 rounded-xl border italic min-h-[80px] ${
+                      theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-100 text-stone-700"
+                    }`}>
+                      "{selectedConsultation.plainte}"
+                    </p>
                   </div>
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800 border-b pb-1 mb-2">4. Examen Clinique Physique</h3>
-                    {isEditingDetail ? (
-                      <textarea
-                        value={editExamenPhysique}
-                        onChange={(e) => setEditExamenPhysique(e.target.value)}
-                        className={`w-full text-xs p-3 rounded-xl border min-h-[80px] focus:outline-none focus:ring-1 focus:ring-primary-500 ${
-                          theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-200 text-stone-700"
-                        }`}
-                      />
-                    ) : (
-                      <p className={`text-xs p-3 rounded-xl border min-h-[80px] ${
-                        theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-100 text-stone-700"
-                      }`}>
-                        {selectedConsultation.examenPhysique || "—"}
-                      </p>
-                    )}
+                    <p className={`text-xs p-3 rounded-xl border min-h-[80px] ${
+                      theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-100 text-stone-700"
+                    }`}>
+                      {selectedConsultation.examenPhysique || "—"}
+                    </p>
                   </div>
                 </div>
 
@@ -2342,60 +2525,8 @@ export default function TabConsultation({
                 <div className={`p-4 rounded-xl border ${
                   theme === "dark" ? "bg-primary-950/20 border-primary-900 text-primary-200" : "bg-primary-50/50 border-primary-150 text-primary-900"
                 }`}>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800 mb-1">5. Conclusion Clinique & Diagnostic</h3>
-                  {isEditingDetail ? (
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Diagnostic de Présomption *</label>
-                        <input
-                          type="text"
-                          value={editDiagnostic}
-                          onChange={(e) => setEditDiagnostic(e.target.value)}
-                          className="w-full text-sm font-semibold border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">
-                          Diagnostic Final / de Sortie
-                          {selectedConsultation.labResults && selectedConsultation.labResults.length > 0 && (
-                            <span className="text-danger-600 ml-1">* (obligatoire : examen labo prescrit)</span>
-                          )}
-                        </label>
-                        <input
-                          type="text"
-                          value={editDiagnosticFinal}
-                          onChange={(e) => setEditDiagnosticFinal(e.target.value)}
-                          placeholder="Ex: Paludisme simple confirmé (GE positive)"
-                          className="w-full text-sm font-semibold border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Observations / Conseils</label>
-                        <textarea
-                          value={editObservations}
-                          onChange={(e) => setEditObservations(e.target.value)}
-                          className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-primary-500 min-h-[60px]"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div>
-                        <span className="text-xs uppercase font-semibold tracking-wider text-primary-700/70">Diagnostic de Présomption :</span>
-                        <p className="text-sm font-semibold">{selectedConsultation.diagnostic}</p>
-                      </div>
-                      <div>
-                        <span className="text-xs uppercase font-semibold tracking-wider text-primary-700/70">Diagnostic Final / de Sortie :</span>
-                        <p className="text-sm font-semibold">
-                          {selectedConsultation.diagnosticFinal || (
-                            <span className="italic font-normal text-stone-500">
-                              Non renseigné {selectedConsultation.labResults && selectedConsultation.labResults.length > 0 ? "— examen labo en attente" : ""}
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800 mb-1">5. Conclusion Clinique & Diagnostic Final</h3>
+                  <p className="text-sm font-semibold">{selectedConsultation.diagnostic}</p>
                 </div>
 
                 {/* Prescription Section */}
@@ -2704,3 +2835,7 @@ export default function TabConsultation({
     </div>
   );
 }
+
+// Mémoïsé : évite de re-rendre tout cet onglet (souvent 1000+ lignes de JSX)
+// quand seul un autre onglet ou une donnée sans rapport change dans App.tsx.
+export default React.memo(TabConsultation);

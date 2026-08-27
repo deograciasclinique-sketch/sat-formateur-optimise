@@ -32,7 +32,7 @@ interface TabPharmacieProps {
   thresholdApplyMode?: "override" | "fallback";
 }
 
-export default function TabPharmacie({
+function TabPharmacie({
   stock,
   mouvements,
   onUpdateStock,
@@ -47,6 +47,11 @@ export default function TabPharmacie({
   const [medForme, setMedForme] = useState("Comprimé");
   const [medDosage, setMedDosage] = useState("");
   const [medCategorie, setMedCategorie] = useState("Antibiotique");
+  // Cahier des charges point 6.2 : type d'article (liste séparée médicaments /
+  // consommables / réactifs de laboratoire) au sein de la même pharmacie.
+  const [medTypeArticle, setMedTypeArticle] = useState<NonNullable<Medicament["typeArticle"]>>("Médicament");
+  // Onglet actif du registre de pharmacie, pour afficher trois listes distinctes.
+  const [stockTypeFilter, setStockTypeFilter] = useState<"Médicament" | "Consommable" | "Réactif de laboratoire" | "Tout">("Médicament");
   const [medStock, setMedStock] = useState("");
   const [medSeuil, setMedSeuil] = useState("");
   const [medPrixAchat, setMedPrixAchat] = useState("");
@@ -72,6 +77,10 @@ export default function TabPharmacie({
 
   // Search filter state
   const [searchQuery, setSearchQuery] = useState("");
+  // Pagination du tableau de stock : évite de rendre des milliers de <tr>
+  // d'un coup dans le DOM.
+  const [stockPage, setStockPage] = useState(1);
+  const STOCK_PAGE_SIZE = 50;
 
   // Automated bulk upload and parser states
   const [receptionMode, setReceptionMode] = useState<"manual" | "auto">("manual");
@@ -496,6 +505,7 @@ export default function TabPharmacie({
         forme: medForme,
         dosage: medDosage.trim(),
         categorie: medCategorie,
+        typeArticle: medTypeArticle,
         stock: qte,
         seuil: sVal,
         prixAchat: pA,
@@ -834,26 +844,40 @@ export default function TabPharmacie({
     .filter((m) => m.type === "sortie" && m.date === getTodayStr())
     .reduce((s, m) => s + m.qte, 0);
 
-  // Filters search list
-  const filteredStock = stock
-    .filter((m) => m.nom.toLowerCase().includes(searchQuery.toLowerCase()))
-    .sort((a, b) => a.nom.localeCompare(b.nom));
+  // Filters search list (mémoïsé : évite de refiltrer/retrier tout le stock
+  // à chaque rendu, y compris à chaque changement de page de pagination)
+  const filteredStock = React.useMemo(() => {
+    return stock
+      .filter((m) => m.nom.toLowerCase().includes(searchQuery.toLowerCase()))
+      .filter((m) => {
+        if (stockTypeFilter === "Tout") return true;
+        // Une fiche créée avant l'introduction de ce champ est traitée comme
+        // un Médicament, pour ne rien faire disparaître des listes existantes.
+        const effectiveType = m.typeArticle || "Médicament";
+        return effectiveType === stockTypeFilter;
+      })
+      .sort((a, b) => a.nom.localeCompare(b.nom));
+  }, [stock, searchQuery, stockTypeFilter]);
 
   // 1. Calculate top medications by "sortie" volume in movements over the last 30 days
-  const medUsage: Record<string, number> = {};
-  mouvements.forEach((mv) => {
-    if (mv.type === "sortie") {
-      medUsage[mv.medId] = (medUsage[mv.medId] || 0) + mv.qte;
-    }
-  });
+  // (mémoïsé : ce calcul parcourt tous les mouvements de stock, potentiellement
+  // nombreux sur la durée de vie du cabinet)
+  const sortedMeds = React.useMemo(() => {
+    const medUsage: Record<string, number> = {};
+    mouvements.forEach((mv) => {
+      if (mv.type === "sortie") {
+        medUsage[mv.medId] = (medUsage[mv.medId] || 0) + mv.qte;
+      }
+    });
 
-  // Sort medications by usage, then by current stock if equal
-  const sortedMeds = [...stock].sort((a, b) => {
-    const usageA = medUsage[a.id] || 0;
-    const usageB = medUsage[b.id] || 0;
-    if (usageB !== usageA) return usageB - usageA;
-    return b.stock - a.stock; // fallback to higher stock
-  });
+    // Sort medications by usage, then by current stock if equal
+    return [...stock].sort((a, b) => {
+      const usageA = medUsage[a.id] || 0;
+      const usageB = medUsage[b.id] || 0;
+      if (usageB !== usageA) return usageB - usageA;
+      return b.stock - a.stock; // fallback to higher stock
+    });
+  }, [stock, mouvements]);
 
   // Limit to top 4 to keep chart clean and legible
   const topMeds = sortedMeds.slice(0, 4);
@@ -1413,6 +1437,18 @@ export default function TabPharmacie({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
+                  <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Type d'article</label>
+                  <select
+                    value={medTypeArticle}
+                    onChange={(e) => setMedTypeArticle(e.target.value as NonNullable<Medicament["typeArticle"]>)}
+                    className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
+                  >
+                    <option value="Médicament">💊 Médicament</option>
+                    <option value="Consommable">📦 Consommable</option>
+                    <option value="Réactif de laboratoire">🧪 Réactif de laboratoire</option>
+                  </select>
+                </div>
+                <div>
                   <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Forme galénique</label>
                   <select
                     value={medForme}
@@ -1428,6 +1464,9 @@ export default function TabPharmacie({
                     <option value="Solution buccale">Solution buccale</option>
                   </select>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Catégorie thérapeutique</label>
                   <select
@@ -2155,7 +2194,7 @@ export default function TabPharmacie({
                 type="text"
                 placeholder="Rechercher une boîte..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => { setSearchQuery(e.target.value); setStockPage(1); }}
                 className="w-full text-xs border border-stone-200 rounded-lg pl-9 pr-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
               />
             </div>
@@ -2171,9 +2210,39 @@ export default function TabPharmacie({
           </div>
         </div>
 
+        {/* Trois listes distinctes : Médicaments / Consommables / Réactifs de laboratoire (cahier des charges, point 6.2) */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          {([
+            { key: "Médicament", label: "💊 Médicaments" },
+            { key: "Consommable", label: "📦 Consommables" },
+            { key: "Réactif de laboratoire", label: "🧪 Réactifs de laboratoire" },
+            { key: "Tout", label: "Tout afficher" },
+          ] as const).map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => { setStockTypeFilter(tab.key); setStockPage(1); }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                stockTypeFilter === tab.key
+                  ? "bg-primary-600 border-primary-600 text-white"
+                  : "bg-white border-stone-200 text-stone-600 hover:bg-stone-50"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
         {filteredStock.length === 0 ? (
           <p className="text-xs text-stone-500 dark:text-stone-400 py-6 text-center italic">Aucun médicament trouvé.</p>
-        ) : (
+        ) : (() => {
+            const totalStockPages = Math.max(1, Math.ceil(filteredStock.length / STOCK_PAGE_SIZE));
+            const stockPageClamped = Math.min(stockPage, totalStockPages);
+            const stockPageItems = filteredStock.slice(
+              (stockPageClamped - 1) * STOCK_PAGE_SIZE,
+              stockPageClamped * STOCK_PAGE_SIZE
+            );
+            return (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -2191,7 +2260,7 @@ export default function TabPharmacie({
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {filteredStock.map((m) => {
+                {stockPageItems.map((m) => {
                   const daysToExpiry = getDaysToExpiry(m.peremption);
                   const isExpired = daysToExpiry !== null && daysToExpiry < 0;
                   const isExpiringSoon = daysToExpiry !== null && daysToExpiry >= 0 && daysToExpiry <= 90;
@@ -2268,8 +2337,34 @@ export default function TabPharmacie({
                 })}
               </tbody>
             </table>
+            {totalStockPages > 1 && (
+              <div className="flex items-center justify-between gap-3 pt-3 text-xs text-stone-500">
+                <span>
+                  Page {stockPageClamped} / {totalStockPages} — {filteredStock.length} référence{filteredStock.length > 1 ? "s" : ""}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setStockPage((p) => Math.max(1, p - 1))}
+                    disabled={stockPageClamped <= 1}
+                    className="px-2.5 py-1 rounded-lg border border-stone-200 font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone-50"
+                  >
+                    Précédent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStockPage((p) => Math.min(totalStockPages, p + 1))}
+                    disabled={stockPageClamped >= totalStockPages}
+                    className="px-2.5 py-1 rounded-lg border border-stone-200 font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:bg-stone-50"
+                  >
+                    Suivant
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+            );
+          })()}
       </div>
 
       {/* Movements Log Card */}
@@ -2323,3 +2418,7 @@ export default function TabPharmacie({
     </div>
   );
 }
+
+// Mémoïsé : évite de re-rendre tout cet onglet (souvent 1000+ lignes de JSX)
+// quand seul un autre onglet ou une donnée sans rapport change dans App.tsx.
+export default React.memo(TabPharmacie);

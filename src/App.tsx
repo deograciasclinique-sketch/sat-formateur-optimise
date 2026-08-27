@@ -3,11 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, Suspense, lazy } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { SelfHealingErrorBoundary, useSystemWatchdog } from "./components/SelfHealingEngine";
-import { subscribeToCloudKey, pushToCloudKey } from "./lib/liveSync";
-import { useCloudSyncedState } from "./lib/useCloudSyncedState";
 import PatientMobilePortal from "./components/PatientMobilePortal";
 import {
   Audit,
@@ -25,7 +23,6 @@ import {
   Absence,
   Hospitalisation,
   Evolution,
-  FicheReference,
   Vaccination,
   ExamenLabo,
   PriseEnCharge,
@@ -46,34 +43,40 @@ import {
   migrateMaterniteCpns,
   migrateUrgences,
   migratePediatrie,
-  getClinicProfile
+  getClinicProfile,
+  hydrateDocumentsFromBlobStore,
+  persistDocuments,
+  hydrateConsultationsFromBlobStore,
+  persistConsultations
 } from "./data";
 
 import { addOfflineAction, getPendingActionsCount, processOfflineQueue } from "./lib/offlineQueue";
 import { db } from "./lib/firebase";
 import { sendBrowserNotification } from "./lib/browserNotifications";
 
-// Import all 16 operational tab panels
-import TabQualite from "./components/TabQualite";
-import TabIndicateurs from "./components/TabIndicateurs";
-import TabTaches from "./components/TabTaches";
-import TabPharmacie from "./components/TabPharmacie";
-import TabFacturation from "./components/TabFacturation";
-import TabRDV from "./components/TabRDV";
-import TabRH from "./components/TabRH";
-import TabHospitalisation from "./components/TabHospitalisation";
-import TabVaccination from "./components/TabVaccination";
-import TabLabo from "./components/TabLabo";
-import TabMaternite from "./components/TabMaternite";
-import TabAssurance from "./components/TabAssurance";
-import TabUrgences from "./components/TabUrgences";
-import TabPediatrie from "./components/TabPediatrie";
-import TabConsultation from "./components/TabConsultation";
-import TabDocuments from "./components/TabDocuments";
-import TabOnlineRDV from "./components/TabOnlineRDV";
-import TabDashboardGlobal from "./components/TabDashboardGlobal";
-import TabSettings from "./components/TabSettings";
-import TabPlanifFamiliale from "./components/TabPlanifFamiliale";
+// Onglets chargés à la demande (code splitting) : chaque module n'est
+// téléchargé/compilé que lorsque l'agent ouvre l'onglet correspondant,
+// au lieu d'alourdir le chargement initial de l'app avec les 20 modules.
+const TabQualite = lazy(() => import("./components/TabQualite"));
+const TabIndicateurs = lazy(() => import("./components/TabIndicateurs"));
+const TabTaches = lazy(() => import("./components/TabTaches"));
+const TabPharmacie = lazy(() => import("./components/TabPharmacie"));
+const TabFacturation = lazy(() => import("./components/TabFacturation"));
+const TabRDV = lazy(() => import("./components/TabRDV"));
+const TabRH = lazy(() => import("./components/TabRH"));
+const TabHospitalisation = lazy(() => import("./components/TabHospitalisation"));
+const TabVaccination = lazy(() => import("./components/TabVaccination"));
+const TabLabo = lazy(() => import("./components/TabLabo"));
+const TabMaternite = lazy(() => import("./components/TabMaternite"));
+const TabAssurance = lazy(() => import("./components/TabAssurance"));
+const TabUrgences = lazy(() => import("./components/TabUrgences"));
+const TabPediatrie = lazy(() => import("./components/TabPediatrie"));
+const TabConsultation = lazy(() => import("./components/TabConsultation"));
+const TabDocuments = lazy(() => import("./components/TabDocuments"));
+const TabOnlineRDV = lazy(() => import("./components/TabOnlineRDV"));
+const TabDashboardGlobal = lazy(() => import("./components/TabDashboardGlobal"));
+const TabSettings = lazy(() => import("./components/TabSettings"));
+const TabPlanifFamiliale = lazy(() => import("./components/TabPlanifFamiliale"));
 
 import {
   ShieldAlert,
@@ -326,7 +329,6 @@ export default function App() {
   const [hospCapacite, setHospCapacite] = useState(20);
   const [hospitalisations, setHospitalisations] = useState<Hospitalisation[]>([]);
   const [hospEvolutions, setHospEvolutions] = useState<Evolution[]>([]);
-  const [ficheReferences, setFicheReferences] = useState<FicheReference[]>([]);
   const [factures, setFactures] = useState<Facture[]>([]);
   const [depenses, setDepenses] = useState<Depense[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
@@ -341,64 +343,36 @@ export default function App() {
   const [laboExamens, setLaboExamens] = useState<ExamenLabo[]>([]);
   const [documents, setDocuments] = useState<DocumentArchive[]>([]);
 
-  // --- Synchronisation temps réel multi-appareils (Firestore) ---
-  // Associe chaque clé de données à sa fonction de mise à jour locale.
-  // "dg_staff" n'est pas ici : il a déjà son propre mécanisme de synchronisation cloud.
-  const liveSyncSetters = React.useRef<Record<string, (data: any) => void>>({
-    dg_pharma_stock: setMedicaments,
-    dg_pharma_mouvements: setMouvements,
-    dg_tasks: setTasks,
-    dg_consultations: setConsultations,
-    dg_pediatrie: setPediatrie,
-    dg_maternite_cpn: setMaterniteCpns,
-    dg_maternite_accouchements: setMaterniteAccouchements,
-    dg_rdv: setRdv,
-    dg_hospitalisations: setHospitalisations,
-    dg_fiches_reference: setFicheReferences,
-    dg_hosp_evolutions: setHospEvolutions,
-    dg_factures: setFactures,
-    dg_depenses: setDepenses,
-    dg_incidents: setIncidents,
-    dg_actions: setActions,
-    dg_audits: setAudits,
-    dg_conges: setConges,
-    dg_absences: setAbsences,
-    dg_rh: setRhFiches,
-    dg_prises_charge: setPrisesEnCharge,
-    dg_urgences: setUrgences,
-    dg_vaccinations: setVaccinations,
-    dg_labo_examens: setLaboExamens,
-    dg_documents: setDocuments,
-  });
-  // Garde en mémoire la dernière valeur confirmée comme envoyée au cloud pour chaque clé,
-  // afin de ne renvoyer que ce qui a réellement changé (et d'éviter les boucles avec les
-  // mises à jour reçues depuis un autre appareil).
-  const lastCloudSyncedRef = React.useRef<Record<string, any>>({});
-
-  // Threshold settings state — synchronisé cloud en temps réel
-  const [medTypeThresholds, setMedTypeThresholds] = useCloudSyncedState<Record<string, number>>("dg_med_type_thresholds", {
-    "Comprimé": 50,
-    "Sirop": 15,
-    "Injectable": 30,
-    "Perfusion": 25,
-    "Pommade / Crème": 10,
-    "Poudre": 15,
-    "Solution buccale": 10
+  // Threshold settings state
+  const [medTypeThresholds, setMedTypeThresholds] = useState<Record<string, number>>(() => {
+    return safeGet<Record<string, number>>("dg_med_type_thresholds", {
+      "Comprimé": 50,
+      "Sirop": 15,
+      "Injectable": 30,
+      "Perfusion": 25,
+      "Pommade / Crème": 10,
+      "Poudre": 15,
+      "Solution buccale": 10
+    });
   });
 
-  const [medCategoryThresholds, setMedCategoryThresholds] = useCloudSyncedState<Record<string, number>>("dg_med_category_thresholds", {
-    "Antalgique / Antipyrétique": 30,
-    "Antibiotique": 40,
-    "Antipaludéen": 35,
-    "Antihypertenseur": 20,
-    "Anti-inflammatoire": 25,
-    "Antidiabétique": 20,
-    "Vitamines / Minéraux": 15,
-    "Solutés / Perfusions": 30,
-    "Matériel médical": 50
+  const [medCategoryThresholds, setMedCategoryThresholds] = useState<Record<string, number>>(() => {
+    return safeGet<Record<string, number>>("dg_med_category_thresholds", {
+      "Antalgique / Antipyrétique": 30,
+      "Antibiotique": 40,
+      "Antipaludéen": 35,
+      "Antihypertenseur": 20,
+      "Anti-inflammatoire": 25,
+      "Antidiabétique": 20,
+      "Vitamines / Minéraux": 15,
+      "Solutés / Perfusions": 30,
+      "Matériel médical": 50
+    });
   });
 
-  const [thresholdApplyMode, setThresholdApplyMode] = useCloudSyncedState<"override" | "fallback">("dg_threshold_apply_mode", "fallback");
+  const [thresholdApplyMode, setThresholdApplyMode] = useState<"override" | "fallback">(() => {
+    return safeGet<"override" | "fallback">("dg_threshold_apply_mode", "fallback");
+  });
 
   const getMedEffectiveThreshold = (med: Medicament) => {
     if (thresholdApplyMode === "override") {
@@ -422,17 +396,20 @@ export default function App() {
     return med.seuil || 10;
   };
 
-  const handleUpdateTypeThresholds = (newThresholds: Record<string, number>) => {
+  const handleUpdateTypeThresholds = useCallback((newThresholds: Record<string, number>) => {
     setMedTypeThresholds(newThresholds);
-  };
+    safeSet("dg_med_type_thresholds", newThresholds);
+  }, []);
 
-  const handleUpdateCategoryThresholds = (newThresholds: Record<string, number>) => {
+  const handleUpdateCategoryThresholds = useCallback((newThresholds: Record<string, number>) => {
     setMedCategoryThresholds(newThresholds);
-  };
+    safeSet("dg_med_category_thresholds", newThresholds);
+  }, []);
 
-  const handleUpdateApplyMode = (newMode: "override" | "fallback") => {
+  const handleUpdateApplyMode = useCallback((newMode: "override" | "fallback") => {
     setThresholdApplyMode(newMode);
-  };
+    safeSet("dg_threshold_apply_mode", newMode);
+  }, []);
 
   // PIN access control systems
   const [currentUserPin, setCurrentUserPin] = useState<string>(() => {
@@ -882,7 +859,13 @@ export default function App() {
     const rawConsultations = safeGet<any[]>("dg_consultations", []);
     const migratedConsultations = migrateConsultations(rawConsultations);
     setConsultations(migratedConsultations);
-    safeSet("dg_consultations", migratedConsultations);
+    // Hydratation asynchrone des photos depuis IndexedDB : l'app s'affiche
+    // tout de suite avec les métadonnées, les photos arrivent ensuite sans
+    // bloquer l'interface.
+    hydrateConsultationsFromBlobStore(migratedConsultations).then((hydrated) => {
+      setConsultations(hydrated);
+      persistConsultations(hydrated);
+    });
 
     const rawPediatrie = safeGet<any[]>("dg_pediatrie", []);
     const migratedPediatrie = migratePediatrie(rawPediatrie);
@@ -899,7 +882,6 @@ export default function App() {
     setHospCapacite(safeGet<number>("dg_hosp_capacite", 20));
     setHospitalisations(safeGet<Hospitalisation[]>("dg_hospitalisations", []));
     setHospEvolutions(safeGet<Evolution[]>("dg_hosp_evolutions", []));
-    setFicheReferences(safeGet<FicheReference[]>("dg_fiches_reference", []));
     setFactures(safeGet<Facture[]>("dg_factures", []));
     setDepenses(safeGet<Depense[]>("dg_depenses", []));
     setIncidents(safeGet<Incident[]>("dg_incidents", []));
@@ -916,40 +898,14 @@ export default function App() {
     safeSet("dg_urgences", migratedUrgences);
     setVaccinations(safeGet<Vaccination[]>("dg_vaccinations", []));
     setLaboExamens(safeGet<ExamenLabo[]>("dg_labo_examens", []));
-    setDocuments(safeGet<DocumentArchive[]>("dg_documents", []));
+    const rawDocuments = safeGet<DocumentArchive[]>("dg_documents", []);
+    setDocuments(rawDocuments);
+    hydrateDocumentsFromBlobStore(rawDocuments).then((hydrated) => {
+      setDocuments(hydrated);
+      persistDocuments(hydrated);
+    });
     setIsLoaded(true);
   }, []);
-
-  // Écoute en temps réel des changements faits depuis d'autres appareils.
-  // Dès qu'un autre appareil enregistre une consultation, un rendez-vous, etc.,
-  // la mise à jour arrive automatiquement ici, sans avoir besoin de recharger la page.
-  useEffect(() => {
-    if (!isLoaded || !db) return;
-
-    const unsubscribers: Array<() => void> = [];
-
-    Object.entries(liveSyncSetters.current).forEach(([key, setter]: [string, (data: any) => void]) => {
-      const unsubscribe = subscribeToCloudKey(key, (remoteData) => {
-        if (!Array.isArray(remoteData) && typeof remoteData !== "number") return;
-
-        const remoteJson = JSON.stringify(remoteData);
-        const localValue = lastSavedRef.current[key];
-        if (localValue !== undefined && JSON.stringify(localValue) === remoteJson) {
-          return; // Aucune vraie différence, on ignore.
-        }
-
-        setter(remoteData);
-        safeSet(key, remoteData);
-        lastSavedRef.current[key] = remoteData;
-        lastCloudSyncedRef.current[key] = remoteData;
-      });
-      unsubscribers.push(unsubscribe);
-    });
-
-    return () => {
-      unsubscribers.forEach((unsub) => unsub());
-    };
-  }, [isLoaded]);
 
   // Load and restore staff from Firestore if available
   useEffect(() => {
@@ -1027,13 +983,15 @@ export default function App() {
       dg_pharma_stock: medicaments,
       dg_pharma_mouvements: mouvements,
       dg_tasks: tasks,
-      dg_consultations: consultations,
+      // dg_consultations et dg_documents sont volontairement exclus de
+      // l'auto-save générique : ils contiennent des photos/fichiers en
+      // base64 et sont persistés séparément (métadonnées -> localStorage,
+      // fichiers -> IndexedDB) via handleUpdateConsultations/handleUpdateDocuments.
       dg_pediatrie: pediatrie,
       dg_maternite_cpn: materniteCpns,
       dg_maternite_accouchements: materniteAccouchements,
       dg_rdv: rdv,
       dg_hospitalisations: hospitalisations,
-      dg_fiches_reference: ficheReferences,
       dg_hosp_evolutions: hospEvolutions,
       dg_factures: factures,
       dg_depenses: depenses,
@@ -1046,15 +1004,14 @@ export default function App() {
       dg_prises_charge: prisesEnCharge,
       dg_urgences: urgences,
       dg_vaccinations: vaccinations,
-      dg_labo_examens: laboExamens,
-      dg_documents: documents
+      dg_labo_examens: laboExamens
     };
   }, [
-    staff, medicaments, mouvements, tasks, consultations, pediatrie,
-    materniteCpns, materniteAccouchements, rdv, hospitalisations, ficheReferences,
+    staff, medicaments, mouvements, tasks, pediatrie,
+    materniteCpns, materniteAccouchements, rdv, hospitalisations,
     hospEvolutions, factures, depenses, incidents, actions, audits,
     conges, absences, rhFiches, prisesEnCharge, urgences, vaccinations,
-    laboExamens, documents
+    laboExamens
   ]);
 
   // Periodic auto-save effect
@@ -1069,7 +1026,6 @@ export default function App() {
     const initialData = latestDataRef.current;
     Object.entries(initialData).forEach(([key, val]) => {
       lastSavedRef.current[key] = val;
-      lastCloudSyncedRef.current[key] = val;
     });
 
     const interval = setInterval(() => {
@@ -1094,19 +1050,6 @@ export default function App() {
           if (state !== undefined && state !== lastSavedRef.current[key]) {
             localStorage.setItem(key, JSON.stringify(state));
             lastSavedRef.current[key] = state; // update saved ref
-
-            // Envoie aussi vers le cloud (sauf le personnel, qui a son propre circuit),
-            // pour que les autres appareils reçoivent la mise à jour en temps réel.
-            if (key !== "dg_staff" && liveSyncSetters.current[key] && db) {
-              pushToCloudKey(key, state)
-                .then(() => {
-                  lastCloudSyncedRef.current[key] = state;
-                })
-                .catch(() => {
-                  // Échec (ex: hors-ligne) : on retentera au prochain cycle
-                  // puisque lastCloudSyncedRef n'a pas été mis à jour.
-                });
-            }
           }
         });
         setLastAutoSave(new Date().toLocaleTimeString("fr-FR"));
@@ -1115,16 +1058,21 @@ export default function App() {
       } finally {
         setTimeout(() => setIsSaving(false), 800);
       }
-    }, 15000); // Sauvegarde locale + synchro cloud toutes les 15 secondes
+    }, 30000); // Sauvegarde automatique toutes les 30 secondes
 
     return () => clearInterval(interval);
   }, [isLoaded]);
 
   // Sync methods
-  const handleUpdateStaff = (newStaff: Staff[]) => {
+  // Tous les handlers ci-dessous sont enveloppés dans useCallback : sans ça,
+  // une nouvelle fonction serait recréée à CHAQUE rendu d'App.tsx, ce qui
+  // ferait re-rendre inutilement tous les onglets malgré le React.memo posé
+  // sur chacun d'eux (la comparaison de props échouerait sur la prop
+  // onUpdateXxx à chaque fois).
+  const handleUpdateStaff = useCallback((newStaff: Staff[]) => {
     setStaff(newStaff);
     safeSet("dg_staff", newStaff);
-    
+
     // Asynchronously back up to cloud Firestore
     if (db) {
       db.collection("dg_staff_cloud").doc("global_list").set({
@@ -1136,137 +1084,138 @@ export default function App() {
         console.error("Cloud backup auto-update failed:", err);
       });
     }
-  };
+  }, []);
 
-  const handleUpdateMedicaments = (newMeds: Medicament[]) => {
+  const handleUpdateMedicaments = useCallback((newMeds: Medicament[]) => {
     setMedicaments(newMeds);
     safeSet("dg_pharma_stock", newMeds);
-  };
+  }, []);
 
-  const handleUpdateMouvements = (newMovs: MouvementStock[]) => {
+  const handleUpdateMouvements = useCallback((newMovs: MouvementStock[]) => {
     setMouvements(newMovs);
     safeSet("dg_pharma_mouvements", newMovs);
-  };
+  }, []);
 
-  const handleUpdateTasks = (newTasks: Task[]) => {
+  const handleUpdateTasks = useCallback((newTasks: Task[]) => {
     setTasks(newTasks);
     safeSet("dg_tasks", newTasks);
-  };
+  }, []);
 
-  const handleUpdateConsultations = (newConsults: Consultation[]) => {
-    setConsultations(newConsults);
-    safeSet("dg_consultations", newConsults);
-  };
+  const handleUpdateConsultations = useCallback((newConsults: Consultation[]) => {
+    setConsultations((prev) => {
+      const previousIds = prev.map((c) => c.id);
+      persistConsultations(newConsults, previousIds);
+      return newConsults;
+    });
+  }, []);
 
-  const handleUpdatePediatrie = (newPed: FichePediatrique[]) => {
+  const handleUpdatePediatrie = useCallback((newPed: FichePediatrique[]) => {
     setPediatrie(newPed);
     safeSet("dg_pediatrie", newPed);
-  };
+  }, []);
 
-  const handleUpdateMaterniteCpns = (newCpns: ConsultationPrenatale[]) => {
+  const handleUpdateMaterniteCpns = useCallback((newCpns: ConsultationPrenatale[]) => {
     setMaterniteCpns(newCpns);
     safeSet("dg_maternite_cpn", newCpns);
-  };
+  }, []);
 
-  const handleUpdateMaterniteAccouchements = (newAccs: Accouchement[]) => {
+  const handleUpdateMaterniteAccouchements = useCallback((newAccs: Accouchement[]) => {
     setMaterniteAccouchements(newAccs);
     safeSet("dg_maternite_accouchements", newAccs);
-  };
+  }, []);
 
-  const handleUpdateRdv = (newRdv: RendezVous[]) => {
+  const handleUpdateRdv = useCallback((newRdv: RendezVous[]) => {
     setRdv(newRdv);
     safeSet("dg_rdv", newRdv);
-  };
+  }, []);
 
-  const handleUpdateHospitalisations = (newHosps: Hospitalisation[]) => {
+  const handleUpdateHospitalisations = useCallback((newHosps: Hospitalisation[]) => {
     setHospitalisations(newHosps);
     safeSet("dg_hospitalisations", newHosps);
-  };
+  }, []);
 
-  const handleUpdateHospEvolutions = (newEvs: Evolution[]) => {
+  const handleUpdateHospEvolutions = useCallback((newEvs: Evolution[]) => {
     setHospEvolutions(newEvs);
     safeSet("dg_hosp_evolutions", newEvs);
-  };
+  }, []);
 
-  const handleUpdateFicheReferences = (newRefs: FicheReference[]) => {
-    setFicheReferences(newRefs);
-    safeSet("dg_fiches_reference", newRefs);
-  };
-
-  const handleUpdateFactures = (newInvoices: Facture[]) => {
+  const handleUpdateFactures = useCallback((newInvoices: Facture[]) => {
     setFactures(newInvoices);
     safeSet("dg_factures", newInvoices);
-  };
+  }, []);
 
-  const handleUpdateDepenses = (newDepenses: Depense[]) => {
+  const handleUpdateDepenses = useCallback((newDepenses: Depense[]) => {
     setDepenses(newDepenses);
     safeSet("dg_depenses", newDepenses);
-  };
+  }, []);
 
-  const handleUpdateIncidents = (newIncidents: Incident[]) => {
+  const handleUpdateIncidents = useCallback((newIncidents: Incident[]) => {
     setIncidents(newIncidents);
     safeSet("dg_incidents", newIncidents);
-  };
+  }, []);
 
-  const handleUpdateActions = (newActions: ActionCorrective[]) => {
+  const handleUpdateActions = useCallback((newActions: ActionCorrective[]) => {
     setActions(newActions);
     safeSet("dg_actions", newActions);
-  };
+  }, []);
 
-  const handleUpdateAudits = (newAudits: Audit[]) => {
+  const handleUpdateAudits = useCallback((newAudits: Audit[]) => {
     setAudits(newAudits);
     safeSet("dg_audits", newAudits);
-  };
+  }, []);
 
-  const handleUpdateConges = (newConges: Conge[]) => {
+  const handleUpdateConges = useCallback((newConges: Conge[]) => {
     setConges(newConges);
     safeSet("dg_conges", newConges);
-  };
+  }, []);
 
-  const handleUpdateAbsences = (newAbsences: Absence[]) => {
+  const handleUpdateAbsences = useCallback((newAbsences: Absence[]) => {
     setAbsences(newAbsences);
     safeSet("dg_absences", newAbsences);
-  };
+  }, []);
 
-  const handleUpdateRhFiches = (newRh: RhFiche[]) => {
+  const handleUpdateRhFiches = useCallback((newRh: RhFiche[]) => {
     setRhFiches(newRh);
     safeSet("dg_rh", newRh);
-  };
+  }, []);
 
-  const handleUpdatePrisesEnCharge = (newPec: PriseEnCharge[]) => {
+  const handleUpdatePrisesEnCharge = useCallback((newPec: PriseEnCharge[]) => {
     setPrisesEnCharge(newPec);
     safeSet("dg_prises_charge", newPec);
-  };
+  }, []);
 
-  const handleUpdateAssureurs = (newAssureurs: any[]) => {
+  const handleUpdateAssureurs = useCallback((newAssureurs: any[]) => {
     setAssureurs(newAssureurs);
     safeSet("dg_assureurs", newAssureurs);
-  };
+  }, []);
 
-  const handleUpdateAssures = (newAssures: any[]) => {
+  const handleUpdateAssures = useCallback((newAssures: any[]) => {
     setAssures(newAssures);
     safeSet("dg_assures", newAssures);
-  };
+  }, []);
 
-  const handleUpdateUrgences = (newUrgences: PatientUrgence[]) => {
+  const handleUpdateUrgences = useCallback((newUrgences: PatientUrgence[]) => {
     setUrgences(newUrgences);
     safeSet("dg_urgences", newUrgences);
-  };
+  }, []);
 
-  const handleUpdateVaccinations = (newVacc: Vaccination[]) => {
+  const handleUpdateVaccinations = useCallback((newVacc: Vaccination[]) => {
     setVaccinations(newVacc);
     safeSet("dg_vaccinations", newVacc);
-  };
+  }, []);
 
-  const handleUpdateLaboExamens = (newExamens: ExamenLabo[]) => {
+  const handleUpdateLaboExamens = useCallback((newExamens: ExamenLabo[]) => {
     setLaboExamens(newExamens);
     safeSet("dg_labo_examens", newExamens);
-  };
+  }, []);
 
-  const handleUpdateDocuments = (newDocs: DocumentArchive[]) => {
-    setDocuments(newDocs);
-    safeSet("dg_documents", newDocs);
-  };
+  const handleUpdateDocuments = useCallback((newDocs: DocumentArchive[]) => {
+    setDocuments((prev) => {
+      const previousIds = prev.map((d) => d.id);
+      persistDocuments(newDocs, previousIds);
+      return newDocs;
+    });
+  }, []);
 
   // Memoized sidebar category definitions - compiled once or when key data updates
   const filteredMenuCategories = React.useMemo(() => {
@@ -1995,6 +1944,14 @@ export default function App() {
 
         {/* Panel render staging viewarea */}
         <main className="flex-1 overflow-y-auto p-6 max-w-7xl w-full mx-auto">
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-64 gap-3 text-stone-500 dark:text-stone-400">
+                <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+                <span className="text-sm font-medium">Chargement du module...</span>
+              </div>
+            }
+          >
           {activeTab === "qualite" && (
             <TabQualite
               audits={audits}
@@ -2079,11 +2036,9 @@ export default function App() {
             <TabHospitalisation
               hospitalisations={hospitalisations}
               evolutions={hospEvolutions}
-              ficheReferences={ficheReferences}
               staff={staff}
               onUpdateHospitalisations={handleUpdateHospitalisations}
               onUpdateEvolutions={handleUpdateHospEvolutions}
-              onUpdateFicheReferences={handleUpdateFicheReferences}
               filterPatientQuery={headerSearchQuery}
               theme={theme}
             />
@@ -2151,7 +2106,6 @@ export default function App() {
               pediatrie={pediatrie}
               staff={staff}
               onUpdatePediatrie={handleUpdatePediatrie}
-              theme={theme}
             />
           )}
 
@@ -2187,6 +2141,13 @@ export default function App() {
               laboExamens={laboExamens}
               onUpdateLaboExamens={handleUpdateLaboExamens}
               isLoading={!isLoaded}
+              hospitalisations={hospitalisations}
+              onUpdateHospitalisations={handleUpdateHospitalisations}
+              urgences={urgences}
+              onUpdateUrgences={handleUpdateUrgences}
+              onUpdateMedicaments={handleUpdateMedicaments}
+              mouvements={mouvements}
+              onUpdateMouvements={handleUpdateMouvements}
             />
           )}
 
@@ -2227,6 +2188,7 @@ export default function App() {
               theme={theme}
             />
           )}
+          </Suspense>
         </main>
       </div>
 

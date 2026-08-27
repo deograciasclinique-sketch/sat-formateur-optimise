@@ -4,7 +4,6 @@
  */
 
 import React, { useState } from "react";
-import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { Staff, Task, GardeAgent } from "../types";
 import { generateUid, getTodayStr, safeSet } from "../data";
 import { 
@@ -45,7 +44,7 @@ interface TabTachesProps {
   currentUser?: Staff | null;
 }
 
-export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, isResponsable = false, currentUser }: TabTachesProps) {
+function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, isResponsable = false, currentUser }: TabTachesProps) {
   // Staff form states
   const [staffNom, setStaffNom] = useState("");
   const [staffPoste, setStaffPoste] = useState("");
@@ -94,6 +93,16 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
   const [taskLabel, setTaskLabel] = useState("");
   const [taskCat, setTaskCat] = useState("Soins infirmiers");
   const [taskAssigne, setTaskAssigne] = useState("");
+
+  // Seul le responsable du service peut attribuer une tâche/un dossier à un
+  // autre agent (cahier des charges, point 4). Un agent non-responsable ne
+  // peut créer une tâche que pour lui-même : on verrouille automatiquement le
+  // champ "Assigné à" sur son propre identifiant dès qu'il est connu.
+  React.useEffect(() => {
+    if (!isResponsable && currentUser?.id) {
+      setTaskAssigne(currentUser.id);
+    }
+  }, [isResponsable, currentUser?.id]);
   const [taskHeure, setTaskHeure] = useState("");
   const [taskPriorite, setTaskPriorite] = useState<"haute" | "normale" | "basse">("normale");
   const [taskDate, setTaskDate] = useState(getTodayStr());
@@ -106,8 +115,12 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
   // --- SUB-TABS NAVIGATION ---
   const [activeSubTab, setActiveSubTab] = useState<"tasks" | "gardes">("tasks");
 
-  // --- ÉTATS PORTAIL DE GARDE DES AGENTS (WEEKLY ROSTER) --- synchronisé cloud
-  const [gardes, setGardes] = useCloudSyncedState<GardeAgent[]>("dg_staff_gardes_schedule", []);
+  // --- ÉTATS PORTAIL DE GARDE DES AGENTS (WEEKLY ROSTER) ---
+  const [gardes, setGardes] = useState<GardeAgent[]>(() => {
+    const saved = localStorage.getItem("dg_staff_gardes_schedule");
+    if (saved) return JSON.parse(saved);
+    return [];
+  });
 
   const [selectedWeekDate, setSelectedWeekDate] = useState(getTodayStr());
   const [gardeViewMode, setGardeViewMode] = useState<"weekly_grid" | "monthly_calendar">("weekly_grid");
@@ -292,8 +305,11 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
     return null;
   }, [gardes]);
 
-  // Securisation des codes agents (Directeur) — synchronisé cloud
-  const [directorCode, setDirectorCode] = useCloudSyncedState<string>("dg_director_code", "1234");
+  // Securisation des codes agents (Directeur)
+  const [directorCode, setDirectorCode] = useState(() => {
+    const saved = localStorage.getItem("dg_director_code");
+    return saved || "1234";
+  });
   const [isDirectorUnlocked, setIsDirectorUnlocked] = useState(false);
   const [enteredCode, setEnteredCode] = useState("");
   const [unlockError, setUnlockError] = useState("");
@@ -310,6 +326,7 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
 
   const saveGardes = (newGardes: GardeAgent[]) => {
     setGardes(newGardes);
+    localStorage.setItem("dg_staff_gardes_schedule", JSON.stringify(newGardes));
   };
 
   const handleUnlockDirector = (e: React.FormEvent) => {
@@ -623,7 +640,11 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
   };
 
   const handleAddTask = () => {
-    if (!taskLabel.trim() || !taskAssigne) {
+    // Garde-fou : même si l'état local était manipulé, un agent non-responsable
+    // ne peut jamais attribuer une tâche à quelqu'un d'autre que lui-même.
+    const effectiveAssigne = isResponsable ? taskAssigne : (currentUser?.id || taskAssigne);
+
+    if (!taskLabel.trim() || !effectiveAssigne) {
       alert("Veuillez saisir le libellé de la tâche et l'assigner à un agent.");
       return;
     }
@@ -631,7 +652,7 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
     const newTask: Task = {
       id: generateUid(),
       label: taskLabel.trim(),
-      assigne: taskAssigne,
+      assigne: effectiveAssigne,
       cat: taskCat,
       heure: taskHeure || "—",
       priorite: taskPriorite,
@@ -1687,20 +1708,35 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
               </div>
               <div>
                 <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Assigné à</label>
-                <select
-                  value={taskAssigne}
-                  onChange={(e) => setTaskAssigne(e.target.value)}
-                  className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
-                >
-                  <option value="">— Choisir l'agent —</option>
-                  {staff.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.nom} ({s.poste})
-                    </option>
-                  ))}
-                </select>
+                {isResponsable ? (
+                  <select
+                    value={taskAssigne}
+                    onChange={(e) => setTaskAssigne(e.target.value)}
+                    className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
+                  >
+                    <option value="">— Choisir l'agent —</option>
+                    {staff.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.nom} ({s.poste})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div
+                    title="Seul le responsable du service peut attribuer une tâche à un autre agent."
+                    className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-100 text-stone-500 flex items-center gap-1.5"
+                  >
+                    <Lock className="w-3 h-3 flex-shrink-0" />
+                    {currentUser ? `${currentUser.nom} (vous)` : "Vous-même"}
+                  </div>
+                )}
               </div>
             </div>
+            {!isResponsable && (
+              <p className="text-2xs text-stone-500 dark:text-stone-400 -mt-1">
+                Vous ne pouvez créer une tâche que pour vous-même. Seul le responsable du service peut l'attribuer à un autre agent.
+              </p>
+            )}
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Heure prévue</label>
@@ -1962,3 +1998,7 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
     </div>
   );
 }
+
+// Mémoïsé : évite de re-rendre tout cet onglet (souvent 1000+ lignes de JSX)
+// quand seul un autre onglet ou une donnée sans rapport change dans App.tsx.
+export default React.memo(TabTaches);
