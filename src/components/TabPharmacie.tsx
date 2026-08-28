@@ -143,6 +143,13 @@ export default function TabPharmacie({
         const peremption = parts[7] || "";
         const fournisseur = parts[8] || "Grossiste Automatique";
         const codeBarre = parts[9] || "";
+        // Colonne optionnelle (10e) : Médicament / Consommable / Réactif de laboratoire.
+        // Absente ou reconnue -> "Médicament" par défaut (compatible avec les anciens fichiers).
+        const typeArticleRaw = (parts[10] || "").trim();
+        const typeArticle =
+          typeArticleRaw === "Consommable" || typeArticleRaw === "Réactif de laboratoire"
+            ? typeArticleRaw
+            : "Médicament";
 
         parsedList.push({
           nom,
@@ -155,6 +162,7 @@ export default function TabPharmacie({
           peremption,
           fournisseur,
           codeBarre,
+          typeArticle,
         });
       });
     }
@@ -182,6 +190,10 @@ export default function TabPharmacie({
       const peremp = String(item.peremption || "").trim();
       const supplier = String(item.fournisseur || "Grossiste").trim();
       const cb = String(item.codeBarre || "").trim();
+      const typeArt: NonNullable<Medicament["typeArticle"]> =
+        item.typeArticle === "Consommable" || item.typeArticle === "Réactif de laboratoire"
+          ? item.typeArticle
+          : "Médicament";
 
       const idx = updatedStock.findIndex(
         (m) => m.nom.toLowerCase() === rawNom.toLowerCase() && m.dosage === rawDosage
@@ -195,6 +207,7 @@ export default function TabPharmacie({
         if (peremp) med.peremption = peremp;
         if (supplier) med.fournisseur = supplier;
         if (cb) med.codeBarre = cb;
+        if (item.typeArticle) med.typeArticle = typeArt;
 
         const mId = generateUid();
         newMouvements.unshift({
@@ -221,6 +234,7 @@ export default function TabPharmacie({
           dosage: rawDosage,
           forme: forme,
           categorie: cat,
+          typeArticle: typeArt,
           stock: qty,
           seuil: 10,
           prixAchat: pa,
@@ -582,6 +596,32 @@ export default function TabPharmacie({
         );
       }
     }
+  };
+
+  // Vider tout l'inventaire (produits uniquement, l'historique des mouvements
+  // est conservé) — action destructive, double confirmation obligatoire.
+  const handleClearAllInventory = () => {
+    if (stock.length === 0) {
+      alert("L'inventaire est déjà vide.");
+      return;
+    }
+    const firstConfirm = confirm(
+      `⚠️ Vous êtes sur le point de supprimer DÉFINITIVEMENT les ${stock.length} article(s) actuellement enregistrés dans l'inventaire (médicaments, consommables et réactifs confondus).\n\nCette action est irréversible. Voulez-vous continuer ?`
+    );
+    if (!firstConfirm) return;
+
+    const secondConfirm = confirm(
+      `Dernière confirmation : tapez OK pour vider complètement l'inventaire (${stock.length} article(s)). L'historique des mouvements de stock ne sera pas supprimé.`
+    );
+    if (!secondConfirm) return;
+
+    onUpdateStock([]);
+    logActivity(
+      "Vidage complet de l'inventaire (Pharmacie)",
+      "suppression",
+      `Suppression de la totalité des ${stock.length} article(s) de l'inventaire pharmacie/laboratoire.`
+    );
+    alert("L'inventaire a été vidé. Vous pouvez maintenant enregistrer de nouveaux produits.");
   };
 
   const handleExportStockPDF = () => {
@@ -1674,10 +1714,10 @@ export default function TabPharmacie({
                   <div className="flex items-center justify-between pt-1 border-t border-stone-100">
                     <span className="text-xs text-stone-500 dark:text-stone-400 font-medium flex items-center gap-1">
                       <HelpCircle className="w-3.5 h-3.5 text-stone-300" />
-                      Colonnes recommandées : Nom, Dosage, Quantité
+                      Colonnes recommandées : Nom, Dosage, Quantité, ... TypeArticle (10e colonne, optionnelle)
                     </span>
                     <a
-                      href="data:text/csv;charset=utf-8,Nom,Dosage,Quantite,PrixAchat,PrixVente,Forme,Categorie,Peremption,Fournisseur%0AParacetamol,500mg,100,250,350,Comprime,Antalgique,2027-12-31,CAMEG%0AAmoxicilline,1g,50,600,850,Comprime,Antibiotique,2027-06-30,CAMEG%0A"
+                      href="data:text/csv;charset=utf-8,Nom,Dosage,Quantite,PrixAchat,PrixVente,Forme,Categorie,Peremption,Fournisseur,CodeBarre,TypeArticle%0AParacetamol,500mg,100,250,350,Comprime,Antalgique,2027-12-31,CAMEG,,Medicament%0AGant d'examen,,900,200,,Materiel medical,Materiel medical,2028-10-31,CAMEG,,Consommable%0ATDR Paludisme,,38,1500,,Test rapide,Reactif de laboratoire,2026-01-31,CAMEG,,Reactif de laboratoire%0A"
                       download="modele_reapprovisionnement.csv"
                       className="text-xs font-bold text-primary-600 hover:text-primary-700 underline flex items-center gap-1"
                     >
@@ -2195,6 +2235,15 @@ export default function TabPharmacie({
             >
               <Download className="w-4 h-4" />
               <span>Exporter PDF</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleClearAllInventory}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-danger-50 text-danger-600 font-bold rounded-lg text-xs border border-danger-200 shadow-sm transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap"
+              title="Supprimer tous les produits de l'inventaire (action irréversible)"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Vider l'inventaire</span>
             </button>
           </div>
         </div>
