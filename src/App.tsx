@@ -551,14 +551,14 @@ export default function App() {
     if (p.includes("responsable") || p.includes("directeur") || p.includes("admin") || p.includes("chef") || currentUserPin === "0000") {
       return [
         "dashboard", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
-        "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", 
+        "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
         "assurances", "rh", "indicateurs", "qualite", "documents", "settings"
       ];
     }
     
     const tabs = ["taches"]; // everyone can see tasks
     if (p.includes("médecin") || p.includes("medecin") || p.includes("pédiatre") || p.includes("pediatre") || p.includes("praticien")) {
-      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale");
+      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs");
     } else if (p.includes("sage-femme") || p.includes("maternité") || p.includes("maternite")) {
       tabs.push("maternite", "vaccination", "rdv", "documents", "planif_familiale");
     } else if (p.includes("infirmier") || p.includes("aide-soignant") || p.includes("triage")) {
@@ -566,11 +566,11 @@ export default function App() {
     } else if (p.includes("labo") || p.includes("laborantin")) {
       tabs.push("labo");
     } else if (p.includes("pharma") || p.includes("pharmacien") || p.includes("stock")) {
-      tabs.push("pharma");
+      tabs.push("pharma", "actes_tarifs");
     } else if (p.includes("accueil") || p.includes("secrétaire") || p.includes("secretaire") || p.includes("réception") || p.includes("reception")) {
-      tabs.push("rdv", "rdv_en_ligne", "factures");
+      tabs.push("rdv", "rdv_en_ligne", "factures", "actes_tarifs");
     } else if (p.includes("comptable") || p.includes("finance") || p.includes("caissier")) {
-      tabs.push("factures", "assurances");
+      tabs.push("factures", "assurances", "actes_tarifs");
     } else {
       tabs.push("dashboard", "rdv");
     }
@@ -1469,8 +1469,8 @@ export default function App() {
               💡 Aide à la connexion :
             </p>
             <ul className="list-disc pl-4 space-y-1">
-              <li>Le code du <strong>Responsable du Service</strong> par défaut est <strong className="text-primary-600 dark:text-primary-400 font-mono">0000</strong>.</li>
-              <li>Chaque praticien doit utiliser son code d'entrée attribué par le responsable, à créer dans <strong>Ressources Humaines</strong>.</li>
+              <li>Chaque praticien doit utiliser son code d'entrée personnel, attribué par le responsable du service dans <strong>Ressources Humaines</strong>.</li>
+              <li>Code oublié ou perdu ? Contactez le responsable du service pour le récupérer ou en obtenir un nouveau.</li>
             </ul>
           </div>
         </div>
