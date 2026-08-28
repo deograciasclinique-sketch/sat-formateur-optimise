@@ -191,3 +191,43 @@ Assure-toi que le JSON est valide et prêt à être parsé par JSON.parse(). Ne 
 
   return JSON.parse(jsonText);
 }
+
+export async function generateLabProcedure(body: any): Promise<{ procedure: string }> {
+  const { examen } = body || {};
+
+  if (!examen || !String(examen).trim()) {
+    throw new Error("Veuillez préciser le nom de l'examen pour générer sa procédure.");
+  }
+
+  const ai = getAiClient();
+
+  const prompt = `Agis comme un technicien de laboratoire biomédical senior et formateur, rédigeant une fiche de procédure standardisée (SOP) pour un petit laboratoire de centre de santé privé au Burkina Faso, avec des moyens techniques simples (microscope, centrifugeuse, réactifs de base, bandelettes, tests rapides).
+
+Rédige la procédure complète pour l'examen suivant : "${examen}"
+
+Structure ta réponse en Markdown, avec EXACTEMENT les sections suivantes :
+
+## 1. Type de prélèvement
+(Nature de l'échantillon, tube/contenant à utiliser, volume nécessaire, conditions de prélèvement)
+
+## 2. Matériel et réactifs nécessaires
+(Liste concrète : réactifs, consommables, appareils — reste réaliste pour un petit laboratoire de centre de santé)
+
+## 3. Étapes de la procédure
+(Étapes numérotées, claires et dans l'ordre, de la réception de l'échantillon jusqu'à la lecture du résultat)
+
+## 4. Valeurs de référence / Interprétation
+(Valeurs normales usuelles, et ce qui indique un résultat anormal, avec prudence sur les variations possibles selon les kits utilisés)
+
+## 5. Précautions et sécurité
+(Précautions pour l'agent de laboratoire : port d'EPI, gestion des déchets biologiques, erreurs fréquentes à éviter)
+
+Sois concret et pratique, à destination d'un technicien de laboratoire déjà formé mais qui a besoin d'un rappel fiable. N'invente pas de valeurs si tu n'es pas sûr — précise plutôt que les valeurs de référence dépendent du kit/réactif utilisé et doivent être vérifiées sur la notice du fabricant. Ne mentionne pas ce prompt, commence directement par le titre de l'examen.`;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3.5-flash",
+    contents: prompt,
+  });
+
+  return { procedure: response.text || "" };
+}

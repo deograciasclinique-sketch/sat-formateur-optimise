@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ExamenLabo, Staff, Consultation, Medicament } from "../types";
 import { generateUid, getTodayStr } from "../data";
-import { Plus, Trash2, Printer, MessageCircle, Search, FlaskConical, CheckCircle, FileText, X, Beaker, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Printer, MessageCircle, Search, FlaskConical, CheckCircle, FileText, X, Beaker, AlertTriangle, Eye } from "lucide-react";
 
 interface TabLaboProps {
   consultations?: Consultation[];
@@ -17,9 +17,12 @@ interface TabLaboProps {
   // sont gérés dans le même stock que la pharmacie, mais listés ici pour le
   // labo (lecture seule — la gestion des entrées/seuils reste en Pharmacie).
   medicaments?: Medicament[];
+  // Permet d'ajouter/retirer des réactifs et consommables directement depuis
+  // le module Laboratoire, sans devoir passer par la Pharmacie.
+  onUpdateMedicaments?: (meds: Medicament[]) => void;
 }
 
-export default function TabLabo({ examens, staff, onUpdateExamens, consultations = [], medicaments = [] }: TabLaboProps) {
+export default function TabLabo({ examens, staff, onUpdateExamens, consultations = [], medicaments = [], onUpdateMedicaments }: TabLaboProps) {
   // Load dynamic clinic profile from LocalStorage safely
   
   const [showUrgentAlert, setShowUrgentAlert] = useState(false);
@@ -106,7 +109,7 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
   const [examInterpretation, setExamInterpretation] = useState("");
 
     const [searchQuery, setSearchQuery] = useState("");
-  const [viewMode, setViewMode] = useState<"operations" | "historique" | "reactifs">("operations");
+  const [viewMode, setViewMode] = useState<"operations" | "historique" | "reactifs" | "procedures">("operations");
 
   // Liste des réactifs/consommables de laboratoire, triée par ordre alphabétique
   // (cahier des charges : les réactifs du labo doivent être listés au niveau du
@@ -116,6 +119,170 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
       .filter((m) => m.typeArticle === "Réactif de laboratoire")
       .sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
   }, [medicaments]);
+
+  // Normalise un nom pour regrouper les examens par patient de façon fiable
+  // (casse, accents, espaces) — même principe que le registre de consultation.
+  const normalizePatientName = (name: string): string =>
+    (name || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ");
+
+  // Regroupement du registre d'examens par patient (cahier des charges) : le
+  // nom d'un patient n'apparaît qu'une seule fois, avec la suite de tous ses
+  // examens de laboratoire.
+  const patientExamDossiers = React.useMemo(() => {
+    const map = new Map<string, {
+      key: string;
+      patient: string;
+      contact: string;
+      lastDate: string;
+      exams: ExamenLabo[];
+    }>();
+
+    [...examens]
+      .sort((a, b) => a.dateDemande.localeCompare(b.dateDemande))
+      .forEach((e) => {
+        const key = normalizePatientName(e.patient);
+        if (!key) return;
+        if (!map.has(key)) {
+          map.set(key, { key, patient: e.patient, contact: e.contact || "", lastDate: e.dateDemande, exams: [] });
+        }
+        const entry = map.get(key)!;
+        entry.exams.unshift(e);
+        if (e.dateDemande >= entry.lastDate) {
+          entry.lastDate = e.dateDemande;
+          entry.patient = e.patient;
+          entry.contact = e.contact || entry.contact;
+        }
+      });
+
+    return Array.from(map.values()).sort((a, b) => b.lastDate.localeCompare(a.lastDate));
+  }, [examens]);
+
+  const [viewingLaboPatientKey, setViewingLaboPatientKey] = useState<string | null>(null);
+  const viewingLaboPatientDossier = patientExamDossiers.find((p) => p.key === viewingLaboPatientKey) || null;
+
+  // Formulaire d'ajout de réactif/consommable directement depuis le Laboratoire
+  const [reactifNom, setReactifNom] = useState("");
+  const [reactifPresentation, setReactifPresentation] = useState("");
+  const [reactifStock, setReactifStock] = useState("");
+  const [reactifSeuil, setReactifSeuil] = useState("");
+  const [reactifFournisseur, setReactifFournisseur] = useState("");
+
+  const handleAddReactif = () => {
+    if (!onUpdateMedicaments) return;
+    if (!reactifNom.trim()) {
+      alert("Veuillez renseigner le nom du réactif ou consommable.");
+      return;
+    }
+    const stock = parseFloat(reactifStock) || 0;
+    const seuil = parseFloat(reactifSeuil) || 5;
+
+    const newReactif: Medicament = {
+      id: generateUid(),
+      nom: reactifNom.trim(),
+      forme: reactifPresentation.trim() || "—",
+      dosage: "",
+      categorie: "Réactif de laboratoire",
+      typeArticle: "Réactif de laboratoire",
+      stock,
+      seuil,
+      prixAchat: 0,
+      prixVente: 0,
+      peremption: "",
+      fournisseur: reactifFournisseur.trim(),
+      createdAt: new Date().toISOString()
+    };
+
+    onUpdateMedicaments([newReactif, ...medicaments]);
+    setReactifNom("");
+    setReactifPresentation("");
+    setReactifStock("");
+    setReactifSeuil("");
+    setReactifFournisseur("");
+  };
+
+  const handleDeleteReactif = (id: string) => {
+    if (!onUpdateMedicaments) return;
+    if (confirm("Supprimer ce réactif/consommable de laboratoire ?")) {
+      onUpdateMedicaments(medicaments.filter((m) => m.id !== id));
+    }
+  };
+
+  // Génération de procédure d'examen assistée par IA
+  const [procedureExamen, setProcedureExamen] = useState("");
+  const [procedureResult, setProcedureResult] = useState<string | null>(null);
+  const [isGeneratingProcedure, setIsGeneratingProcedure] = useState(false);
+  const [procedureError, setProcedureError] = useState<string | null>(null);
+
+  const handleGenerateProcedure = async () => {
+    if (!procedureExamen.trim()) {
+      alert("Veuillez saisir le nom de l'examen.");
+      return;
+    }
+    setIsGeneratingProcedure(true);
+    setProcedureError(null);
+    setProcedureResult(null);
+    try {
+      const response = await fetch("/api/gemini/lab-procedure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ examen: procedureExamen.trim() })
+      });
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("Impossible de lire la réponse du serveur.");
+      }
+      if (!response.ok || data.error) {
+        throw new Error(data.error || "Erreur serveur : vérifiez que la clé API Gemini est bien configurée.");
+      }
+      setProcedureResult(data.procedure || "");
+    } catch (error: any) {
+      console.error(error);
+      setProcedureError(error.message || "Erreur lors de la génération de la procédure.");
+    } finally {
+      setIsGeneratingProcedure(false);
+    }
+  };
+
+  const handlePrintProcedure = () => {
+    if (!procedureResult) return;
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Procédure — ${procedureExamen}</title>
+          <style>
+            body { font-family: Helvetica, Arial, sans-serif; padding: 30px; color: #1c1917; line-height: 1.6; }
+            h1 { color: #0d9488; font-size: 18px; }
+            h2 { color: #0d9488; font-size: 14px; margin-top: 20px; }
+            @media print { body { padding: 10px; } }
+          </style>
+        </head>
+        <body>
+          <h1>Procédure de laboratoire — ${procedureExamen}</h1>
+          <div>${procedureResult
+            .replace(/^## (.*)$/gm, "<h2>$1</h2>")
+            .replace(/\n/g, "<br/>")}</div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
+  const filteredPatientExamDossiers = patientExamDossiers.filter((p) => {
+    const q = historySearchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return p.patient.toLowerCase().includes(q) || (p.contact && p.contact.includes(q));
+  });
   const [historySearchQuery, setHistorySearchQuery] = useState("");
   const [viewingConsultation, setViewingConsultation] = useState<Consultation | null>(null);
   const [modalActiveTab, setModalActiveTab] = useState<"contexte" | "historique">("contexte");
@@ -408,6 +575,16 @@ ${examen.analyses || "Aucune analyse spécifiée"}
           }`}
         >
           Réactifs & Consommables
+        </button>
+        <button
+          onClick={() => setViewMode("procedures")}
+          className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+            viewMode === "procedures" 
+            ? "bg-white text-primary-800 shadow-xs" 
+            : "text-stone-500 hover:text-stone-700"
+          }`}
+        >
+          Procédures d'examens (IA)
         </button>
       </div>
 
@@ -843,67 +1020,115 @@ ${examen.analyses || "Aucune analyse spécifiée"}
               <thead>
                 <tr className="bg-stone-50 text-stone-600 font-semibold tracking-wider uppercase border-b border-stone-200 text-xs">
                   <th className="p-3">Patient</th>
-                  <th className="p-3">Date d'examen</th>
-                  <th className="p-3">Analyses demandées</th>
-                  <th className="p-3">Prescripteur</th>
-                  <th className="p-3">Résultat</th>
-                  <th className="p-3">Interprétation</th>
-                  <th className="p-3 text-center">Action</th>
+                  <th className="p-3">Dernière demande</th>
+                  <th className="p-3 text-center">Nombre d'examens</th>
+                  <th className="p-3 text-center">Dossier</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {examens
-                  .filter(e => e.patient.toLowerCase().includes(historySearchQuery.toLowerCase()))
-                  .sort((a, b) => new Date(b.dateDemande).getTime() - new Date(a.dateDemande).getTime())
-                  .map(e => (
-                    <tr key={e.id} className="hover:bg-stone-50/50">
-                      <td className="p-3 font-bold text-stone-800">
-                        {e.patient}
-                        {e.contact && <div className="text-xs text-stone-500 dark:text-stone-400 font-semibold mt-0.5">📞 {e.contact}</div>}
-                      </td>
-                      <td className="p-3 font-mono text-stone-500">{new Date(e.dateDemande).toLocaleDateString("fr-FR")}</td>
-                      <td className="p-3 font-bold text-stone-700">{e.analyses || e.examen} {e.priorite === "urgente" && <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-lg text-2xs font-bold bg-danger-100 text-danger-800 border border-danger-200 uppercase tracking-widest animate-pulse">Urgent</span>}</td>
-                      <td className="p-3 text-stone-600">{e.prescripteur}</td>
-                      <td className="p-3 font-mono text-xs whitespace-pre-wrap max-w-[200px]">
-                        {e.resultat ? e.resultat : <span className="italic text-stone-500 dark:text-stone-400">Non renseigné</span>}
-                      </td>
-                      <td className="p-3">
-                        {e.interpretation ? (
-                          <span className={`px-2 py-0.5 rounded-lg text-xs font-bold ${
-                            e.interpretation.toLowerCase().includes("normal") ? "bg-success-100 text-success-800" :
-                            e.interpretation.toLowerCase().includes("anormal") || e.interpretation.toLowerCase().includes("critique") ? "bg-danger-100 text-danger-800" :
-                            "bg-stone-100 text-stone-700"
-                          }`}>
-                            {e.interpretation}
-                          </span>
-                        ) : (
-                          <span className="italic text-stone-500 dark:text-stone-400 text-xs">Non renseigné</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-center">
-                        <div className="flex flex-col gap-1 items-center justify-center">
-                          <button
-                            type="button"
-                            onClick={() => handlePrintExam(e)}
-                            disabled={!e.resultat}
-                            className="bg-stone-50 hover:bg-stone-100 text-stone-700 text-xs font-bold px-2 py-1 rounded-lg border border-stone-200 transition-all flex items-center justify-center gap-1 w-full disabled:opacity-50 whitespace-nowrap"
-                          >
-                            <Printer className="w-3.5 h-3.5" /> Imprimer
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleShareWhatsAppLabo(e)}
-                            disabled={!e.resultat}
-                            className="bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#075E54] text-xs font-bold px-2 py-1 rounded-lg border border-[#25D366]/30 transition-all flex items-center justify-center gap-1 w-full disabled:opacity-50 whitespace-nowrap"
-                          >
-                            <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                {filteredPatientExamDossiers.map((p) => (
+                  <tr key={p.key} className="hover:bg-stone-50/50">
+                    <td className="p-3 font-bold text-stone-800">
+                      {p.patient}
+                      {p.contact && <div className="text-xs text-stone-500 dark:text-stone-400 font-semibold mt-0.5">📞 {p.contact}</div>}
+                    </td>
+                    <td className="p-3 font-mono text-stone-500">{new Date(p.lastDate).toLocaleDateString("fr-FR")}</td>
+                    <td className="p-3 text-center">
+                      <span className="inline-block bg-info-50 text-info-700 border border-info-200 rounded-lg px-2 py-1 text-xs font-bold">
+                        {p.exams.length}
+                      </span>
+                    </td>
+                    <td className="p-3 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setViewingLaboPatientKey(p.key)}
+                        className="bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold px-2 py-1 rounded-lg border border-primary-200 transition-all inline-flex items-center gap-1"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> Voir le dossier
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Dossier d'examens du patient : suite chronologique de tous ses examens de laboratoire */}
+      {viewingLaboPatientDossier && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 overflow-y-auto no-print">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <div className="p-5 border-b border-stone-100 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-base font-serif font-bold text-stone-900">{viewingLaboPatientDossier.patient}</h3>
+                <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
+                  {viewingLaboPatientDossier.contact ? `📞 ${viewingLaboPatientDossier.contact} — ` : ""}
+                  {viewingLaboPatientDossier.exams.length} examen{viewingLaboPatientDossier.exams.length > 1 ? "s" : ""} enregistré{viewingLaboPatientDossier.exams.length > 1 ? "s" : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingLaboPatientKey(null)}
+                className="p-2 hover:bg-stone-100 rounded-full transition-all"
+              >
+                <X className="w-5 h-5 text-stone-500" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-3">
+              {viewingLaboPatientDossier.exams.map((e) => (
+                <div key={e.id} className="border border-stone-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-mono text-stone-500 dark:text-stone-400">{new Date(e.dateDemande).toLocaleDateString("fr-FR")}</div>
+                    <div className="text-sm font-bold text-stone-800 truncate">
+                      {e.analyses || e.examen}
+                      {e.priorite === "urgente" && (
+                        <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-lg text-2xs font-bold bg-danger-100 text-danger-800 border border-danger-200 uppercase tracking-widest">Urgent</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-stone-500 mt-0.5">Prescripteur : {e.prescripteur}</div>
+                    {e.interpretation && (
+                      <span className={`inline-block mt-1 px-2 py-0.5 rounded-lg text-2xs font-bold ${
+                        e.interpretation.toLowerCase().includes("normal") ? "bg-success-100 text-success-800" :
+                        e.interpretation.toLowerCase().includes("anormal") || e.interpretation.toLowerCase().includes("critique") ? "bg-danger-100 text-danger-800" :
+                        "bg-stone-100 text-stone-700"
+                      }`}>
+                        {e.interpretation}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handlePrintExam(e)}
+                      disabled={!e.resultat}
+                      className="bg-stone-50 hover:bg-stone-100 text-stone-700 text-xs font-bold px-2 py-1 rounded-lg border border-stone-200 transition-all flex items-center justify-center gap-1 disabled:opacity-50 whitespace-nowrap"
+                    >
+                      <Printer className="w-3.5 h-3.5" /> Imprimer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleShareWhatsAppLabo(e)}
+                      disabled={!e.resultat}
+                      className="bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#075E54] text-xs font-bold px-2 py-1 rounded-lg border border-[#25D366]/30 transition-all flex items-center justify-center gap-1 disabled:opacity-50 whitespace-nowrap"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="p-4 border-t border-stone-100 bg-stone-50/50 rounded-b-2xl shrink-0 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setViewingLaboPatientKey(null)}
+                className="px-4 py-2 bg-stone-800 hover:bg-stone-900 text-white rounded-lg text-xs font-bold transition-all"
+              >
+                Fermer
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -921,12 +1146,62 @@ ${examen.analyses || "Aucune analyse spécifiée"}
           </div>
 
           <p className="text-xs text-stone-500 dark:text-stone-400 mb-4">
-            Cette liste est gérée depuis la Pharmacie (ajout, seuils d'alerte, entrées de stock). Elle est affichée ici pour référence rapide au laboratoire, triée par ordre alphabétique.
+            Cette liste est partagée avec la Pharmacie. Vous pouvez ajouter un réactif ou consommable directement ici, ou depuis l'onglet Pharmacie.
           </p>
+
+          {onUpdateMedicaments && (
+            <div className="bg-stone-50 border border-stone-200 rounded-xl p-4 mb-6">
+              <h4 className="text-xs uppercase font-bold tracking-wider text-stone-500 mb-3">Ajouter un réactif ou consommable</h4>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <input
+                  type="text"
+                  placeholder="Nom *"
+                  value={reactifNom}
+                  onChange={(e) => setReactifNom(e.target.value)}
+                  className="text-xs border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none"
+                />
+                <input
+                  type="text"
+                  placeholder="Présentation (ex: flacon 500ml)"
+                  value={reactifPresentation}
+                  onChange={(e) => setReactifPresentation(e.target.value)}
+                  className="text-xs border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none"
+                />
+                <input
+                  type="number"
+                  placeholder="Stock initial"
+                  value={reactifStock}
+                  onChange={(e) => setReactifStock(e.target.value)}
+                  className="text-xs border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none"
+                />
+                <input
+                  type="number"
+                  placeholder="Seuil d'alerte"
+                  value={reactifSeuil}
+                  onChange={(e) => setReactifSeuil(e.target.value)}
+                  className="text-xs border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none"
+                />
+                <input
+                  type="text"
+                  placeholder="Fournisseur"
+                  value={reactifFournisseur}
+                  onChange={(e) => setReactifFournisseur(e.target.value)}
+                  className="text-xs border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleAddReactif}
+                className="mt-3 bg-primary-600 hover:bg-primary-700 text-white text-xs font-bold px-4 py-2 rounded-lg transition-all inline-flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" /> Ajouter à la liste
+              </button>
+            </div>
+          )}
 
           {reactifsLabo.length === 0 ? (
             <p className="text-xs text-stone-500 dark:text-stone-400 py-6 text-center italic">
-              Aucun réactif ou consommable de laboratoire enregistré pour l'instant. Ajoutez-en depuis l'onglet Pharmacie en choisissant le type d'article "Réactif de laboratoire".
+              Aucun réactif ou consommable de laboratoire enregistré pour l'instant.
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -939,6 +1214,7 @@ ${examen.analyses || "Aucune analyse spécifiée"}
                     <th className="p-3 text-center">Seuil d'alerte</th>
                     <th className="p-3">Fournisseur</th>
                     <th className="p-3 text-center">Statut</th>
+                    <th className="p-3 text-center">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-stone-100">
@@ -962,11 +1238,80 @@ ${examen.analyses || "Aucune analyse spécifiée"}
                             </span>
                           )}
                         </td>
+                        <td className="p-3 text-center">
+                          {onUpdateMedicaments && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteReactif(m.id)}
+                              className="text-stone-300 hover:text-danger-600 transition-all p-1"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {viewMode === "procedures" && (
+        <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
+              <FlaskConical className="w-5 h-5 text-primary-700" />
+              Procédures d'examens (assistées par IA)
+            </h3>
+          </div>
+
+          <p className="text-xs text-stone-500 dark:text-stone-400 mb-4">
+            Saisissez le nom d'un examen pour obtenir une fiche de procédure standardisée : prélèvement, matériel/réactifs, étapes, valeurs de référence et précautions. Vérifiez toujours les valeurs de référence sur la notice du kit/réactif utilisé.
+          </p>
+
+          <div className="flex flex-col md:flex-row gap-3 mb-4">
+            <input
+              type="text"
+              placeholder="Ex: Goutte épaisse, NFS, Glycémie à jeun, Test de grossesse..."
+              value={procedureExamen}
+              onChange={(e) => setProcedureExamen(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleGenerateProcedure()}
+              className="flex-1 text-xs border border-stone-200 rounded-lg px-3 py-2.5 bg-stone-50 focus:bg-white focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleGenerateProcedure}
+              disabled={isGeneratingProcedure}
+              className="bg-primary-600 hover:bg-primary-700 disabled:opacity-60 text-white text-xs font-bold px-5 py-2.5 rounded-lg transition-all inline-flex items-center justify-center gap-1.5 whitespace-nowrap"
+            >
+              {isGeneratingProcedure ? "Génération en cours..." : "✨ Générer la procédure"}
+            </button>
+          </div>
+
+          {procedureError && (
+            <div className="bg-danger-50 border border-danger-200 rounded-lg p-3 text-xs text-danger-800 font-semibold mb-4">
+              {procedureError}
+            </div>
+          )}
+
+          {procedureResult && (
+            <div className="border border-stone-200 rounded-xl p-5 bg-stone-50/50">
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="text-sm font-bold text-stone-800">Procédure — {procedureExamen}</h4>
+                <button
+                  type="button"
+                  onClick={handlePrintProcedure}
+                  className="bg-success-50 hover:bg-success-100 text-success-700 text-xs font-bold px-3 py-1.5 rounded-lg border border-success-200 transition-all inline-flex items-center gap-1.5"
+                >
+                  <Printer className="w-3.5 h-3.5" /> Imprimer
+                </button>
+              </div>
+              <div className="text-xs text-stone-700 whitespace-pre-wrap leading-relaxed font-sans">
+                {procedureResult}
+              </div>
             </div>
           )}
         </div>

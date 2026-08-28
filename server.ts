@@ -6,6 +6,7 @@ import {
   generateComplianceReport,
   generateOptimizationReport,
   generateConsultationAssistant,
+  generateLabProcedure,
 } from "./api/_lib/geminiCore.js";
 
 // NOTE IMPORTANTE : ce serveur Express sert uniquement au développement local
@@ -51,6 +52,17 @@ app.post("/api/gemini/consultation-assistant", async (req, res) => {
   } catch (error: any) {
     console.error("Error in consultation assistant:", error);
     res.status(500).json({ error: error.message || "Erreur de l'assistant médical IA." });
+  }
+});
+
+// API endpoint for AI-assisted lab exam procedure generation
+app.post("/api/gemini/lab-procedure", async (req, res) => {
+  try {
+    const result = await generateLabProcedure(req.body);
+    res.json(result);
+  } catch (error: any) {
+    console.error("Error generating lab procedure:", error);
+    res.status(500).json({ error: error.message || "Erreur lors de la génération de la procédure." });
   }
 });
 

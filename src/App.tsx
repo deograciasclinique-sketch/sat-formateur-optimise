@@ -2105,6 +2105,7 @@ export default function App() {
               onUpdateExamens={handleUpdateLaboExamens}
               consultations={consultations}
               medicaments={medicaments}
+              onUpdateMedicaments={handleUpdateMedicaments}
             />
           )}
 
