@@ -113,20 +113,28 @@ export default function TabPharmacie({
 
     if (!isJson) {
       const lines = text.split(/\r?\n/);
+      let isFirstNonEmptyLine = true;
       lines.forEach((line) => {
         const trimmed = line.trim();
         if (!trimmed) return;
 
-        const lower = trimmed.toLowerCase();
-        if (
-          lower.includes("nom") ||
-          lower.includes("medicament") ||
-          lower.includes("dosage") ||
-          lower.includes("quantit") ||
-          lower.includes("qte") ||
-          lower.includes("stock")
-        ) {
-          return;
+        // Ce filtre ne doit s'appliquer qu'à la toute première ligne (l'en-tête
+        // du CSV, ex: "Nom,Dosage,..."). Le vérifier sur chaque ligne rejetait à
+        // tort toute ligne de produit dont une colonne contenait justement le mot
+        // "Medicament" (la colonne TypeArticle), par exemple.
+        if (isFirstNonEmptyLine) {
+          isFirstNonEmptyLine = false;
+          const lower = trimmed.toLowerCase();
+          if (
+            lower.includes("nom") ||
+            lower.includes("medicament") ||
+            lower.includes("dosage") ||
+            lower.includes("quantit") ||
+            lower.includes("qte") ||
+            lower.includes("stock")
+          ) {
+            return;
+          }
         }
 
         const parts = trimmed.split(/[,;\t]/).map((p) => p.trim());
