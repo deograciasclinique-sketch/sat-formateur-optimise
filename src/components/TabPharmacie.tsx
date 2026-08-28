@@ -645,6 +645,32 @@ export default function TabPharmacie({
     alert("L'inventaire a été vidé. Vous pouvez maintenant enregistrer de nouveaux produits.");
   };
 
+  // Vider le journal des mouvements de stock (entrées/sorties historisées).
+  // N'affecte pas le stock actuel des produits, seulement l'historique affiché.
+  const handleClearMouvements = () => {
+    if (mouvements.length === 0) {
+      alert("Le journal des mouvements est déjà vide.");
+      return;
+    }
+    const firstConfirm = confirm(
+      `⚠️ Vous êtes sur le point de supprimer DÉFINITIVEMENT les ${mouvements.length} mouvement(s) de stock enregistrés dans le journal (entrées et sorties).\n\nCela n'affecte pas le stock actuel des produits, seulement l'historique. Cette action est irréversible. Voulez-vous continuer ?`
+    );
+    if (!firstConfirm) return;
+
+    const secondConfirm = confirm(
+      `Dernière confirmation : vider le journal des mouvements (${mouvements.length} entrée(s)) ?`
+    );
+    if (!secondConfirm) return;
+
+    onUpdateMouvements([]);
+    logActivity(
+      "Vidage du journal des mouvements de stock (Pharmacie)",
+      "suppression",
+      `Suppression de la totalité des ${mouvements.length} mouvement(s) de l'historique de stock.`
+    );
+    alert("Le journal des mouvements a été vidé.");
+  };
+
   const handleExportStockPDF = () => {
     const doc = new jsPDF({
       orientation: "portrait",
@@ -2397,10 +2423,21 @@ export default function TabPharmacie({
 
       {/* Movements Log Card */}
       <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs">
-        <h3 className="text-base font-serif font-bold text-stone-900 border-b border-stone-100 pb-3 mb-4 flex items-center gap-2">
-          <FileText className="w-5 h-5 text-primary-700" />
-          Journal des Mouvements de Stock
-        </h3>
+        <div className="flex items-center justify-between border-b border-stone-100 pb-3 mb-4">
+          <h3 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
+            <FileText className="w-5 h-5 text-primary-700" />
+            Journal des Mouvements de Stock
+          </h3>
+          <button
+            type="button"
+            onClick={handleClearMouvements}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-danger-50 text-danger-600 font-bold rounded-lg text-xs border border-danger-200 shadow-sm transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap"
+            title="Supprimer tout l'historique des mouvements (action irréversible)"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Vider le journal</span>
+          </button>
+        </div>
         {mouvements.length === 0 ? (
           <p className="text-xs text-stone-500 dark:text-stone-400 py-6 text-center italic">Aucun mouvement de stock enregistré.</p>
         ) : (
