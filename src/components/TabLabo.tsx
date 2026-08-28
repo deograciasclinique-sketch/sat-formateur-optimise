@@ -109,6 +109,7 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
   const [examInterpretation, setExamInterpretation] = useState("");
 
     const [searchQuery, setSearchQuery] = useState("");
+  const [historySearchQuery, setHistorySearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"operations" | "historique" | "reactifs" | "procedures">("operations");
 
   // Liste des réactifs/consommables de laboratoire, triée par ordre alphabétique
@@ -283,7 +284,6 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
     if (!q) return true;
     return p.patient.toLowerCase().includes(q) || (p.contact && p.contact.includes(q));
   });
-  const [historySearchQuery, setHistorySearchQuery] = useState("");
   const [viewingConsultation, setViewingConsultation] = useState<Consultation | null>(null);
   const [modalActiveTab, setModalActiveTab] = useState<"contexte" | "historique">("contexte");
   const [viewingPatient, setViewingPatient] = useState<string>("");
