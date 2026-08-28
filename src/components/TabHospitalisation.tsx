@@ -634,6 +634,123 @@ export default function TabHospitalisation({
     doc.save(`dossier_hospitalisation_${hosp.patient.toLowerCase().replace(/\s+/g, "_")}.pdf`);
   };
 
+  // Certificat d'hospitalisation ou de mise en observation, à délivrer au
+  // patient ou à sa famille (ex : justificatif pour l'employeur, l'école, etc.)
+  const handleDownloadCertificat = (hosp: Hospitalisation) => {
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const margin = 15;
+    const pageWidth = 210;
+    const contentWidth = pageWidth - margin * 2;
+
+    const primaryColor = [13, 148, 136];
+    const darkGray = [100, 116, 139];
+    const secondaryColor = [30, 41, 59];
+
+    const doctorName = staff.find((s) => s.id === hosp.medecin)?.nom || "Médecin Traitant";
+    const isObservation = hosp.typeAdmission === "Mise en Observation (72h)";
+    const titre = isObservation ? "CERTIFICAT DE MISE EN OBSERVATION" : "CERTIFICAT D'HOSPITALISATION";
+    const estToujoursPresent = hosp.statut === "En cours";
+
+    let y = 20;
+
+    // En-tête établissement
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.text(profile.name || "CABINET MÉDICAL DEO-GRACIAS", pageWidth / 2, y, { align: "center" });
+    y += 5;
+
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(darkGray[0], darkGray[1], darkGray[2]);
+    doc.text(`${profile.address || ""} — Tél: ${profile.phone || ""}`, pageWidth / 2, y, { align: "center" });
+    y += 4;
+
+    doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.setLineWidth(0.8);
+    doc.line(margin, y, margin + contentWidth, y);
+    doc.setLineWidth(0.2);
+    doc.line(margin, y + 1, margin + contentWidth, y + 1);
+    y += 14;
+
+    // Titre du certificat
+    doc.setFillColor(236, 253, 245);
+    doc.rect(margin, y, contentWidth, 12, "F");
+    doc.setDrawColor(209, 250, 229);
+    doc.setLineWidth(0.3);
+    doc.rect(margin, y, contentWidth, 12, "S");
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.text(titre, pageWidth / 2, y + 8, { align: "center" });
+    y += 24;
+
+    // Corps du texte
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+
+    const dateAdmissionFr = new Date(hosp.dateAdmission).toLocaleDateString("fr-FR");
+    const dateSortieFr = hosp.dateSortie ? new Date(hosp.dateSortie).toLocaleDateString("fr-FR") : "";
+    const dateAujourdhui = new Date().toLocaleDateString("fr-FR");
+
+    let corps: string;
+    if (isObservation) {
+      corps = estToujoursPresent
+        ? `Je soussigné(e), Docteur ${doctorName}, certifie que le patient ${hosp.patient} a été admis(e) en mise en observation dans notre établissement le ${dateAdmissionFr} à ${hosp.heureAdmission}, pour le motif suivant : ${hosp.motif}.\n\nÀ ce jour, le patient demeure sous surveillance médicale au sein de notre service.`
+        : `Je soussigné(e), Docteur ${doctorName}, certifie que le patient ${hosp.patient} a été admis(e) en mise en observation dans notre établissement du ${dateAdmissionFr} à ${hosp.heureAdmission} au ${dateSortieFr}, pour le motif suivant : ${hosp.motif}.`;
+    } else {
+      corps = estToujoursPresent
+        ? `Je soussigné(e), Docteur ${doctorName}, certifie que le patient ${hosp.patient} est actuellement hospitalisé(e) dans notre établissement depuis le ${dateAdmissionFr} à ${hosp.heureAdmission}, pour le motif suivant : ${hosp.motif}.\n\nÀ ce jour, le patient demeure hospitalisé(e) au sein de notre service.`
+        : `Je soussigné(e), Docteur ${doctorName}, certifie que le patient ${hosp.patient} a été hospitalisé(e) dans notre établissement du ${dateAdmissionFr} à ${hosp.heureAdmission} au ${dateSortieFr}, pour le motif suivant : ${hosp.motif}.`;
+    }
+
+    const corpsLines = doc.splitTextToSize(corps, contentWidth);
+    doc.text(corpsLines, margin, y, { lineHeightFactor: 1.6 });
+    y += corpsLines.length * 6.5 + 10;
+
+    doc.setFont("Helvetica", "italic");
+    doc.setFontSize(10);
+    const mentionLines = doc.splitTextToSize(
+      "Le présent certificat est délivré à l'intéressé(e) pour servir et valoir ce que de droit.",
+      contentWidth
+    );
+    doc.text(mentionLines, margin, y);
+    y += mentionLines.length * 6 + 16;
+
+    // Date et lieu de délivrance
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+    doc.text(`Fait à Bobo-Dioulasso, le ${dateAujourdhui}`, margin, y);
+    y += 20;
+
+    // Signature
+    const sigX = margin + contentWidth - 75;
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+    doc.text("Le Médecin", sigX, y);
+
+    doc.setFont("Helvetica", "oblique");
+    doc.setFontSize(8.5);
+    doc.setTextColor(darkGray[0], darkGray[1], darkGray[2]);
+    doc.text(doctorName, sigX, y + 4.5);
+
+    doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.setLineWidth(0.3);
+    doc.setFillColor(240, 253, 250);
+    doc.rect(sigX, y + 7.5, 60, 14, "F");
+    doc.rect(sigX, y + 7.5, 60, 14, "S");
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+    doc.text(profile.stampText || "CACHET & SIGNATURE", sigX + 2, y + 16);
+
+    const typeFichier = isObservation ? "certificat_observation" : "certificat_hospitalisation";
+    doc.save(`${typeFichier}_${hosp.patient.toLowerCase().replace(/\s+/g, "_")}.pdf`);
+  };
+
   // Calculations
   const enCours = hospitalisations.filter((h) => h.statut === "En cours");
   const sorties = hospitalisations.filter((h) => h.statut !== "En cours");
@@ -1079,14 +1196,25 @@ export default function TabHospitalisation({
                         {h.motif}
                       </td>
                       <td className="p-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedHospitalisation(h)}
-                          className="bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold px-2 py-1 rounded-lg border border-primary-200 transition-all inline-flex items-center gap-1"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          Dossier
-                        </button>
+                        <div className="flex flex-col gap-1 items-center">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedHospitalisation(h)}
+                            className="bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold px-2 py-1 rounded-lg border border-primary-200 transition-all inline-flex items-center gap-1 w-full justify-center"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            Dossier
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadCertificat(h)}
+                            title={h.typeAdmission === "Mise en Observation (72h)" ? "Certificat de mise en observation" : "Certificat d'hospitalisation"}
+                            className="bg-success-50 hover:bg-success-100 text-success-700 text-xs font-bold px-2 py-1 rounded-lg border border-success-200 transition-all inline-flex items-center gap-1 w-full justify-center"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            Certificat
+                          </button>
+                        </div>
                       </td>
                       <td className="p-3 text-center">
                         <button
@@ -1468,6 +1596,14 @@ export default function TabHospitalisation({
                 >
                   <Download className="w-4 h-4" />
                   Télécharger le PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadCertificat(selectedHospitalisation)}
+                  className="bg-info-600 hover:bg-info-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                >
+                  <FileText className="w-4 h-4" />
+                  {selectedHospitalisation.typeAdmission === "Mise en Observation (72h)" ? "Certificat d'observation" : "Certificat d'hospitalisation"}
                 </button>
                 <button
                   type="button"

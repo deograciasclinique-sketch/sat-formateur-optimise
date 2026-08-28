@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { jsPDF } from "jspdf";
 import { logActivity } from "../lib/activityLogger";
-import { Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock } from "../types";
+import { Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff} from "lucide-react";
 import CameraCapture from "./CameraCapture";
@@ -35,6 +35,9 @@ interface TabConsultationProps {
   onUpdateMedicaments?: (meds: Medicament[]) => void;
   mouvements?: MouvementStock[];
   onUpdateMouvements?: (movs: MouvementStock[]) => void;
+  // Registre par patient (regroupement du dossier) : documents scannés et
+  // examens de laboratoire liés à chaque patient, affichés dans son dossier.
+  documents?: DocumentArchive[];
 }
 
 export default function TabConsultation({
@@ -56,6 +59,7 @@ export default function TabConsultation({
   onUpdateMedicaments,
   mouvements = [],
   onUpdateMouvements,
+  documents = [],
 }: TabConsultationProps) {
   // Load dynamic clinic profile from LocalStorage safely
   const profile = (() => {
@@ -473,6 +477,66 @@ export default function TabConsultation({
   };
 
   const [similarPatientSuggestion, setSimilarPatientSuggestion] = useState<Consultation | null>(null);
+
+  // Regroupement du registre par patient (cahier des charges) : le nom d'un
+  // patient n'apparaît qu'une seule fois dans le registre, avec la suite
+  // chronologique de son dossier (consultations, examens labo, documents scannés).
+  const patientDossiers = useMemo(() => {
+    const map = new Map<string, {
+      key: string;
+      patient: string;
+      contact: string;
+      age: number;
+      sexe: string;
+      lastDate: string;
+      consultations: Consultation[];
+      labExams: ExamenLabo[];
+      scannedDocs: DocumentArchive[];
+    }>();
+
+    [...consultations]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .forEach((c) => {
+        const key = normalizePatientName(c.patient);
+        if (!key) return;
+        if (!map.has(key)) {
+          map.set(key, {
+            key,
+            patient: c.patient,
+            contact: c.contact || "",
+            age: c.age,
+            sexe: c.sexe,
+            lastDate: c.date,
+            consultations: [],
+            labExams: [],
+            scannedDocs: []
+          });
+        }
+        const entry = map.get(key)!;
+        entry.consultations.unshift(c); // le plus récent en premier au final (car on itère du plus ancien au plus récent)
+        // Toujours garder l'identité la plus récente affichée
+        if (c.date >= entry.lastDate) {
+          entry.lastDate = c.date;
+          entry.patient = c.patient;
+          entry.contact = c.contact || entry.contact;
+          entry.age = c.age;
+          entry.sexe = c.sexe;
+        }
+      });
+
+    // Rattacher les examens de laboratoire et documents scannés au bon patient
+    map.forEach((entry) => {
+      entry.labExams = laboExamens
+        ? laboExamens.filter((e) => normalizePatientName(e.patient) === entry.key)
+        : [];
+      entry.scannedDocs = documents.filter((d) => normalizePatientName(d.patient) === entry.key);
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.lastDate.localeCompare(a.lastDate));
+  }, [consultations, laboExamens, documents]);
+
+  const [viewingPatientKey, setViewingPatientKey] = useState<string | null>(null);
+  const viewingPatientDossier = patientDossiers.find((p) => p.key === viewingPatientKey) || null;
 
   const handleContinuerDossier = (c: Consultation) => {
     setConsPatient(c.patient);
@@ -1211,15 +1275,15 @@ export default function TabConsultation({
   ).size;
 
   const effectiveQuery = filterPatientQuery || searchQuery;
-  const filteredConsultationsList = consultations
-    .filter((c) => {
-      const eq = effectiveQuery.toLowerCase().trim();
-      return c.patient.toLowerCase().includes(eq) || 
-             c.diagnostic.toLowerCase().includes(eq) || 
-             c.id.toLowerCase().includes(eq) ||
-             (c.contact && c.contact.includes(eq));
-    })
-    .sort((a, b) => b.date.localeCompare(a.date));
+  const filteredPatientDossiers = patientDossiers.filter((p) => {
+    const eq = effectiveQuery.toLowerCase().trim();
+    if (!eq) return true;
+    if (p.patient.toLowerCase().includes(eq)) return true;
+    if (p.contact && p.contact.includes(eq)) return true;
+    return p.consultations.some((c) =>
+      c.diagnostic.toLowerCase().includes(eq) || c.id.toLowerCase().includes(eq)
+    );
+  });
 
   return (
     <div className="space-y-6">
@@ -2227,175 +2291,213 @@ export default function TabConsultation({
               <div key={i} className="animate-pulse bg-stone-100 dark:bg-stone-800 rounded-xl p-4 h-16 border border-stone-200 dark:border-stone-700"></div>
             ))}
           </div>
-        ) : filteredConsultationsList.length === 0 ? (
+        ) : filteredPatientDossiers.length === 0 ? (
           <p className="text-xs text-stone-500 dark:text-stone-400 py-6 text-center italic">Aucun dossier clinique enregistré.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-stone-50 text-stone-600 font-semibold tracking-wider uppercase border-b border-stone-200 text-xs">
-                  <th className="p-3">Date Examen</th>
                   <th className="p-3">Patient</th>
                   <th className="p-3 text-center">Âge / Sexe</th>
-                  <th className="p-3">Constantes vitales</th>
-                  <th className="p-3">Plaintes / Symptômes</th>
-                  <th className="p-3">Examen clinique</th>
-                  <th className="p-3">Diagnostic posé</th>
-                  <th className="p-3">Laboratoire</th>
-                  <th className="p-3">Ordonnance rédigée</th>
-                  <th className="p-3 text-center">Fiche / Dossier</th>
-                  <th className="p-3 text-center">Billet</th>
-                  <th className="p-3 text-center">Effacer</th>
+                  <th className="p-3">Dernière visite</th>
+                  <th className="p-3 text-center">Consultations</th>
+                  <th className="p-3 text-center">Examens labo</th>
+                  <th className="p-3 text-center">Documents scannés</th>
+                  <th className="p-3 text-center">Dossier</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-100">
-                {filteredConsultationsList.map((c) => {
-                  const mName = staff.find((s) => s.id === c.medecinId)?.nom || "Généraliste";
-                  const vit = c.vitals;
-
-                  return (
-                    <tr key={c.id} className="hover:bg-stone-50/50">
-                      <td className="p-3 font-mono text-stone-500 dark:text-stone-400">{new Date(c.date).toLocaleDateString("fr-FR")}</td>
-                      <td className="p-3 font-bold text-stone-800">
-                        <div>{c.patient}</div>
-                        {c.contact && <div className="text-xs text-stone-500 dark:text-stone-400 font-semibold mt-0.5">📞 {c.contact}</div>}
-                        {c.agentCode && (
-                          <div className="mt-1">
-                            <span className="inline-block text-[8px] font-mono px-1.5 py-0.5 bg-primary-50 text-primary-700 rounded-lg border border-primary-100 font-bold uppercase tracking-wider">
-                              Agent : {c.agentCode}
-                            </span>
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-3 text-center font-semibold text-stone-600">
-                        {c.age} ans / {c.sexe}
-                      </td>
-                      <td className="p-3">
-                        <div className="text-xs text-stone-500 font-mono font-semibold space-y-0.5">
-                          {vit.temperature ? <div>T°C: <strong className="text-danger-600">{vit.temperature} °C</strong></div> : null}
-                          {vit.poids ? <div>Poids: <strong>{vit.poids} kg</strong></div> : null}
-                          {vit.taille ? <div>Taille: <strong>{vit.taille} cm</strong></div> : null}
-                          {vit.imc ? (
-                            <div>
-                              IMC: <strong className={vit.imc < 18.5 ? "text-warning-600 font-bold" : vit.imc < 25 ? "text-success-600 font-bold" : vit.imc < 30 ? "text-orange-500 font-bold" : "text-danger-600 font-bold"}>
-                                {vit.imc.toFixed(1)}
-                              </strong>
-                            </div>
-                          ) : null}
-                          {vit.tensionArterielle ? <div>TA: <strong>{vit.tensionArterielle}</strong></div> : null}
-                          {vit.pouls ? <div>Pouls: <strong>{vit.pouls} bpm</strong></div> : null}
-                        </div>
-                      </td>
-                      <td className="p-3 text-stone-500 italic max-w-[150px] truncate" title={c.plainte}>
-                        {c.plainte}
-                      </td>
-                      <td className="p-3 text-stone-500 max-w-[150px] truncate" title={c.examenPhysique}>
-                        {c.examenPhysique || "—"}
-                      </td>
-                      <td className="p-3 font-bold text-primary-800 font-sans">{c.diagnostic}</td>
-                      <td className="p-3">
-                        {(() => {
-                          const exams = laboExamens.filter(e => 
-                            e.patient && c.patient && 
-                            e.patient.toLowerCase().trim() === c.patient.toLowerCase().trim()
-                          );
-                          if (exams.length === 0) return <span className="text-stone-500 dark:text-stone-400 italic text-xs">Aucun</span>;
-                          
-                          return (
-                            <div className="flex flex-col gap-1">
-                              {exams.slice(0, 2).map(exam => {
-                                let badgeColor = "bg-stone-100 text-stone-600 border-stone-200";
-                                if (exam.statut === "En attente") badgeColor = "bg-warning-50 text-warning-600 border-warning-200";
-                                if (exam.statut === "Prélevé") badgeColor = "bg-sky-50 text-sky-600 border-sky-200";
-                                if (exam.statut === "En cours d'analyse") badgeColor = "bg-info-50 text-info-600 border-info-200";
-                                if (exam.statut === "Résultat disponible" || exam.statut === "Prêt" || exam.statut === "Validé") badgeColor = "bg-success-50 text-success-600 border-success-200";
-                                
-                                return (
-                                  <div key={exam.id} className="flex flex-col gap-0.5">
-                                    <span className="text-2xs font-semibold text-stone-700 truncate max-w-[100px]" title={exam.analyses || exam.examen}>{exam.analyses || exam.examen}</span>
-                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-lg border inline-block w-fit ${badgeColor}`}>
-                                      {exam.statut}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                              {exams.length > 2 && <span className="text-[8px] text-stone-500 font-bold">+{exams.length - 2} autres...</span>}
-                            </div>
-                          );
-                        })()}
-                      </td>
-                      <td className="p-3">
-                        {(!c.ordonnance || c.ordonnance.length === 0) ? (
-                          <span className="text-stone-500 dark:text-stone-400 italic">Aucun</span>
-                        ) : (
-                          <div className="text-xs font-semibold text-stone-700 font-sans list-decimal">
-                            {c.ordonnance.map((o) => (
-                              <div key={o.id} className="truncate max-w-[150px]">
-                                • <strong>{o.medicamentNom}</strong> ({o.posologie})
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-3 text-center">
-                        <div className="flex flex-col gap-1 items-center">
-                          <button
-                            type="button"
-                            onClick={() => { setSelectedConsultation(c); setIsEditingDetail(false); }}
-                            className="bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold px-2 py-1 rounded-lg border border-primary-200 transition-all inline-flex items-center gap-1 w-full justify-center"
-                          >
-                            <Eye className="w-3 h-3" /> Dossier
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleContinuerDossier(c)}
-                            className="bg-info-50 hover:bg-info-100 text-info-700 text-xs font-bold px-2 py-1 rounded-lg border border-info-200 transition-all inline-flex items-center gap-1 w-full justify-center"
-                            title="Nouveau dossier pour ce patient"
-                          >
-                            <Plus className="w-3 h-3" /> Nouveau RDV
-                          </button>
-                        </div>
-                      </td>
-                      <td className="p-3 text-center">
-                        {(c.ordonnance && c.ordonnance.length > 0) ? (
-                          <div className="flex flex-col gap-1 items-center">
-                            <button
-                              type="button"
-                              onClick={() => handlePrintPrescriptionOnly(c)}
-                              className="bg-success-50 hover:bg-success-100 text-success-700 text-xs font-bold px-2 py-1 rounded-lg border border-success-200 transition-all inline-flex items-center gap-1 w-full justify-center"
-                            >
-                              <Printer className="w-3 h-3" /> Ordonnance
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleShareWhatsAppOrdonnance(c)}
-                              className="bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#075E54] text-xs font-bold px-2 py-1 rounded-lg border border-[#25D366]/30 transition-all inline-flex items-center gap-1 w-full justify-center"
-                              title="Envoyer par WhatsApp"
-                            >
-                              <MessageCircle className="w-3 h-3" /> WhatsApp
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-stone-500 dark:text-stone-400 font-bold text-xs uppercase">Aucun</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-center">
+                {filteredPatientDossiers.map((p) => (
+                  <tr key={p.key} className="hover:bg-stone-50/50">
+                    <td className="p-3 font-bold text-stone-800">
+                      <div>{p.patient}</div>
+                      {p.contact && <div className="text-xs text-stone-500 dark:text-stone-400 font-semibold mt-0.5">📞 {p.contact}</div>}
+                    </td>
+                    <td className="p-3 text-center font-semibold text-stone-600">
+                      {p.age} ans / {p.sexe}
+                    </td>
+                    <td className="p-3 font-mono text-stone-500 dark:text-stone-400">
+                      {new Date(p.lastDate).toLocaleDateString("fr-FR")}
+                    </td>
+                    <td className="p-3 text-center">
+                      <span className="inline-block bg-primary-50 text-primary-700 border border-primary-200 rounded-lg px-2 py-1 text-xs font-bold">
+                        {p.consultations.length}
+                      </span>
+                    </td>
+                    <td className="p-3 text-center">
+                      <span className="inline-block bg-info-50 text-info-700 border border-info-200 rounded-lg px-2 py-1 text-xs font-bold">
+                        {p.labExams.length}
+                      </span>
+                    </td>
+                    <td className="p-3 text-center">
+                      <span className="inline-block bg-stone-100 text-stone-700 border border-stone-200 rounded-lg px-2 py-1 text-xs font-bold">
+                        {p.scannedDocs.length}
+                      </span>
+                    </td>
+                    <td className="p-3 text-center">
+                      <div className="flex flex-col gap-1 items-center">
                         <button
                           type="button"
-                          onClick={() => handleDeleteConsult(c.id)}
-                          className="text-stone-300 hover:text-danger-600 transition-all p-1"
+                          onClick={() => setViewingPatientKey(p.key)}
+                          className="bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold px-2 py-1 rounded-lg border border-primary-200 transition-all inline-flex items-center gap-1 w-full justify-center"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Eye className="w-3 h-3" /> Voir le dossier
                         </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        <button
+                          type="button"
+                          onClick={() => handleContinuerDossier(p.consultations[0])}
+                          className="bg-info-50 hover:bg-info-100 text-info-700 text-xs font-bold px-2 py-1 rounded-lg border border-info-200 transition-all inline-flex items-center gap-1 w-full justify-center"
+                          title="Nouvelle consultation pour ce patient"
+                        >
+                          <Plus className="w-3 h-3" /> Nouvelle visite
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {/* Dossier Patient Modal : suite chronologique des consultations, examens labo et documents scannés */}
+      {viewingPatientDossier && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 overflow-y-auto no-print">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <div className="p-5 border-b border-stone-100 flex items-center justify-between shrink-0">
+              <div>
+                <h3 className="text-base font-serif font-bold text-stone-900">{viewingPatientDossier.patient}</h3>
+                <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
+                  {viewingPatientDossier.age} ans / {viewingPatientDossier.sexe}
+                  {viewingPatientDossier.contact ? ` — 📞 ${viewingPatientDossier.contact}` : ""}
+                  {" — "}{viewingPatientDossier.consultations.length} consultation{viewingPatientDossier.consultations.length > 1 ? "s" : ""} enregistrée{viewingPatientDossier.consultations.length > 1 ? "s" : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingPatientKey(null)}
+                className="p-2 hover:bg-stone-100 rounded-full transition-all"
+              >
+                <X className="w-5 h-5 text-stone-500" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-6">
+              {/* Historique des consultations */}
+              <div>
+                <h4 className="text-xs uppercase font-bold tracking-wider text-stone-500 mb-2 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4" /> Historique des consultations
+                </h4>
+                <div className="space-y-2">
+                  {viewingPatientDossier.consultations.map((c) => (
+                    <div key={c.id} className="border border-stone-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-xs font-mono text-stone-500 dark:text-stone-400">{new Date(c.date).toLocaleDateString("fr-FR")}</div>
+                        <div className="text-sm font-bold text-primary-800 truncate">{c.diagnostic}</div>
+                        <div className="text-xs text-stone-500 truncate">{c.plainte}</div>
+                        {c.decision && c.decision !== "Retour à domicile" && (
+                          <span className="inline-block mt-1 text-2xs font-bold px-2 py-0.5 rounded-lg bg-warning-50 text-warning-700 border border-warning-200">
+                            {c.decision}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => { setSelectedConsultation(c); setIsEditingDetail(false); }}
+                          className="bg-primary-50 hover:bg-primary-100 text-primary-700 text-xs font-bold px-2 py-1 rounded-lg border border-primary-200 transition-all inline-flex items-center gap-1 justify-center whitespace-nowrap"
+                        >
+                          <Eye className="w-3 h-3" /> Fiche
+                        </button>
+                        {c.ordonnance && c.ordonnance.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handlePrintPrescriptionOnly(c)}
+                            className="bg-success-50 hover:bg-success-100 text-success-700 text-xs font-bold px-2 py-1 rounded-lg border border-success-200 transition-all inline-flex items-center gap-1 justify-center whitespace-nowrap"
+                          >
+                            <Printer className="w-3 h-3" /> Ordonnance
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteConsult(c.id)}
+                          className="text-stone-300 hover:text-danger-600 transition-all p-1 self-center"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Examens de laboratoire */}
+              <div>
+                <h4 className="text-xs uppercase font-bold tracking-wider text-stone-500 mb-2 flex items-center gap-1.5">
+                  <FlaskConical className="w-4 h-4" /> Examens de laboratoire
+                </h4>
+                {viewingPatientDossier.labExams.length === 0 ? (
+                  <p className="text-xs text-stone-500 dark:text-stone-400 italic">Aucun examen de laboratoire enregistré pour ce patient.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {viewingPatientDossier.labExams.map((e) => (
+                      <div key={e.id} className="border border-stone-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-xs font-mono text-stone-500 dark:text-stone-400">{new Date(e.dateDemande).toLocaleDateString("fr-FR")}</div>
+                          <div className="text-sm font-bold text-stone-800 truncate">{e.analyses || e.examen}</div>
+                        </div>
+                        <span className="text-2xs font-bold px-2 py-1 rounded-lg bg-stone-100 text-stone-700 border border-stone-200 shrink-0 whitespace-nowrap">
+                          {e.statut}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Documents scannés */}
+              <div>
+                <h4 className="text-xs uppercase font-bold tracking-wider text-stone-500 mb-2 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4" /> Documents scannés
+                </h4>
+                {viewingPatientDossier.scannedDocs.length === 0 ? (
+                  <p className="text-xs text-stone-500 dark:text-stone-400 italic">Aucun document scanné pour ce patient. Ajoutez-en depuis le Coffre-fort Documents.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {viewingPatientDossier.scannedDocs.map((d) => (
+                      <a
+                        key={d.id}
+                        href={`data:${d.fileType || "application/octet-stream"};base64,${d.base64Data}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="border border-stone-200 rounded-xl p-3 hover:bg-stone-50 transition-all flex items-center gap-2"
+                      >
+                        <FileText className="w-4 h-4 text-primary-600 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-stone-800 truncate">{d.titre}</div>
+                          <div className="text-2xs text-stone-500 dark:text-stone-400">{d.categorie} — {new Date(d.dateUpload).toLocaleDateString("fr-FR")}</div>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-stone-100 bg-stone-50/50 rounded-b-2xl shrink-0 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setViewingPatientKey(null)}
+                className="px-4 py-2 bg-stone-800 hover:bg-stone-900 text-white rounded-lg text-xs font-bold transition-all"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Consultation Detail Modal (Printable) */}
       {selectedConsultation && (
