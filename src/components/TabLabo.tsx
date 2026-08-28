@@ -4,9 +4,9 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { ExamenLabo, Staff, Consultation, Medicament } from "../types";
+import { ExamenLabo, Staff, Consultation, Medicament, MouvementStock } from "../types";
 import { generateUid, getTodayStr } from "../data";
-import { Plus, Trash2, Printer, MessageCircle, Search, FlaskConical, CheckCircle, FileText, X, Beaker, AlertTriangle, Eye } from "lucide-react";
+import { Plus, Trash2, Printer, MessageCircle, Search, FlaskConical, CheckCircle, FileText, X, Beaker, AlertTriangle, Eye, Upload, Download } from "lucide-react";
 
 interface TabLaboProps {
   consultations?: Consultation[];
@@ -20,9 +20,13 @@ interface TabLaboProps {
   // Permet d'ajouter/retirer des réactifs et consommables directement depuis
   // le module Laboratoire, sans devoir passer par la Pharmacie.
   onUpdateMedicaments?: (meds: Medicament[]) => void;
+  // Historique des mouvements de stock, pour tracer les entrées de réactifs
+  // importées en masse depuis le laboratoire (mêmes mouvements que la pharmacie).
+  mouvements?: MouvementStock[];
+  onUpdateMouvements?: (movs: MouvementStock[]) => void;
 }
 
-export default function TabLabo({ examens, staff, onUpdateExamens, consultations = [], medicaments = [], onUpdateMedicaments }: TabLaboProps) {
+export default function TabLabo({ examens, staff, onUpdateExamens, consultations = [], medicaments = [], onUpdateMedicaments, mouvements = [], onUpdateMouvements }: TabLaboProps) {
   // Load dynamic clinic profile from LocalStorage safely
   
   const [showUrgentAlert, setShowUrgentAlert] = useState(false);
@@ -211,6 +215,117 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
     if (confirm("Supprimer ce réactif/consommable de laboratoire ?")) {
       onUpdateMedicaments(medicaments.filter((m) => m.id !== id));
     }
+  };
+
+  // Import d'un fichier CSV de réactifs/consommables de laboratoire, directement
+  // depuis le module Laboratoire. Les articles sont comptabilisés dans le même
+  // stock général que la Pharmacie (typeArticle "Réactif de laboratoire"),
+  // avec génération des mouvements de stock correspondants.
+  const [isImportingReactifs, setIsImportingReactifs] = useState(false);
+  const [importReactifsLog, setImportReactifsLog] = useState<{ text: string; status: "success" | "warning" }[] | null>(null);
+
+  const handleImportReactifsFile = (file: File) => {
+    if (!onUpdateMedicaments) return;
+    setIsImportingReactifs(true);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = String(e.target?.result || "");
+      const lines = text.split(/\r?\n/);
+      const logs: { text: string; status: "success" | "warning" }[] = [];
+      const updatedStock = [...medicaments];
+      const newMovements: MouvementStock[] = [];
+
+      lines.forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        const lower = trimmed.toLowerCase();
+        if (lower.includes("nom") && (lower.includes("quantit") || lower.includes("stock") || lower.includes("presentation"))) return;
+
+        const parts = trimmed.split(/[,;\t]/).map((p) => p.trim());
+        if (!parts[0]) return;
+
+        const nom = parts[0];
+        const presentation = parts[1] || "";
+        const qte = parseFloat(parts[2]) || 0;
+        const prixAchat = parts[3] ? (parseFloat(parts[3]) || 0) : 0;
+        const prixVente = parts[4] ? (parseFloat(parts[4]) || 0) : 0;
+        const peremption = parts[5] || "";
+        const fournisseur = parts[6] || "";
+
+        const idx = updatedStock.findIndex(
+          (m) => m.nom.toLowerCase() === nom.toLowerCase() && m.typeArticle === "Réactif de laboratoire"
+        );
+
+        if (idx !== -1) {
+          const existing = updatedStock[idx];
+          updatedStock[idx] = {
+            ...existing,
+            stock: existing.stock + qte,
+            prixAchat: prixAchat || existing.prixAchat,
+            prixVente: prixVente || existing.prixVente,
+            peremption: peremption || existing.peremption,
+            fournisseur: fournisseur || existing.fournisseur
+          };
+          if (onUpdateMouvements) {
+            newMovements.push({
+              id: generateUid(),
+              medId: existing.id,
+              type: "entree",
+              qte,
+              motif: `Import CSV réactifs (Laboratoire) — fichier : ${file.name}`,
+              prixUnitaire: prixAchat || existing.prixAchat,
+              montant: (prixAchat || existing.prixAchat) * qte,
+              date: getTodayStr(),
+              createdAt: new Date().toISOString()
+            });
+          }
+          logs.push({ text: `${nom} : stock complété (+${qte})`, status: "success" });
+        } else {
+          const newMed: Medicament = {
+            id: generateUid(),
+            nom,
+            forme: presentation,
+            dosage: "",
+            categorie: "Réactif de laboratoire",
+            typeArticle: "Réactif de laboratoire",
+            stock: qte,
+            seuil: 5,
+            prixAchat,
+            prixVente,
+            peremption,
+            fournisseur,
+            createdAt: new Date().toISOString()
+          };
+          updatedStock.unshift(newMed);
+          if (onUpdateMouvements) {
+            newMovements.push({
+              id: generateUid(),
+              medId: newMed.id,
+              type: "entree",
+              qte,
+              motif: `Import CSV réactifs (Laboratoire) — fichier : ${file.name}`,
+              prixUnitaire: prixAchat,
+              montant: prixAchat * qte,
+              date: getTodayStr(),
+              createdAt: new Date().toISOString()
+            });
+          }
+          logs.push({ text: `${nom} : nouvelle fiche créée (${qte})`, status: "success" });
+        }
+      });
+
+      if (logs.length === 0) {
+        logs.push({ text: "Aucune ligne valide n'a été trouvée dans le fichier.", status: "warning" });
+      } else {
+        onUpdateMedicaments(updatedStock);
+        if (onUpdateMouvements && newMovements.length > 0) {
+          onUpdateMouvements([...newMovements, ...mouvements]);
+        }
+      }
+      setImportReactifsLog(logs);
+      setIsImportingReactifs(false);
+    };
+    reader.readAsText(file);
   };
 
   // Génération de procédure d'examen assistée par IA
@@ -786,7 +901,18 @@ ${examen.analyses || "Aucune analyse spécifiée"}
                 >
                   <option value="">— Choisir le biologiste —</option>
                   {staff
-                    .filter((s) => s.poste === "Infirmier" || s.poste === "Médecin")
+                    .filter((s) => {
+                      const poste = (s.poste || "").toLowerCase();
+                      return (
+                        poste.includes("biologiste") ||
+                        poste.includes("laborantin") ||
+                        poste.includes("technicien") ||
+                        poste.includes("labo") ||
+                        poste.includes("infirmier") ||
+                        poste.includes("médecin") ||
+                        poste.includes("medecin")
+                      );
+                    })
                     .map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.nom} ({s.poste})
@@ -1196,6 +1322,53 @@ ${examen.analyses || "Aucune analyse spécifiée"}
               >
                 <Plus className="w-3.5 h-3.5" /> Ajouter à la liste
               </button>
+            </div>
+          )}
+
+          {onUpdateMedicaments && (
+            <div className="bg-info-50/50 border border-info-100 rounded-xl p-4 mb-6">
+              <h4 className="text-xs uppercase font-bold tracking-wider text-stone-500 mb-3 flex items-center gap-1.5">
+                <Upload className="w-4 h-4" /> Importer un fichier CSV de réactifs/consommables
+              </h4>
+              <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">
+                Colonnes attendues : Nom, Présentation, Quantité, PrixAchat, PrixVente, Péremption (AAAA-MM-JJ), Fournisseur. Les articles importés sont automatiquement comptabilisés dans le stock général (visible aussi en Pharmacie).
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={isImportingReactifs}
+                  onClick={() => {
+                    const input = document.createElement("input");
+                    input.type = "file";
+                    input.accept = ".csv,.txt";
+                    input.onchange = (e: any) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImportReactifsFile(file);
+                    };
+                    input.click();
+                  }}
+                  className="bg-info-600 hover:bg-info-700 disabled:opacity-60 text-white text-xs font-bold px-4 py-2 rounded-lg transition-all inline-flex items-center gap-1.5"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  {isImportingReactifs ? "Import en cours..." : "Choisir un fichier CSV"}
+                </button>
+                <a
+                  href="data:text/csv;charset=utf-8,Nom,Presentation,Quantite,PrixAchat,PrixVente,Peremption,Fournisseur%0ATube EDTA (violet),Boite de 100,50,2000,50,2027-12-31,CAMEG%0ATest rapide Paludisme (TDR),Boite de 25,10,15000,1500,2026-06-30,CAMEG%0A"
+                  download="modele_reactifs_laboratoire.csv"
+                  className="text-xs font-bold text-primary-600 hover:text-primary-700 underline inline-flex items-center gap-1"
+                >
+                  <Download className="w-3.5 h-3.5" /> Télécharger un modèle CSV
+                </a>
+              </div>
+              {importReactifsLog && (
+                <div className="mt-3 bg-white border border-stone-200 rounded-lg p-3 max-h-40 overflow-y-auto space-y-1">
+                  {importReactifsLog.map((l, i) => (
+                    <p key={i} className={`text-2xs font-semibold ${l.status === "success" ? "text-success-700" : "text-warning-700"}`}>
+                      {l.status === "success" ? "✓" : "⚠️"} {l.text}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
