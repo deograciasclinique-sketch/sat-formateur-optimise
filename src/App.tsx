@@ -17,6 +17,7 @@ import {
   Task,
   Medicament,
   MouvementStock,
+  ActeTarifaire,
   Facture,
   Depense,
   RendezVous,
@@ -70,6 +71,7 @@ import TabUrgences from "./components/TabUrgences";
 import TabPediatrie from "./components/TabPediatrie";
 import TabConsultation from "./components/TabConsultation";
 import TabDocuments from "./components/TabDocuments";
+import TabActesTarifs from "./components/TabActesTarifs";
 import TabOnlineRDV from "./components/TabOnlineRDV";
 import TabDashboardGlobal from "./components/TabDashboardGlobal";
 import TabSettings from "./components/TabSettings";
@@ -84,6 +86,7 @@ import {
   Users,
   Briefcase,
   FileText,
+  Receipt,
   Activity,
   ClipboardList,
   ShieldCheck,
@@ -340,6 +343,7 @@ export default function App() {
   const [vaccinations, setVaccinations] = useState<Vaccination[]>([]);
   const [laboExamens, setLaboExamens] = useState<ExamenLabo[]>([]);
   const [documents, setDocuments] = useState<DocumentArchive[]>([]);
+  const [actesTarifaires, setActesTarifaires] = useState<ActeTarifaire[]>([]);
 
   // --- Synchronisation temps réel multi-appareils (Firestore) ---
   // Associe chaque clé de données à sa fonction de mise à jour locale.
@@ -369,6 +373,7 @@ export default function App() {
     dg_vaccinations: setVaccinations,
     dg_labo_examens: setLaboExamens,
     dg_documents: setDocuments,
+    dg_actes_tarifaires: setActesTarifaires,
   });
   // Garde en mémoire la dernière valeur confirmée comme envoyée au cloud pour chaque clé,
   // afin de ne renvoyer que ce qui a réellement changé (et d'éviter les boucles avec les
@@ -917,6 +922,7 @@ export default function App() {
     setVaccinations(safeGet<Vaccination[]>("dg_vaccinations", []));
     setLaboExamens(safeGet<ExamenLabo[]>("dg_labo_examens", []));
     setDocuments(safeGet<DocumentArchive[]>("dg_documents", []));
+    setActesTarifaires(safeGet<ActeTarifaire[]>("dg_actes_tarifaires", []));
     setIsLoaded(true);
   }, []);
 
@@ -1047,14 +1053,15 @@ export default function App() {
       dg_urgences: urgences,
       dg_vaccinations: vaccinations,
       dg_labo_examens: laboExamens,
-      dg_documents: documents
+      dg_documents: documents,
+      dg_actes_tarifaires: actesTarifaires
     };
   }, [
     staff, medicaments, mouvements, tasks, consultations, pediatrie,
     materniteCpns, materniteAccouchements, rdv, hospitalisations, ficheReferences,
     hospEvolutions, factures, depenses, incidents, actions, audits,
     conges, absences, rhFiches, prisesEnCharge, urgences, vaccinations,
-    laboExamens, documents
+    laboExamens, documents, actesTarifaires
   ]);
 
   // Periodic auto-save effect
@@ -1268,6 +1275,11 @@ export default function App() {
     safeSet("dg_documents", newDocs);
   };
 
+  const handleUpdateActesTarifaires = (newActes: ActeTarifaire[]) => {
+    setActesTarifaires(newActes);
+    safeSet("dg_actes_tarifaires", newActes);
+  };
+
   // Memoized sidebar category definitions - compiled once or when key data updates
   const filteredMenuCategories = React.useMemo(() => {
     const pharmaAlertCount = medicaments.filter((m) => m.stock <= getMedEffectiveThreshold(m)).length;
@@ -1304,6 +1316,7 @@ export default function App() {
           { id: "rdv", label: "Planification & RDV", icon: Calendar, alertCount: rdv.filter((r) => r.date === new Date().toISOString().slice(0, 10)).length },
           { id: "rdv_en_ligne", label: "Portail RDV en ligne (Mobile)", icon: Smartphone },
           { id: "factures", label: "Factures & Journal", icon: TrendingUp },
+          { id: "actes_tarifs", label: "Actes & Tarifs", icon: Receipt },
           { id: "assurances", label: "Assurances & Tiers-Payant", icon: Briefcase },
           { id: "rh", label: "Ressources Humaines", icon: Users }
         ]
@@ -1456,8 +1469,8 @@ export default function App() {
               💡 Aide à la connexion :
             </p>
             <ul className="list-disc pl-4 space-y-1">
-              <li>Le code du <strong>Responsable du Service</strong> par défaut est <strong className="text-primary-600 dark:text-primary-400 font-mono">0000</strong>.</li>
-              <li>Chaque praticien doit utiliser son code d'entrée attribué par le responsable, à créer dans <strong>Ressources Humaines</strong>.</li>
+              <li>Chaque praticien doit utiliser son code d'entrée personnel, attribué par le responsable du service dans <strong>Ressources Humaines</strong>.</li>
+              <li>Code oublié ou perdu ? Contactez le responsable du service pour le récupérer ou en obtenir un nouveau.</li>
             </ul>
           </div>
         </div>
@@ -2106,6 +2119,8 @@ export default function App() {
               consultations={consultations}
               medicaments={medicaments}
               onUpdateMedicaments={handleUpdateMedicaments}
+              mouvements={mouvements}
+              onUpdateMouvements={handleUpdateMouvements}
             />
           )}
 
@@ -2206,6 +2221,15 @@ export default function App() {
               theme={theme}
               laboExamens={laboExamens}
               onUpdateLaboExamens={handleUpdateLaboExamens}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeTab === "actes_tarifs" && (
+            <TabActesTarifs
+              actes={actesTarifaires}
+              onUpdateActes={handleUpdateActesTarifaires}
+              isResponsable={currentUserPin === "0000" || (currentUser?.poste?.toLowerCase() || "").includes("responsable")}
               currentUser={currentUser}
             />
           )}
