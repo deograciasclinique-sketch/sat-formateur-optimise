@@ -160,6 +160,11 @@ export default function TabConsultation({
   const [presPosologie, setPresPosologie] = useState("");
   const [presDuree, setPresDuree] = useState("");
   const [presQuantite, setPresQuantite] = useState("1");
+  // Recherche instantanée pour choisir rapidement un article à prescrire parmi
+  // un stock potentiellement très volumineux (médicaments, consommables,
+  // matériel technique, réactifs confondus).
+  const [presSearchQuery, setPresSearchQuery] = useState("");
+  const [presSearchOpen, setPresSearchOpen] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedConsultation, setSelectedConsultation] = useState<Consultation | null>(null);
@@ -537,6 +542,25 @@ export default function TabConsultation({
 
   const [viewingPatientKey, setViewingPatientKey] = useState<string | null>(null);
   const viewingPatientDossier = patientDossiers.find((p) => p.key === viewingPatientKey) || null;
+
+  // Résultats de la recherche instantanée d'article à prescrire (médicaments,
+  // consommables, matériel technique, réactifs confondus), limités à 20
+  // résultats pour rester rapide même avec un stock très volumineux.
+  const presSearchResults = useMemo(() => {
+    const q = presSearchQuery.trim().toLowerCase();
+    if (!q) return [];
+    return medicaments
+      .filter((m) => m.stock > 0 && m.nom.toLowerCase().includes(q))
+      .sort((a, b) => a.nom.localeCompare(b.nom, "fr"))
+      .slice(0, 20);
+  }, [medicaments, presSearchQuery]);
+
+  const TYPE_ARTICLE_BADGE: Record<string, { emoji: string; label: string; color: string }> = {
+    "Médicament": { emoji: "💊", label: "Médicament", color: "bg-primary-50 text-primary-700 border-primary-200" },
+    "Consommable": { emoji: "📦", label: "Consommable", color: "bg-info-50 text-info-700 border-info-200" },
+    "Matériel médical technique": { emoji: "🩺", label: "Matériel", color: "bg-warning-50 text-warning-700 border-warning-200" },
+    "Réactif de laboratoire": { emoji: "🧪", label: "Réactif", color: "bg-success-50 text-success-700 border-success-200" },
+  };
 
   const handleContinuerDossier = (c: Consultation) => {
     setConsPatient(c.patient);
@@ -2113,61 +2137,90 @@ export default function TabConsultation({
 
           <div className="space-y-4">
             <div className="grid grid-cols-4 gap-2 bg-stone-50/50 p-3 rounded-xl border border-stone-100">
-              <div className="col-span-2">
-                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Nom du Médicament *</label>
-                <select
-                  value={presMedId ? `id:${presMedId}` : (presCustomMode ? "custom" : "")}
+              <div className="col-span-2 relative">
+                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Article à prescrire (Médicament, Consommable, Matériel, Réactif) *</label>
+                <input
+                  type="text"
+                  placeholder="Tapez pour rechercher un article..."
+                  value={presMedId || presCustomMode ? presMedName : presSearchQuery}
                   onChange={(e) => {
                     const val = e.target.value;
-                    if (val.startsWith("id:")) {
-                      const medId = val.slice(3);
-                      const med = medicaments.find((m) => m.id === medId);
-                      setPresMedId(medId);
-                      setPresCustomMode(false);
-                      setPresMedName(med ? `${med.nom} ${med.dosage}`.trim() : "");
-                    } else if (val === "custom") {
-                      setPresMedId(undefined);
-                      setPresCustomMode(true);
-                      setPresMedName("");
-                    } else {
-                      setPresMedId(undefined);
-                      setPresCustomMode(false);
-                      setPresMedName("");
-                    }
+                    // Toute frappe invalide une sélection précédente : on repart
+                    // en mode recherche jusqu'à ce qu'un résultat soit choisi.
+                    setPresMedId(undefined);
+                    setPresCustomMode(false);
+                    setPresMedName("");
+                    setPresSearchQuery(val);
+                    setPresSearchOpen(true);
                   }}
+                  onFocus={() => setPresSearchOpen(true)}
+                  onBlur={() => setTimeout(() => setPresSearchOpen(false), 150)}
                   className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none"
-                >
-                  <option value="">— Choisir de la pharmacie —</option>
-                  <optgroup label="💊 Médicaments (A → Z)">
-                    {medicaments
-                      .filter((m) => m.stock > 0 && (m.typeArticle || "Médicament") === "Médicament")
-                      .sort((a, b) => a.nom.localeCompare(b.nom, "fr"))
-                      .map((m) => (
-                        <option key={m.id} value={`id:${m.id}`}>
-                          {m.nom} {m.dosage} (Reste : {m.stock})
-                        </option>
-                      ))}
-                  </optgroup>
-                  <optgroup label="📦 Consommables (A → Z)">
-                    {medicaments
-                      .filter((m) => m.stock > 0 && m.typeArticle === "Consommable")
-                      .sort((a, b) => a.nom.localeCompare(b.nom, "fr"))
-                      .map((m) => (
-                        <option key={m.id} value={`id:${m.id}`}>
-                          {m.nom} {m.dosage} (Reste : {m.stock})
-                        </option>
-                      ))}
-                  </optgroup>
-                  <option value="custom">— Autre médicament (Saisie libre) —</option>
-                </select>
-                {presCustomMode && (
-                  <input
-                    type="text"
-                    placeholder="Saisir nom médicament"
-                    value={presMedName}
-                    onChange={(e) => setPresMedName(e.target.value)}
-                    className="w-full text-xs border border-stone-200 rounded-lg px-2.5 py-1.5 mt-1.5 bg-white focus:outline-none"
-                  />
+                />
+                {presSearchOpen && presSearchQuery.trim() && (
+                  <div className="absolute z-20 left-0 right-0 mt-1 bg-white border border-stone-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                    {presSearchResults.length === 0 ? (
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setPresMedId(undefined);
+                          setPresCustomMode(true);
+                          setPresMedName(presSearchQuery.trim());
+                          setPresSearchOpen(false);
+                        }}
+                        className="w-full text-left px-3 py-2 text-xs text-stone-600 hover:bg-stone-50 flex items-center gap-2"
+                      >
+                        ✏️ Aucun résultat — utiliser « {presSearchQuery.trim()} » en saisie libre
+                      </button>
+                    ) : (
+                      presSearchResults.map((m) => {
+                        const badge = TYPE_ARTICLE_BADGE[m.typeArticle || "Médicament"] || TYPE_ARTICLE_BADGE["Médicament"];
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              setPresMedId(m.id);
+                              setPresCustomMode(false);
+                              setPresMedName(`${m.nom} ${m.dosage}`.trim());
+                              setPresSearchQuery("");
+                              setPresSearchOpen(false);
+                            }}
+                            className="w-full text-left px-3 py-2 text-xs hover:bg-stone-50 flex items-center justify-between gap-2 border-b border-stone-50 last:border-b-0"
+                          >
+                            <span className="flex items-center gap-2 min-w-0">
+                              <span className={`shrink-0 text-2xs font-bold px-1.5 py-0.5 rounded border ${badge.color}`}>
+                                {badge.emoji}
+                              </span>
+                              <span className="truncate font-semibold text-stone-700">{m.nom} {m.dosage}</span>
+                            </span>
+                            <span className="shrink-0 text-2xs text-stone-500 dark:text-stone-400 font-mono">Reste : {m.stock}</span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+                {(presMedId || presCustomMode) && (
+                  <div className="mt-1.5 flex items-center justify-between gap-2 bg-primary-50 border border-primary-200 rounded-lg px-2.5 py-1.5">
+                    <span className="text-xs font-bold text-primary-800 truncate">
+                      {presMedId ? (TYPE_ARTICLE_BADGE[medicaments.find((m) => m.id === presMedId)?.typeArticle || "Médicament"]?.emoji || "💊") : "✏️"} {presMedName}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPresMedId(undefined);
+                        setPresCustomMode(false);
+                        setPresMedName("");
+                        setPresSearchQuery("");
+                      }}
+                      className="shrink-0 text-primary-600 hover:text-primary-800 font-bold text-xs"
+                    >
+                      ✕ Changer
+                    </button>
+                  </div>
                 )}
               </div>
               <div>
