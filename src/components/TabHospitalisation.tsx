@@ -6,7 +6,7 @@
 import React, { useState } from "react";
 import { jsPDF } from "jspdf";
 import { Hospitalisation, Evolution, Staff, FicheReference } from "../types";
-import { generateUid, getTodayStr } from "../data";
+import { generateUid, getTodayStr, safeGet, safeSet } from "../data";
 import { Plus, Trash2, Home, Bed, History, FileText, ArrowRight, AlertCircle, Printer, X, Eye, Download, Send } from "lucide-react";
 
 interface TabHospitalisationProps {
@@ -57,7 +57,13 @@ export default function TabHospitalisation({
   })();
 
   // Capacity total bed configuration
-  const [hospCapacite, setHospCapacite] = useState(20);
+  // Capacité totale de lits : persistée (auparavant réinitialisée à 20 à
+  // chaque rechargement de la page, faute de sauvegarde).
+  const [hospCapacite, setHospCapaciteState] = useState(() => safeGet<number>("dg_hosp_capacite", 20));
+  const setHospCapacite = (val: number) => {
+    setHospCapaciteState(val);
+    safeSet("dg_hosp_capacite", val);
+  };
 
   // New admission form states
   const [hospPatient, setHospPatient] = useState("");
