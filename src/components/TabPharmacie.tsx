@@ -51,7 +51,7 @@ export default function TabPharmacie({
   // consommables / réactifs de laboratoire) au sein de la même pharmacie.
   const [medTypeArticle, setMedTypeArticle] = useState<NonNullable<Medicament["typeArticle"]>>("Médicament");
   // Onglet actif du registre de pharmacie, pour afficher trois listes distinctes.
-  const [stockTypeFilter, setStockTypeFilter] = useState<"Médicament" | "Consommable" | "Réactif de laboratoire" | "Tout">("Médicament");
+  const [stockTypeFilter, setStockTypeFilter] = useState<"Médicament" | "Consommable" | "Matériel médical technique" | "Réactif de laboratoire" | "Tout">("Médicament");
   const [medStock, setMedStock] = useState("");
   const [medSeuil, setMedSeuil] = useState("");
   const [medPrixAchat, setMedPrixAchat] = useState("");
@@ -143,13 +143,16 @@ export default function TabPharmacie({
         const peremption = parts[7] || "";
         const fournisseur = parts[8] || "Grossiste Automatique";
         const codeBarre = parts[9] || "";
-        // Colonne optionnelle (10e) : Médicament / Consommable / Réactif de laboratoire.
-        // Absente ou reconnue -> "Médicament" par défaut (compatible avec les anciens fichiers).
+        // Colonne optionnelle (10e) : Médicament / Consommable / Matériel médical
+        // technique / Réactif de laboratoire. Laissée vide si absente ou non
+        // reconnue : pour un produit déjà enregistré, sa catégorie d'origine sera
+        // automatiquement conservée (reconnaissance par nom) ; pour un nouveau
+        // produit, elle deviendra "Médicament" par défaut.
         const typeArticleRaw = (parts[10] || "").trim();
         const typeArticle =
-          typeArticleRaw === "Consommable" || typeArticleRaw === "Réactif de laboratoire"
+          typeArticleRaw === "Consommable" || typeArticleRaw === "Réactif de laboratoire" || typeArticleRaw === "Matériel médical technique" || typeArticleRaw === "Médicament"
             ? typeArticleRaw
-            : "Médicament";
+            : undefined;
 
         parsedList.push({
           nom,
@@ -190,10 +193,16 @@ export default function TabPharmacie({
       const peremp = String(item.peremption || "").trim();
       const supplier = String(item.fournisseur || "Grossiste").trim();
       const cb = String(item.codeBarre || "").trim();
-      const typeArt: NonNullable<Medicament["typeArticle"]> =
-        item.typeArticle === "Consommable" || item.typeArticle === "Réactif de laboratoire"
+      // Ne reflète que ce que le fichier précise EXPLICITEMENT (colonne présente et
+      // reconnue). undefined = fichier muet sur la catégorie -> on ne touche pas à
+      // celle déjà enregistrée pour un produit existant (reconnaissance par nom).
+      const explicitTypeArt: NonNullable<Medicament["typeArticle"]> | undefined =
+        item.typeArticle === "Consommable" ||
+        item.typeArticle === "Réactif de laboratoire" ||
+        item.typeArticle === "Matériel médical technique" ||
+        item.typeArticle === "Médicament"
           ? item.typeArticle
-          : "Médicament";
+          : undefined;
 
       const idx = updatedStock.findIndex(
         (m) => m.nom.toLowerCase() === rawNom.toLowerCase() && m.dosage === rawDosage
@@ -207,7 +216,11 @@ export default function TabPharmacie({
         if (peremp) med.peremption = peremp;
         if (supplier) med.fournisseur = supplier;
         if (cb) med.codeBarre = cb;
-        if (item.typeArticle) med.typeArticle = typeArt;
+        // Produit déjà connu (reconnu par son nom) : on garde sa catégorie
+        // d'origine (Médicament/Consommable/Matériel/Réactif) telle qu'enregistrée
+        // la première fois, sauf si ce fichier précise explicitement une nouvelle
+        // catégorie (reclassement volontaire).
+        if (explicitTypeArt) med.typeArticle = explicitTypeArt;
 
         const mId = generateUid();
         newMouvements.unshift({
@@ -234,7 +247,7 @@ export default function TabPharmacie({
           dosage: rawDosage,
           forme: forme,
           categorie: cat,
-          typeArticle: typeArt,
+          typeArticle: explicitTypeArt || "Médicament",
           stock: qty,
           seuil: 10,
           prixAchat: pa,
@@ -1475,6 +1488,7 @@ export default function TabPharmacie({
                     <option value="Médicament">💊 Médicament</option>
                     <option value="Consommable">📦 Consommable</option>
                     <option value="Réactif de laboratoire">🧪 Réactif de laboratoire</option>
+                    <option value="Matériel médical technique">🩺 Matériel médical technique</option>
                   </select>
                 </div>
                 <div>
@@ -2248,11 +2262,12 @@ export default function TabPharmacie({
           </div>
         </div>
 
-        {/* Trois listes distinctes : Médicaments / Consommables / Réactifs de laboratoire (cahier des charges, point 6.2) */}
+        {/* Quatre listes distinctes : Médicaments / Consommables / Matériel technique / Réactifs de laboratoire */}
         <div className="flex flex-wrap gap-2 mb-4">
           {([
             { key: "Médicament", label: "💊 Médicaments" },
             { key: "Consommable", label: "📦 Consommables" },
+            { key: "Matériel médical technique", label: "🩺 Matériel technique" },
             { key: "Réactif de laboratoire", label: "🧪 Réactifs de laboratoire" },
             { key: "Tout", label: "Tout afficher" },
           ] as const).map((tab) => (
