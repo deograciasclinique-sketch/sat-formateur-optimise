@@ -92,29 +92,6 @@ export default function TabPharmacie({
     logs: { text: string; status: "success" | "warning" | "error" }[];
   } | null>(null);
 
-  // Reconnaît la catégorie (TypeArticle) d'un fichier importé indépendamment des
-  // accents et de la casse (ex: "Materiel medical technique" ou "matériel Médical
-  // Technique" sont tous deux reconnus comme "Matériel médical technique").
-  // Renvoie undefined si la valeur ne correspond à aucune catégorie connue.
-  const normalizeTypeArticle = (raw: string): NonNullable<Medicament["typeArticle"]> | undefined => {
-    const clean = raw
-      .trim()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-    if (!clean) return undefined;
-    if (clean === "medicament") return "Médicament";
-    if (clean === "consommable") return "Consommable";
-    if (clean === "reactif de laboratoire" || clean === "reactif labo" || clean === "reactif") return "Réactif de laboratoire";
-    if (
-      clean === "materiel medical technique" ||
-      clean === "materiel technique" ||
-      clean === "materiel medico-technique" ||
-      clean === "materiel medico technique"
-    ) return "Matériel médical technique";
-    return undefined;
-  };
-
   // Automated Replenishment function
   const handleAutoReplenish = (text: string, sourceName: string) => {
     if (!text.trim()) {
@@ -136,28 +113,20 @@ export default function TabPharmacie({
 
     if (!isJson) {
       const lines = text.split(/\r?\n/);
-      let isFirstNonEmptyLine = true;
       lines.forEach((line) => {
         const trimmed = line.trim();
         if (!trimmed) return;
 
-        // Ce filtre ne doit s'appliquer qu'à la toute première ligne (l'en-tête
-        // du CSV, ex: "Nom,Dosage,..."). Le vérifier sur chaque ligne rejetait à
-        // tort toute ligne de produit dont une colonne contenait justement le mot
-        // "Medicament" (la colonne TypeArticle), par exemple.
-        if (isFirstNonEmptyLine) {
-          isFirstNonEmptyLine = false;
-          const lower = trimmed.toLowerCase();
-          if (
-            lower.includes("nom") ||
-            lower.includes("medicament") ||
-            lower.includes("dosage") ||
-            lower.includes("quantit") ||
-            lower.includes("qte") ||
-            lower.includes("stock")
-          ) {
-            return;
-          }
+        const lower = trimmed.toLowerCase();
+        if (
+          lower.includes("nom") ||
+          lower.includes("medicament") ||
+          lower.includes("dosage") ||
+          lower.includes("quantit") ||
+          lower.includes("qte") ||
+          lower.includes("stock")
+        ) {
+          return;
         }
 
         const parts = trimmed.split(/[,;\t]/).map((p) => p.trim());
@@ -174,13 +143,13 @@ export default function TabPharmacie({
         const peremption = parts[7] || "";
         const fournisseur = parts[8] || "Grossiste Automatique";
         const codeBarre = parts[9] || "";
-        // Colonne optionnelle (10e) : Médicament / Consommable / Matériel médical
-        // technique / Réactif de laboratoire. Reconnue avec ou sans accents.
-        // Laissée vide si absente ou non reconnue : pour un produit déjà
-        // enregistré, sa catégorie d'origine sera automatiquement conservée
-        // (reconnaissance par nom) ; pour un nouveau produit, elle deviendra
-        // "Médicament" par défaut.
-        const typeArticle = normalizeTypeArticle(parts[10] || "");
+        // Colonne optionnelle (10e) : Médicament / Consommable / Réactif de laboratoire.
+        // Absente ou reconnue -> "Médicament" par défaut (compatible avec les anciens fichiers).
+        const typeArticleRaw = (parts[10] || "").trim();
+        const typeArticle =
+          typeArticleRaw === "Consommable" || typeArticleRaw === "Réactif de laboratoire" || typeArticleRaw === "Matériel médical technique"
+            ? typeArticleRaw
+            : "Médicament";
 
         parsedList.push({
           nom,
@@ -221,12 +190,10 @@ export default function TabPharmacie({
       const peremp = String(item.peremption || "").trim();
       const supplier = String(item.fournisseur || "Grossiste").trim();
       const cb = String(item.codeBarre || "").trim();
-      // Ne reflète que ce que le fichier précise EXPLICITEMENT (colonne présente et
-      // reconnue, avec ou sans accents). undefined = fichier muet sur la catégorie
-      // -> on ne touche pas à celle déjà enregistrée pour un produit existant
-      // (reconnaissance par nom).
-      const explicitTypeArt: NonNullable<Medicament["typeArticle"]> | undefined =
-        normalizeTypeArticle(String(item.typeArticle || ""));
+      const typeArt: NonNullable<Medicament["typeArticle"]> =
+        item.typeArticle === "Consommable" || item.typeArticle === "Réactif de laboratoire" || item.typeArticle === "Matériel médical technique"
+          ? item.typeArticle
+          : "Médicament";
 
       const idx = updatedStock.findIndex(
         (m) => m.nom.toLowerCase() === rawNom.toLowerCase() && m.dosage === rawDosage
@@ -240,11 +207,7 @@ export default function TabPharmacie({
         if (peremp) med.peremption = peremp;
         if (supplier) med.fournisseur = supplier;
         if (cb) med.codeBarre = cb;
-        // Produit déjà connu (reconnu par son nom) : on garde sa catégorie
-        // d'origine (Médicament/Consommable/Matériel/Réactif) telle qu'enregistrée
-        // la première fois, sauf si ce fichier précise explicitement une nouvelle
-        // catégorie (reclassement volontaire).
-        if (explicitTypeArt) med.typeArticle = explicitTypeArt;
+        if (item.typeArticle) med.typeArticle = typeArt;
 
         const mId = generateUid();
         newMouvements.unshift({
@@ -271,7 +234,7 @@ export default function TabPharmacie({
           dosage: rawDosage,
           forme: forme,
           categorie: cat,
-          typeArticle: explicitTypeArt || "Médicament",
+          typeArticle: typeArt,
           stock: qty,
           seuil: 10,
           prixAchat: pa,
@@ -659,32 +622,6 @@ export default function TabPharmacie({
       `Suppression de la totalité des ${stock.length} article(s) de l'inventaire pharmacie/laboratoire.`
     );
     alert("L'inventaire a été vidé. Vous pouvez maintenant enregistrer de nouveaux produits.");
-  };
-
-  // Vider le journal des mouvements de stock (entrées/sorties historisées).
-  // N'affecte pas le stock actuel des produits, seulement l'historique affiché.
-  const handleClearMouvements = () => {
-    if (mouvements.length === 0) {
-      alert("Le journal des mouvements est déjà vide.");
-      return;
-    }
-    const firstConfirm = confirm(
-      `⚠️ Vous êtes sur le point de supprimer DÉFINITIVEMENT les ${mouvements.length} mouvement(s) de stock enregistrés dans le journal (entrées et sorties).\n\nCela n'affecte pas le stock actuel des produits, seulement l'historique. Cette action est irréversible. Voulez-vous continuer ?`
-    );
-    if (!firstConfirm) return;
-
-    const secondConfirm = confirm(
-      `Dernière confirmation : vider le journal des mouvements (${mouvements.length} entrée(s)) ?`
-    );
-    if (!secondConfirm) return;
-
-    onUpdateMouvements([]);
-    logActivity(
-      "Vidage du journal des mouvements de stock (Pharmacie)",
-      "suppression",
-      `Suppression de la totalité des ${mouvements.length} mouvement(s) de l'historique de stock.`
-    );
-    alert("Le journal des mouvements a été vidé.");
   };
 
   const handleExportStockPDF = () => {
@@ -2439,21 +2376,10 @@ export default function TabPharmacie({
 
       {/* Movements Log Card */}
       <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs">
-        <div className="flex items-center justify-between border-b border-stone-100 pb-3 mb-4">
-          <h3 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
-            <FileText className="w-5 h-5 text-primary-700" />
-            Journal des Mouvements de Stock
-          </h3>
-          <button
-            type="button"
-            onClick={handleClearMouvements}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-danger-50 text-danger-600 font-bold rounded-lg text-xs border border-danger-200 shadow-sm transition-all active:scale-[0.98] cursor-pointer whitespace-nowrap"
-            title="Supprimer tout l'historique des mouvements (action irréversible)"
-          >
-            <Trash2 className="w-4 h-4" />
-            <span>Vider le journal</span>
-          </button>
-        </div>
+        <h3 className="text-base font-serif font-bold text-stone-900 border-b border-stone-100 pb-3 mb-4 flex items-center gap-2">
+          <FileText className="w-5 h-5 text-primary-700" />
+          Journal des Mouvements de Stock
+        </h3>
         {mouvements.length === 0 ? (
           <p className="text-xs text-stone-500 dark:text-stone-400 py-6 text-center italic">Aucun mouvement de stock enregistré.</p>
         ) : (

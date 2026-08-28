@@ -901,18 +901,7 @@ ${examen.analyses || "Aucune analyse spécifiée"}
                 >
                   <option value="">— Choisir le biologiste —</option>
                   {staff
-                    .filter((s) => {
-                      const poste = (s.poste || "").toLowerCase();
-                      return (
-                        poste.includes("biologiste") ||
-                        poste.includes("laborantin") ||
-                        poste.includes("technicien") ||
-                        poste.includes("labo") ||
-                        poste.includes("infirmier") ||
-                        poste.includes("médecin") ||
-                        poste.includes("medecin")
-                      );
-                    })
+                    .filter((s) => s.poste === "Infirmier" || s.poste === "Médecin")
                     .map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.nom} ({s.poste})

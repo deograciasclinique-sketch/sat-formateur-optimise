@@ -74,7 +74,18 @@ export interface Medicament {
   // Cahier des charges point 6.2 : distingue médicaments, consommables et
   // réactifs de laboratoire au sein d'une même pharmacie/stock.
   // Absent = "Médicament" (valeur par défaut, compatible avec les fiches déjà créées).
-  typeArticle?: "Médicament" | "Consommable" | "Réactif de laboratoire";
+  typeArticle?: "Médicament" | "Consommable" | "Matériel médical technique" | "Réactif de laboratoire";
+}
+
+// Acte médical tarifé du service (ex: Consultation générale, Pansement,
+// Accouchement...). Rempli et maintenu par le responsable/directeur du service.
+export interface ActeTarifaire {
+  id: string;
+  nom: string;
+  categorie: string;
+  prix: number;
+  description?: string;
+  createdAt: string;
 }
 
 export interface MouvementStock {

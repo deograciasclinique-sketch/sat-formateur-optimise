@@ -1469,8 +1469,8 @@ export default function App() {
               💡 Aide à la connexion :
             </p>
             <ul className="list-disc pl-4 space-y-1">
-              <li>Chaque praticien doit utiliser son code d'entrée personnel, attribué par le responsable du service dans <strong>Ressources Humaines</strong>.</li>
-              <li>Code oublié ou perdu ? Contactez le responsable du service pour le récupérer ou en obtenir un nouveau.</li>
+              <li>Le code du <strong>Responsable du Service</strong> par défaut est <strong className="text-primary-600 dark:text-primary-400 font-mono">0000</strong>.</li>
+              <li>Chaque praticien doit utiliser son code d'entrée attribué par le responsable, à créer dans <strong>Ressources Humaines</strong>.</li>
             </ul>
           </div>
         </div>
