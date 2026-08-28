@@ -92,6 +92,29 @@ export default function TabPharmacie({
     logs: { text: string; status: "success" | "warning" | "error" }[];
   } | null>(null);
 
+  // Reconnaît la catégorie (TypeArticle) d'un fichier importé indépendamment des
+  // accents et de la casse (ex: "Materiel medical technique" ou "matériel Médical
+  // Technique" sont tous deux reconnus comme "Matériel médical technique").
+  // Renvoie undefined si la valeur ne correspond à aucune catégorie connue.
+  const normalizeTypeArticle = (raw: string): NonNullable<Medicament["typeArticle"]> | undefined => {
+    const clean = raw
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+    if (!clean) return undefined;
+    if (clean === "medicament") return "Médicament";
+    if (clean === "consommable") return "Consommable";
+    if (clean === "reactif de laboratoire" || clean === "reactif labo" || clean === "reactif") return "Réactif de laboratoire";
+    if (
+      clean === "materiel medical technique" ||
+      clean === "materiel technique" ||
+      clean === "materiel medico-technique" ||
+      clean === "materiel medico technique"
+    ) return "Matériel médical technique";
+    return undefined;
+  };
+
   // Automated Replenishment function
   const handleAutoReplenish = (text: string, sourceName: string) => {
     if (!text.trim()) {
@@ -152,15 +175,12 @@ export default function TabPharmacie({
         const fournisseur = parts[8] || "Grossiste Automatique";
         const codeBarre = parts[9] || "";
         // Colonne optionnelle (10e) : Médicament / Consommable / Matériel médical
-        // technique / Réactif de laboratoire. Laissée vide si absente ou non
-        // reconnue : pour un produit déjà enregistré, sa catégorie d'origine sera
-        // automatiquement conservée (reconnaissance par nom) ; pour un nouveau
-        // produit, elle deviendra "Médicament" par défaut.
-        const typeArticleRaw = (parts[10] || "").trim();
-        const typeArticle =
-          typeArticleRaw === "Consommable" || typeArticleRaw === "Réactif de laboratoire" || typeArticleRaw === "Matériel médical technique" || typeArticleRaw === "Médicament"
-            ? typeArticleRaw
-            : undefined;
+        // technique / Réactif de laboratoire. Reconnue avec ou sans accents.
+        // Laissée vide si absente ou non reconnue : pour un produit déjà
+        // enregistré, sa catégorie d'origine sera automatiquement conservée
+        // (reconnaissance par nom) ; pour un nouveau produit, elle deviendra
+        // "Médicament" par défaut.
+        const typeArticle = normalizeTypeArticle(parts[10] || "");
 
         parsedList.push({
           nom,
@@ -202,15 +222,11 @@ export default function TabPharmacie({
       const supplier = String(item.fournisseur || "Grossiste").trim();
       const cb = String(item.codeBarre || "").trim();
       // Ne reflète que ce que le fichier précise EXPLICITEMENT (colonne présente et
-      // reconnue). undefined = fichier muet sur la catégorie -> on ne touche pas à
-      // celle déjà enregistrée pour un produit existant (reconnaissance par nom).
+      // reconnue, avec ou sans accents). undefined = fichier muet sur la catégorie
+      // -> on ne touche pas à celle déjà enregistrée pour un produit existant
+      // (reconnaissance par nom).
       const explicitTypeArt: NonNullable<Medicament["typeArticle"]> | undefined =
-        item.typeArticle === "Consommable" ||
-        item.typeArticle === "Réactif de laboratoire" ||
-        item.typeArticle === "Matériel médical technique" ||
-        item.typeArticle === "Médicament"
-          ? item.typeArticle
-          : undefined;
+        normalizeTypeArticle(String(item.typeArticle || ""));
 
       const idx = updatedStock.findIndex(
         (m) => m.nom.toLowerCase() === rawNom.toLowerCase() && m.dosage === rawDosage
