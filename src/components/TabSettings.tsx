@@ -2031,7 +2031,59 @@ export default function TabSettings({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+           {/* App Logo Customization Section */}
+<div className="bg-stone-50/50 dark:bg-stone-900/30 p-4 rounded-2xl">
+  <label className="text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wide">Logo de l'application (fixe, affiché sur l'écran de connexion)</label>
+  <div className="flex flex-col sm:flex-row items-center gap-4">
+    <div className="relative group w-20 h-20 bg-white dark:bg-stone-850 rounded-2xl flex items-center justify-center border border-stone-200 dark:border-stone-800 overflow-hidden">
+      {profile.appLogoUrl ? (
+        <img
+          src={profile.appLogoUrl}
+          alt="App Logo Preview"
+          className="w-full h-full object-contain"
+          referrerPolicy="no-referrer"
+        />
+      ) : (
+        <img src="/icon-512.png" alt="Logo par défaut" className="w-full h-full object-contain" />
+      )}
+      {profile.appLogoUrl && (
+        <button
+          type="button"
+          onClick={() => setProfile({ ...profile, appLogoUrl: "" })}
+          className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs transition-opacity"
+        >
+          Supprimer
+        </button>
+      )}
+    </div>
+    <div className="flex-1 w-full space-y-2">
+      <label className="flex-1 flex flex-col items-center justify-center gap-1 px-4 py-3 bg-white dark:bg-stone-850 border border-dashed border-stone-300 dark:border-stone-700 rounded-xl cursor-pointer hover:bg-stone-50 dark:hover:bg-stone-800 text-xs text-stone-500 dark:text-stone-400">
+        <span>Choisir une image (max 500 KB)</span>
+        <input
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              if (file.size > 512000) {
+                alert("L'image est trop grande (max 500 KB).");
+                return;
+              }
+              const reader = new FileReader();
+              reader.onload = (event) => {
+                if (event.target?.result) {
+                  setProfile({ ...profile, appLogoUrl: event.target.result as string });
+                }
+              };
+              reader.readAsDataURL(file);
+            }
+          }}
+        />
+      </label>
+    </div>
+  </div>
+</div> <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wide">Nom de l'établissement</label>
                 <div className="relative">
