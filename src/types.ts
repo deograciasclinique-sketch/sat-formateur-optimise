@@ -717,6 +717,7 @@ export interface ClinicProfile {
   logoColor: string; // "teal", "indigo", "rose", "emerald", "amber"
   stampText: string; // custom stamp text
   logoUrl?: string; // custom logo URL or base64 string
+  appLogoUrl?: string; // logo de l'application (fixe, séparé du logo du service)
   legalForm?: string; // e.g. "S.A.R.L.", "S.A.", "Cabinet Individuel"
   ownerName?: string; // e.g. "Dr. Deogracias"
   capital?: string; // e.g. "2 000 000 FCFA"
