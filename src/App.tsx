@@ -1364,6 +1364,7 @@ export default function App() {
       }`}>
         <div className="w-full max-w-md bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-850 rounded-3xl p-8 shadow-xl space-y-6">
           {/* Logo & Branding */}
+         <img src="/icon-512.png" alt="DEO GRACIAS" className="mx-auto w-16 h-16 object-contain mb-1" /> 
           <div className="text-center space-y-2">
             <div className={`mx-auto w-56 h-32 bg-white dark:bg-stone-850 rounded-2xl flex items-center justify-center overflow-hidden border border-stone-100 dark:border-stone-800 shadow-md text-xl font-serif font-black ${clinicProfile.logoColor === "teal" ? "text-primary-600" : clinicProfile.logoColor === "indigo" ? "text-info-600" : clinicProfile.logoColor === "rose" ? "text-danger-600" : "text-success-600"}`}>
               {clinicProfile.logoUrl ? (
