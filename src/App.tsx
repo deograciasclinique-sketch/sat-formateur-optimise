@@ -1366,7 +1366,7 @@ export default function App() {
           {/* Logo & Branding */}
 <div className="text-center space-y-2">
 <img src="/icon-512.png" alt="DEO GRACIAS" className="mx-auto w-16 h-16 object-contain mb-1" />
-</div>
+
             <div className="space-y-1">
               <h1 className="text-xl font-semibold font-serif text-stone-900 dark:text-white tracking-tight">{clinicProfile.name}</h1>
               <p className="text-xs uppercase tracking-widest font-semibold text-primary-600 dark:text-primary-500">{clinicProfile.slogan || "Excellence & Dévouement"}</p>
