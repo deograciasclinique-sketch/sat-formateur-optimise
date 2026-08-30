@@ -44,7 +44,7 @@ export const DEFAULT_CLINIC_PROFILE: ClinicProfile = {
   currency: "FCFA",
   logoColor: "teal",
   stampText: "CACHET & SIGNATURE DEO-GRACIAS",
-  logoUrl: "/icon-512.png",
+  logoUrl: "/logo-complet-fond-transparent.png",
   legalForm: "Cabinet Médical Privé (S.A.R.L.)",
   ownerName: "Dr. Deogracias",
   capital: "5 000 000 FCFA",
