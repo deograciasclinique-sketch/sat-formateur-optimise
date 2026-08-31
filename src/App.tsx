@@ -2057,6 +2057,8 @@ export default function App() {
               depenses={depenses}
               onUpdateFactures={handleUpdateFactures}
               onUpdateDepenses={handleUpdateDepenses}
+              laboExamens={laboExamens}
+              onUpdateLaboExamens={handleUpdateLaboExamens}
             />
           )}
 
@@ -2212,6 +2214,7 @@ export default function App() {
               mouvements={mouvements}
               onUpdateMouvements={handleUpdateMouvements}
               documents={documents}
+              actes={actesTarifaires}
             />
           )}
 

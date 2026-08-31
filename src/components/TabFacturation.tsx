@@ -6,7 +6,7 @@
 import React, { useState } from "react";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { logActivity } from "../lib/activityLogger";
-import { Facture, Depense, FactureLigne } from "../types";
+import { Facture, Depense, FactureLigne, ExamenLabo } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { 
   Plus, Trash2, Check, DollarSign, CreditCard, Filter, AlertTriangle, 
@@ -25,6 +25,10 @@ interface TabFacturationProps {
   depenses: Depense[];
   onUpdateFactures: (factures: Facture[]) => void;
   onUpdateDepenses: (depenses: Depense[]) => void;
+  // Examens de laboratoire prescrits (depuis la Consultation), avec leur prix,
+  // pour un report en un clic sur la facture du patient sans ressaisie.
+  laboExamens?: ExamenLabo[];
+  onUpdateLaboExamens?: (examens: ExamenLabo[]) => void;
 }
 
 // Default SYSCOHADA accounting plan tailored for a West African clinic
@@ -62,7 +66,9 @@ export default function TabFacturation({
   factures,
   depenses,
   onUpdateFactures,
-  onUpdateDepenses
+  onUpdateDepenses,
+  laboExamens = [],
+  onUpdateLaboExamens
 }: TabFacturationProps) {
   // Load dynamic clinic profile from LocalStorage safely
   const profile = (() => {
@@ -878,6 +884,50 @@ export default function TabFacturation({
     if (confirm("Supprimer ce compte personnalisé ?")) {
       const updated = customAccounts.filter((a) => a.code !== code);
       setCustomAccounts(updated);
+    }
+  };
+
+  // Examens de laboratoire prescrits pour le patient en cours de facturation,
+  // pas encore reportés sur une facture — pour un ajout en un clic avec prix.
+  const examensNonFactures = React.useMemo(() => {
+    const q = factPatient.trim().toLowerCase();
+    if (!q) return [];
+    return laboExamens.filter(
+      (e) => !e.facture && e.patient.trim().toLowerCase() === q
+    );
+  }, [laboExamens, factPatient]);
+
+  const handleAddExamenALaFacture = (examen: ExamenLabo) => {
+    const newLine: FactureLigne = {
+      id: generateUid(),
+      designation: examen.analyses || examen.examen || "Examen de laboratoire",
+      qte: 1,
+      prix: examen.prix || 0,
+      montant: examen.prix || 0
+    };
+    setFactLignes((prev) => [...prev, newLine]);
+    if (onUpdateLaboExamens) {
+      onUpdateLaboExamens(
+        laboExamens.map((e) => (e.id === examen.id ? { ...e, facture: true } : e))
+      );
+    }
+  };
+
+  const handleAddTousExamensALaFacture = () => {
+    if (examensNonFactures.length === 0) return;
+    const newLines: FactureLigne[] = examensNonFactures.map((examen) => ({
+      id: generateUid(),
+      designation: examen.analyses || examen.examen || "Examen de laboratoire",
+      qte: 1,
+      prix: examen.prix || 0,
+      montant: examen.prix || 0
+    }));
+    setFactLignes((prev) => [...prev, ...newLines]);
+    if (onUpdateLaboExamens) {
+      const idsAFacturer = new Set(examensNonFactures.map((e) => e.id));
+      onUpdateLaboExamens(
+        laboExamens.map((e) => (idsAFacturer.has(e.id) ? { ...e, facture: true } : e))
+      );
     }
   };
 
@@ -1842,6 +1892,40 @@ export default function TabFacturation({
                   <p className="font-semibold text-warning-900">📱 Compte de dépôt Mobile Money :</p>
                   <p className="font-mono text-xs font-black">N° Service : 44 92 01 62</p>
                   <p className="text-2xs text-stone-500">Service officiel de {profile.name}. Contact : {profile.phone}.</p>
+                </div>
+              )}
+
+              {examensNonFactures.length > 0 && (
+                <div className="bg-primary-50 border border-primary-200 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-2xs uppercase font-bold tracking-wider text-primary-700">
+                      🧪 Examens prescrits non facturés ({examensNonFactures.length})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAddTousExamensALaFacture}
+                      className="text-2xs font-bold text-primary-700 hover:text-primary-900 underline"
+                    >
+                      Tout ajouter
+                    </button>
+                  </div>
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {examensNonFactures.map((e) => (
+                      <div key={e.id} className="flex items-center justify-between bg-white rounded-lg px-2.5 py-1.5 text-xs border border-primary-100">
+                        <span className="font-semibold text-stone-700 truncate">{e.analyses || e.examen}</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="font-mono font-bold text-stone-600">{(e.prix || 0).toLocaleString("fr-FR")} F</span>
+                          <button
+                            type="button"
+                            onClick={() => handleAddExamenALaFacture(e)}
+                            className="text-primary-600 hover:text-primary-800 font-bold"
+                          >
+                            + Ajouter
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { jsPDF } from "jspdf";
 import { logActivity } from "../lib/activityLogger";
-import { Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive } from "../types";
+import { Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff} from "lucide-react";
 import CameraCapture from "./CameraCapture";
@@ -38,6 +38,10 @@ interface TabConsultationProps {
   // Registre par patient (regroupement du dossier) : documents scannés et
   // examens de laboratoire liés à chaque patient, affichés dans son dossier.
   documents?: DocumentArchive[];
+  // Grille tarifaire du service (onglet "Actes & Tarifs"). Les actes de
+  // catégorie "Laboratoire" alimentent la liste des examens sélectionnables
+  // à la prescription, avec leur prix, pour un report automatique en facture.
+  actes?: ActeTarifaire[];
 }
 
 export default function TabConsultation({
@@ -60,6 +64,7 @@ export default function TabConsultation({
   mouvements = [],
   onUpdateMouvements,
   documents = [],
+  actes = [],
 }: TabConsultationProps) {
   // Load dynamic clinic profile from LocalStorage safely
   const profile = (() => {
@@ -243,37 +248,90 @@ export default function TabConsultation({
 
   // Lab results integration states & helpers
   const [tempLabResults, setTempLabResults] = useState<ExamenLabo[]>([]);
-  const [consPrescriptionAnalyse, setConsPrescriptionAnalyse] = useState("NFS");
+  // Liste tarifée des examens de laboratoire (catégorie "Laboratoire" de la
+  // grille "Actes & Tarifs"), pour une sélection simple à la prescription.
+  const examensCatalogue = useMemo(
+    () => actes.filter((a) => a.categorie === "Laboratoire").sort((a, b) => a.nom.localeCompare(b.nom, "fr")),
+    [actes]
+  );
+  const [selectedExamenIds, setSelectedExamenIds] = useState<string[]>([]);
+  const [examenSearchQuery, setExamenSearchQuery] = useState("");
+  const [consPrescriptionAutre, setConsPrescriptionAutre] = useState("");
   const [consPrescriptionUrgent, setConsPrescriptionUrgent] = useState(false);
+
+  const filteredExamensCatalogue = useMemo(() => {
+    const q = examenSearchQuery.toLowerCase().trim();
+    if (!q) return examensCatalogue;
+    return examensCatalogue.filter((a) => a.nom.toLowerCase().includes(q));
+  }, [examensCatalogue, examenSearchQuery]);
+
+  const toggleExamenSelection = (id: string) => {
+    setSelectedExamenIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const totalExamensSelectionnes = useMemo(
+    () =>
+      selectedExamenIds.reduce((sum, id) => {
+        const acte = examensCatalogue.find((a) => a.id === id);
+        return sum + (acte?.prix || 0);
+      }, 0),
+    [selectedExamenIds, examensCatalogue]
+  );
 
   const handlePrescrireExamen = () => {
     if (!consPatient) {
       alert("Veuillez d'abord renseigner le nom du patient avant de prescrire un examen.");
       return;
     }
-    if (!consPrescriptionAnalyse.trim()) {
-      alert("Veuillez préciser l'examen à prescrire.");
+    const examensChoisis = examensCatalogue.filter((a) => selectedExamenIds.includes(a.id));
+    if (examensChoisis.length === 0 && !consPrescriptionAutre.trim()) {
+      alert("Veuillez sélectionner au moins un examen dans la liste (ou en préciser un hors liste).");
       return;
     }
-    const newExam: ExamenLabo = {
+    const priorite = consPrescriptionUrgent ? "urgente" : "normale";
+    const prescripteur = currentUser?.nom || "Médecin";
+    const nouveauxExamens: ExamenLabo[] = examensChoisis.map((a) => ({
       id: generateUid(),
       patient: consPatient,
       contact: consContact,
       dateDemande: getTodayStr(),
-      analyses: consPrescriptionAnalyse,
-      priorite: consPrescriptionUrgent ? "urgente" : "normale",
-      prescripteur: currentUser?.nom || "Médecin",
+      analyses: a.nom,
+      prix: a.prix,
+      priorite,
+      prescripteur,
       technicien: "",
       statut: "En attente",
       dateResultat: "",
       resultat: "",
       interpretation: "",
       createdAt: new Date().toISOString()
-    };
+    }));
+    // Examen hors grille tarifaire (saisie libre), sans prix connu.
+    if (consPrescriptionAutre.trim()) {
+      nouveauxExamens.push({
+        id: generateUid(),
+        patient: consPatient,
+        contact: consContact,
+        dateDemande: getTodayStr(),
+        analyses: consPrescriptionAutre.trim(),
+        priorite,
+        prescripteur,
+        technicien: "",
+        statut: "En attente",
+        dateResultat: "",
+        resultat: "",
+        interpretation: "",
+        createdAt: new Date().toISOString()
+      });
+    }
     if (onUpdateLaboExamens) {
-      onUpdateLaboExamens([newExam, ...laboExamens]);
-      alert(`Examen prescrit (${consPrescriptionAnalyse}) et envoyé directement au laboratoire !`);
-      setConsPrescriptionAnalyse(""); // reset after prescription
+      onUpdateLaboExamens([...nouveauxExamens, ...laboExamens]);
+      const noms = nouveauxExamens.map((e) => e.analyses).join(", ");
+      alert(`Examen(s) prescrit(s) (${noms}) et envoyé(s) directement au laboratoire !`);
+      setSelectedExamenIds([]);
+      setConsPrescriptionAutre("");
       setConsPrescriptionUrgent(false);
     }
   };
@@ -1905,16 +1963,66 @@ export default function TabConsultation({
             <div className="pt-3 border-t border-stone-100 space-y-2">
               <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 flex items-center gap-1.5">
                 <FlaskConical className="w-3.5 h-3.5 text-primary-600" />
-                Prescrire un examen au laboratoire
+                Prescrire un ou plusieurs examens au laboratoire
               </label>
+
+              {examensCatalogue.length === 0 ? (
+                <p className="text-2xs text-warning-700 bg-warning-50 border border-warning-200 rounded-lg px-3 py-2">
+                  Aucun examen tarifé n'est encore renseigné. Le responsable doit d'abord les ajouter dans l'onglet
+                  "Actes & Tarifs" (catégorie "Laboratoire") pour qu'ils apparaissent ici avec leur prix.
+                </p>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    placeholder="Rechercher un examen (NFS, Glycémie, Goutte épaisse...)"
+                    value={examenSearchQuery}
+                    onChange={(e) => setExamenSearchQuery(e.target.value)}
+                    className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
+                  />
+                  <div className="max-h-44 overflow-y-auto border border-stone-200 rounded-lg divide-y divide-stone-100 bg-white">
+                    {filteredExamensCatalogue.length === 0 ? (
+                      <p className="text-2xs text-stone-400 italic p-3 text-center">Aucun examen ne correspond à la recherche.</p>
+                    ) : (
+                      filteredExamensCatalogue.map((a) => (
+                        <label
+                          key={a.id}
+                          className="flex items-center justify-between gap-2 px-3 py-2 cursor-pointer hover:bg-primary-50/50 text-xs"
+                        >
+                          <span className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedExamenIds.includes(a.id)}
+                              onChange={() => toggleExamenSelection(a.id)}
+                              className="accent-primary-600 w-3.5 h-3.5"
+                            />
+                            <span className="font-semibold text-stone-700">{a.nom}</span>
+                          </span>
+                          <span className="font-mono font-bold text-stone-600 shrink-0">{a.prix.toLocaleString("fr-FR")} F</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
+
+              <input
+                type="text"
+                placeholder="Autre examen hors liste (optionnel, sans prix)"
+                value={consPrescriptionAutre}
+                onChange={(e) => setConsPrescriptionAutre(e.target.value)}
+                className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
+              />
+
               <div className="flex gap-2 items-center">
-                <input
-                  type="text"
-                  placeholder="Ex: NFS, Goutte épaisse, Glycémie..."
-                  value={consPrescriptionAnalyse}
-                  onChange={(e) => setConsPrescriptionAnalyse(e.target.value)}
-                  className="flex-1 text-xs border border-stone-200 rounded-lg px-3 py-2.5 bg-stone-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
-                />
+                <div className="flex-1 flex items-center justify-between bg-primary-50 border border-primary-200 rounded-lg px-3 py-2">
+                  <span className="text-2xs uppercase font-bold tracking-wider text-primary-700">
+                    {selectedExamenIds.length} examen(s) sélectionné(s)
+                  </span>
+                  <span className="text-sm font-black font-mono text-primary-800">
+                    {totalExamensSelectionnes.toLocaleString("fr-FR")} F
+                  </span>
+                </div>
                 <label className="flex items-center gap-1.5 cursor-pointer text-xs text-danger-600 font-bold bg-danger-50 px-3 py-2.5 rounded-lg border border-danger-200 whitespace-nowrap">
                   <input 
                     type="checkbox" 
@@ -1934,7 +2042,8 @@ export default function TabConsultation({
                 </button>
               </div>
               <p className="text-2xs text-stone-500 dark:text-stone-400">
-                Le bulletin d'examen apparaîtra directement dans l'onglet Laboratoire pour prélèvement et saisie.
+                Le(s) bulletin(s) d'examen apparaîtront directement dans l'onglet Laboratoire, et leur prix sera
+                disponible pour un ajout automatique à la facture du patient dans l'onglet Facturation.
               </p>
             </div>
 

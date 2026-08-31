@@ -262,6 +262,13 @@ export interface ExamenLabo {
   resultat: string;
   interpretation: "Normal" | "Anormal" | "Critique" | string;
   createdAt: string;
+  // Prix de l'examen au moment de la prescription (repris depuis la grille
+  // tarifaire "Actes & Tarifs", catégorie Laboratoire) — permet le calcul
+  // automatique du montant à facturer au patient.
+  prix?: number;
+  // Marque l'examen comme déjà reporté sur une facture patient, pour éviter
+  // de le facturer deux fois depuis l'onglet Facturation.
+  facture?: boolean;
 }
 
 export interface CpnMaternite {
