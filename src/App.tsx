@@ -1364,19 +1364,9 @@ export default function App() {
       }`}>
         <div className="w-full max-w-md bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-850 rounded-3xl p-8 shadow-xl space-y-6">
           {/* Logo & Branding */}
-          <div className="text-center space-y-2">
-            <div className={`mx-auto w-16 h-16 bg-white dark:bg-stone-850 rounded-2xl flex items-center justify-center overflow-hidden border border-stone-100 dark:border-stone-800 shadow-md text-xl font-serif font-black ${clinicProfile.logoColor === "teal" ? "text-primary-600" : clinicProfile.logoColor === "indigo" ? "text-info-600" : clinicProfile.logoColor === "rose" ? "text-danger-600" : "text-success-600"}`}>
-              {clinicProfile.logoUrl ? (
-                <img
-                  src={clinicProfile.logoUrl}
-                  alt="Logo"
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                clinicProfile.name.slice(0, 2).toUpperCase()
-              )}
-            </div>
+<div className="text-center space-y-2">
+<img src={clinicProfile.appLogoUrl || "/icon-512.png"} alt="DEO GRACIAS" className="mx-auto w-48 h-28 object-contain mb-1" />
+
             <div className="space-y-1">
               <h1 className="text-xl font-semibold font-serif text-stone-900 dark:text-white tracking-tight">{clinicProfile.name}</h1>
               <p className="text-xs uppercase tracking-widest font-semibold text-primary-600 dark:text-primary-500">{clinicProfile.slogan || "Excellence & Dévouement"}</p>
