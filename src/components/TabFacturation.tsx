@@ -6,7 +6,7 @@
 import React, { useState } from "react";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { logActivity } from "../lib/activityLogger";
-import { Facture, Depense, FactureLigne, ExamenLabo, ActeTarifaire, Medicament } from "../types";
+import { Facture, Depense, FactureLigne, ExamenLabo, ActeTarifaire, Medicament, Consultation } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { 
   Plus, Trash2, Check, DollarSign, CreditCard, Filter, AlertTriangle, 
@@ -34,6 +34,11 @@ interface TabFacturationProps {
   // avec son prix et l'ajouter à la facture, sans ressaisie manuelle.
   actes?: ActeTarifaire[];
   medicaments?: Medicament[];
+  // Circuit paiement : dossiers en attente de paiement des actes prescrits
+  // (soins, examens, autres) après la consultation médicale, avant transfert
+  // aux infirmiers ou au labo pour exécution.
+  consultations?: Consultation[];
+  onUpdateConsultations?: (consults: Consultation[]) => void;
 }
 
 // Default SYSCOHADA accounting plan tailored for a West African clinic
@@ -67,6 +72,54 @@ const DEFAULT_PLAN = [
   { code: "7066", label: "Prestations - Urgences Médicales", classe: "7", nature: "Crédit" }
 ];
 
+// Ligne de paiement pour un dossier en attente de règlement des actes
+// prescrits. Composant séparé car il a besoin de son propre état local
+// (montant saisi, mode de paiement) — impossible dans une boucle .map().
+function ActePaiementRow({
+  cons,
+  onEncaisser,
+}: {
+  cons: Consultation;
+  onEncaisser: (cons: Consultation, montant: number, mode: string) => void;
+}) {
+  const [montant, setMontant] = useState("");
+  const [mode, setMode] = useState("Espèces");
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 bg-white border border-orange-200 rounded-xl p-3">
+      <div className="flex-1 min-w-[140px]">
+        <div className="font-bold text-stone-800">{cons.patient}</div>
+        <div className="text-xs text-stone-500">
+          {(cons.ordonnance || []).length > 0 ? `${cons.ordonnance.length} ligne(s) d'ordonnance` : ""}
+          {(cons.labResults || []).length > 0 ? ` · ${cons.labResults.length} examen(s) labo` : ""}
+        </div>
+      </div>
+      <input
+        type="number"
+        placeholder="Montant (FCFA)"
+        value={montant}
+        onChange={(e) => setMontant(e.target.value)}
+        className="w-36 px-3 py-2 rounded-lg border border-stone-300 text-sm"
+      />
+      <select
+        value={mode}
+        onChange={(e) => setMode(e.target.value)}
+        className="px-3 py-2 rounded-lg border border-stone-300 text-sm"
+      >
+        <option value="Espèces">Espèces</option>
+        <option value="Mobile Money">Mobile Money</option>
+        <option value="Assurance">Assurance</option>
+      </select>
+      <button
+        onClick={() => onEncaisser(cons, parseFloat(montant) || 0, mode)}
+        className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700"
+      >
+        Encaisser
+      </button>
+    </div>
+  );
+}
+
 export default function TabFacturation({
   factures,
   depenses,
@@ -75,8 +128,47 @@ export default function TabFacturation({
   laboExamens = [],
   onUpdateLaboExamens,
   actes = [],
-  medicaments = []
+  medicaments = [],
+  consultations = [],
+  onUpdateConsultations
 }: TabFacturationProps) {
+  // Dossiers dont la prescription (soins/examens/autres) a été faite par le
+  // médecin et qui attendent le paiement au secrétariat avant transfert aux
+  // infirmiers/labo pour exécution.
+  const dossiersActesAPayer = consultations.filter((c) => c.statut === "Attente paiement actes");
+
+  const handleEncaisserActes = (cons: Consultation, montant: number, mode: string) => {
+    if (!onUpdateConsultations) return;
+    const montantNum = montant || 0;
+    if (montantNum <= 0) {
+      alert("Veuillez renseigner un montant valide pour les actes prescrits.");
+      return;
+    }
+    const ligne: FactureLigne = {
+      id: generateUid(),
+      designation: `Actes prescrits - ${cons.patient}`,
+      qte: 1,
+      prix: montantNum,
+      montant: montantNum,
+    };
+    const newFacture: Facture = {
+      id: generateUid(),
+      patient: cons.patient,
+      date: getTodayStr(),
+      mode,
+      lignes: [ligne],
+      total: montantNum,
+      montantPaye: montantNum,
+      statut: "Payée",
+      createdAt: new Date().toISOString(),
+      consultationId: cons.id,
+      typePaiement: "Actes",
+    };
+    onUpdateFactures([newFacture, ...factures]);
+    onUpdateConsultations(
+      consultations.map((c) => (c.id === cons.id ? { ...c, statut: "Attente exécution actes" } : c))
+    );
+  };
   // Load dynamic clinic profile from LocalStorage safely
   const profile = (() => {
     try {
@@ -1212,6 +1304,20 @@ export default function TabFacturation({
 
   return (
     <div className="space-y-6">
+      {/* Circuit paiement : patients revenus du médecin, en attente de payer
+          les soins/examens/autres actes prescrits avant transfert aux
+          infirmiers ou au labo pour exécution. */}
+      {dossiersActesAPayer.length > 0 && (
+        <div className="bg-orange-50 border border-orange-300 rounded-2xl p-4 shadow-xs space-y-3">
+          <div className="text-xs font-bold uppercase tracking-wider text-orange-700">
+            Paiement des actes prescrits en attente ({dossiersActesAPayer.length})
+          </div>
+          {dossiersActesAPayer.map((c) => (
+            <ActePaiementRow key={c.id} cons={c} onEncaisser={handleEncaisserActes} />
+          ))}
+        </div>
+      )}
+
       {/* Sub-navigation Menu bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-stone-900 text-stone-200 p-4 rounded-2xl shadow-md border border-stone-850">
         <div className="flex flex-wrap items-center gap-1.5">

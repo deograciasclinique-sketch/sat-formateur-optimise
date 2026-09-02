@@ -416,6 +416,18 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
       return;
     }
 
+    // Circuit paiement : on bloque la création de la demande labo tant que
+    // les actes prescrits pour ce patient n'ont pas été payés au secrétariat.
+    const dossierNonPaye = consultations.find(
+      (c) => c.patient.trim().toLowerCase() === examPatient.trim().toLowerCase() && c.statut === "Attente paiement actes"
+    );
+    if (dossierNonPaye) {
+      alert(
+        `Le patient "${examPatient.trim()}" doit d'abord régler les actes prescrits au secrétariat avant l'exécution de l'examen.`
+      );
+      return;
+    }
+
     const newExam: ExamenLabo = {
       id: generateUid(),
       patient: examPatient.trim(),
