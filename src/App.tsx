@@ -60,6 +60,8 @@ import TabIndicateurs from "./components/TabIndicateurs";
 import TabTaches from "./components/TabTaches";
 import TabPharmacie from "./components/TabPharmacie";
 import TabFacturation from "./components/TabFacturation";
+import TabAccueilCaisse from "./components/TabAccueilCaisse";
+import TabInfirmier from "./components/TabInfirmier";
 import TabRDV from "./components/TabRDV";
 import TabRH from "./components/TabRH";
 import TabHospitalisation from "./components/TabHospitalisation";
@@ -87,6 +89,7 @@ import {
   Briefcase,
   FileText,
   Receipt,
+  Wallet2,
   Activity,
   ClipboardList,
   ShieldCheck,
@@ -1293,6 +1296,8 @@ export default function App() {
       {
         title: "🏥 Soins & Clinique",
         items: [
+          { id: "accueil_caisse", label: "Accueil & Caisse", icon: Wallet2 },
+          { id: "infirmier", label: "Salle des Infirmiers", icon: Activity, alertCount: consultations.filter((c) => c.statut === "Attente prise en charge infirmier").length },
           { id: "medecine", label: "Consultation Générale", icon: Stethoscope },
           { id: "urgences", label: "Triage & Urgences", icon: ShieldAlert, alertCount: urgences.filter((u) => u.statut !== "Sorti(e) ou Libéré(e)").length },
           { id: "hospit", label: "Hospitalisations", icon: HeartPulse, alertCount: hospitalisations.filter((h) => h.statut === "En cours").length },
@@ -2048,6 +2053,24 @@ export default function App() {
               medTypeThresholds={medTypeThresholds}
               medCategoryThresholds={medCategoryThresholds}
               thresholdApplyMode={thresholdApplyMode}
+            />
+          )}
+
+          {activeTab === "accueil_caisse" && (
+            <TabAccueilCaisse
+              consultations={consultations}
+              onUpdateConsultations={handleUpdateConsultations}
+              factures={factures}
+              onUpdateFactures={handleUpdateFactures}
+              theme={theme}
+            />
+          )}
+
+          {activeTab === "infirmier" && (
+            <TabInfirmier
+              consultations={consultations}
+              onUpdateConsultations={handleUpdateConsultations}
+              theme={theme}
             />
           )}
 
