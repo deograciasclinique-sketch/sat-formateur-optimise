@@ -550,7 +550,7 @@ export default function App() {
     // Responsable has full control of all stations
     if (p.includes("responsable") || p.includes("directeur") || p.includes("admin") || p.includes("chef") || currentUserPin === "0000") {
       return [
-        "dashboard", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
+       "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_famil...
         "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
         "assurances", "rh", "indicateurs", "qualite", "documents", "settings"
       ];
@@ -562,13 +562,13 @@ export default function App() {
     } else if (p.includes("sage-femme") || p.includes("maternité") || p.includes("maternite")) {
       tabs.push("maternite", "vaccination", "rdv", "documents", "planif_familiale");
     } else if (p.includes("infirmier") || p.includes("aide-soignant") || p.includes("triage")) {
-      tabs.push("urgences", "hospit", "vaccination", "rdv");
+      tabs.push("infirmier", "urgences", "hospit", "vaccination", "rdv");
     } else if (p.includes("labo") || p.includes("laborantin")) {
       tabs.push("labo");
     } else if (p.includes("pharma") || p.includes("pharmacien") || p.includes("stock")) {
       tabs.push("pharma", "actes_tarifs");
     } else if (p.includes("accueil") || p.includes("secrétaire") || p.includes("secretaire") || p.includes("réception") || p.includes("reception")) {
-      tabs.push("rdv", "rdv_en_ligne", "factures", "actes_tarifs");
+      tabs.push("accueil_caisse", "rdv", "rdv_en_ligne", "factures", "actes_tarifs");
     } else if (p.includes("comptable") || p.includes("finance") || p.includes("caissier")) {
       tabs.push("factures", "assurances", "actes_tarifs");
     } else {
