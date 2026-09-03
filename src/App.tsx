@@ -550,7 +550,7 @@ export default function App() {
     // Responsable has full control of all stations
     if (p.includes("responsable") || p.includes("directeur") || p.includes("admin") || p.includes("chef") || currentUserPin === "0000") {
       return [
-       "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_famil...
+       "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
         "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
         "assurances", "rh", "indicateurs", "qualite", "documents", "settings"
       ];
