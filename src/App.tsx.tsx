@@ -2062,6 +2062,7 @@ export default function App() {
               onUpdateConsultations={handleUpdateConsultations}
               factures={factures}
               onUpdateFactures={handleUpdateFactures}
+              actes={actesTarifaires}
               theme={theme}
             />
           )}
