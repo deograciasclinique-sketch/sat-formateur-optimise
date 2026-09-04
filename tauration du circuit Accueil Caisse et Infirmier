@@ -1,0 +1,56 @@
+warning: in the working copy of 'src/App.tsx', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/src/App.tsx b/src/App.tsx[m
+[1mindex 38536f7..99b0735 100644[m
+[1m--- a/src/App.tsx[m
+[1m+++ b/src/App.tsx[m
+[36m@@ -60,6 +60,8 @@[m [mimport TabIndicateurs from "./components/TabIndicateurs";[m
+ import TabTaches from "./components/TabTaches";[m
+ import TabPharmacie from "./components/TabPharmacie";[m
+ import TabFacturation from "./components/TabFacturation";[m
+[32m+[m[32mimport TabAccueilCaisse from "./components/TabAccueilCaisse";[m
+[32m+[m[32mimport TabInfirmier from "./components/TabInfirmier";[m
+ import TabRDV from "./components/TabRDV";[m
+ import TabRH from "./components/TabRH";[m
+ import TabHospitalisation from "./components/TabHospitalisation";[m
+[36m@@ -87,6 +89,7 @@[m [mimport {[m
+   Briefcase,[m
+   FileText,[m
+   Receipt,[m
+[32m+[m[32m  Wallet2,[m
+   Activity,[m
+   ClipboardList,[m
+   ShieldCheck,[m
+[36m@@ -1293,6 +1296,8 @@[m [mexport default function App() {[m
+       {[m
+         title: "🏥 Soins & Clinique",[m
+         items: [[m
+[32m+[m[32m          { id: "accueil_caisse", label: "Accueil & Caisse", icon: Wallet2 },[m
+[32m+[m[32m          { id: "infirmier", label: "Salle des Infirmiers", icon: Activity, alertCount: consultations.filter((c) => c.statut === "Attente prise en charge infirmier").length },[m
+           { id: "medecine", label: "Consultation Générale", icon: Stethoscope },[m
+           { id: "urgences", label: "Triage & Urgences", icon: ShieldAlert, alertCount: urgences.filter((u) => u.statut !== "Sorti(e) ou Libéré(e)").length },[m
+           { id: "hospit", label: "Hospitalisations", icon: HeartPulse, alertCount: hospitalisations.filter((h) => h.statut === "En cours").length },[m
+[36m@@ -2051,6 +2056,24 @@[m [mexport default function App() {[m
+             />[m
+           )}[m
+ [m
+[32m+[m[32m          {activeTab === "accueil_caisse" && ([m
+[32m+[m[32m            <TabAccueilCaisse[m
+[32m+[m[32m              consultations={consultations}[m
+[32m+[m[32m              onUpdateConsultations={handleUpdateConsultations}[m
+[32m+[m[32m              factures={factures}[m
+[32m+[m[32m              onUpdateFactures={handleUpdateFactures}[m
+[32m+[m[32m              theme={theme}[m
+[32m+[m[32m            />[m
+[32m+[m[32m          )}[m
+[32m+[m
+[32m+[m[32m          {activeTab === "infirmier" && ([m
+[32m+[m[32m            <TabInfirmier[m
+[32m+[m[32m              consultations={consultations}[m
+[32m+[m[32m              onUpdateConsultations={handleUpdateConsultations}[m
+[32m+[m[32m              theme={theme}[m
+[32m+[m[32m            />[m
+[32m+[m[32m          )}[m
+[32m+[m
+           {activeTab === "factures" && ([m
+             <TabFacturation[m
+               factures={factures}[m

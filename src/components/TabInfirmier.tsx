@@ -4,24 +4,40 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Consultation } from "../types";
+import { Consultation, Staff } from "../types";
 import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2 } from "lucide-react";
 
 interface TabInfirmierProps {
   consultations: Consultation[];
   onUpdateConsultations: (consults: Consultation[]) => void;
   theme?: "light" | "dark";
+  // Liste du personnel (même source que l'onglet RH), pour choisir le
+  // prestataire qui prend en charge le patient.
+  staff?: Staff[];
 }
+
+const ZONES_RESIDENCE = ["0-4 km", "5-9 km", "10 km et plus"];
+const MODES_ENTREE = ["Auto orienté", "Référé", "Evacué", "Transféré (CMA)"];
 
 // Écran infirmier : liste des patients dont la consultation a été payée au
 // secrétariat et qui attendent la prise des constantes / complément d'état
 // civil. Une fois enregistré, le dossier passe au médecin.
-export default function TabInfirmier({ consultations, onUpdateConsultations, theme = "light" }: TabInfirmierProps) {
+export default function TabInfirmier({ consultations, onUpdateConsultations, theme = "light", staff = [] }: TabInfirmierProps) {
   const isDark = theme === "dark";
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  const todayIso = new Date().toISOString().slice(0, 10);
+
+  const [date, setDate] = useState(todayIso);
   const [profession, setProfession] = useState("");
+  const [commune, setCommune] = useState("");
   const [villageSecteur, setVillageSecteur] = useState("");
+  const [zoneResidence, setZoneResidence] = useState("");
+  const [modeEntree, setModeEntree] = useState("");
+  const [ancienConsultant, setAncienConsultant] = useState(false);
+  const [praticienId, setPraticienId] = useState("");
+  const [filtrePraticien, setFiltrePraticien] = useState("");
+  const [telephonePraticien, setTelephonePraticien] = useState("");
   const [temperature, setTemperature] = useState("");
   const [poids, setPoids] = useState("");
   const [taille, setTaille] = useState("");
@@ -29,6 +45,12 @@ export default function TabInfirmier({ consultations, onUpdateConsultations, the
   const [pouls, setPouls] = useState("");
   const [glycemie, setGlycemie] = useState("");
   const [plainte, setPlainte] = useState("");
+
+  const praticiensFiltres = useMemo(() => {
+    if (!filtrePraticien.trim()) return staff;
+    const q = filtrePraticien.trim().toLowerCase();
+    return staff.filter((s) => (s.nom || "").toLowerCase().includes(q));
+  }, [staff, filtrePraticien]);
 
   const enAttente = useMemo(
     () => consultations.filter((c) => c.statut === "Attente prise en charge infirmier"),
@@ -53,8 +75,16 @@ export default function TabInfirmier({ consultations, onUpdateConsultations, the
 
   const openPatient = (c: Consultation) => {
     setSelectedId(c.id);
+    setDate(c.date || todayIso);
     setProfession(c.profession || "");
+    setCommune(c.commune || "");
     setVillageSecteur(c.villageSecteur || "");
+    setZoneResidence(c.zoneResidence || "");
+    setModeEntree(c.modeEntree || "");
+    setAncienConsultant(!!c.ancienConsultant);
+    setPraticienId(c.praticienId || "");
+    setFiltrePraticien("");
+    setTelephonePraticien(c.telephonePraticien || "");
     setTemperature(c.vitals?.temperature ? String(c.vitals.temperature) : "");
     setPoids(c.vitals?.poids ? String(c.vitals.poids) : "");
     setTaille(c.vitals?.taille ? String(c.vitals.taille) : "");
@@ -80,8 +110,15 @@ export default function TabInfirmier({ consultations, onUpdateConsultations, the
 
     const updated: Consultation = {
       ...selected,
+      date,
       profession: profession.trim(),
+      commune: commune.trim(),
       villageSecteur: villageSecteur.trim(),
+      zoneResidence,
+      modeEntree,
+      ancienConsultant,
+      praticienId,
+      telephonePraticien: telephonePraticien.trim(),
       plainte: plainte.trim(),
       vitals: {
         temperature: parseFloat(temperature) || 0,
@@ -140,14 +177,122 @@ export default function TabInfirmier({ consultations, onUpdateConsultations, the
           <div className={`rounded-lg border p-4 space-y-4 ${isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"}`}>
             <h3 className="font-semibold text-lg">{selected.patient}</h3>
 
+            <div>
+              <label className="text-sm font-medium">Date de la consultation</label>
+              <input
+                type="date"
+                className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
+              <p className={`text-xs mt-1 ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                Par défaut, la date du jour. Modifiez-la pour enregistrer un ancien dossier de consultation (antérieur à aujourd'hui).
+              </p>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium">Profession</label>
+              <input
+                className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                placeholder="Ex: Enseignant"
+                value={profession}
+                onChange={(e) => setProfession(e.target.value)}
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-sm font-medium">Profession</label>
-                <input className="w-full mt-1 px-3 py-2 rounded border bg-transparent" value={profession} onChange={(e) => setProfession(e.target.value)} />
+                <label className="text-sm font-medium">Adresse - Commune/Arrond.</label>
+                <input
+                  className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                  placeholder="Ex: Bobo-Dioulasso, Secteur 15"
+                  value={commune}
+                  onChange={(e) => setCommune(e.target.value)}
+                />
               </div>
               <div>
-                <label className="text-sm font-medium">Village / Secteur</label>
-                <input className="w-full mt-1 px-3 py-2 rounded border bg-transparent" value={villageSecteur} onChange={(e) => setVillageSecteur(e.target.value)} />
+                <label className="text-sm font-medium">Adresse - Village/Secteur</label>
+                <input
+                  className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                  placeholder="Ex: Belle-ville"
+                  value={villageSecteur}
+                  onChange={(e) => setVillageSecteur(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium">Zone de résidence du consultant</label>
+                <select
+                  className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                  value={zoneResidence}
+                  onChange={(e) => setZoneResidence(e.target.value)}
+                >
+                  <option value="">— Choisir —</option>
+                  {ZONES_RESIDENCE.map((z) => (
+                    <option key={z} value={z}>{z}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Mode d'entrée</label>
+                <select
+                  className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                  value={modeEntree}
+                  onChange={(e) => setModeEntree(e.target.value)}
+                >
+                  <option value="">— Choisir —</option>
+                  {MODES_ENTREE.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={ancienConsultant}
+                onChange={(e) => setAncienConsultant(e.target.checked)}
+              />
+              Ancien consultant (Déjà venu)
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-medium">Nom, prénom, qualification et signature du prestataire</label>
+                <input
+                  className="w-full mt-1 mb-1 px-3 py-1.5 text-sm rounded border bg-transparent"
+                  placeholder="Filtrer praticien"
+                  value={filtrePraticien}
+                  onChange={(e) => setFiltrePraticien(e.target.value)}
+                />
+                <select
+                  className="w-full px-3 py-2 rounded border bg-transparent"
+                  value={praticienId}
+                  onChange={(e) => {
+                    setPraticienId(e.target.value);
+                    const s = staff.find((st) => st.id === e.target.value);
+                    setTelephonePraticien(s?.contact || "");
+                  }}
+                >
+                  <option value="">— Choisir le praticien —</option>
+                  {praticiensFiltres.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.nom}{s.poste ? ` (${s.poste})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium">Téléphone</label>
+                <input
+                  className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                  placeholder="+226..."
+                  value={telephonePraticien}
+                  onChange={(e) => setTelephonePraticien(e.target.value)}
+                />
               </div>
             </div>
 

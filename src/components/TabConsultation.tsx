@@ -91,6 +91,13 @@ export default function TabConsultation({
   })();
 
   // General Consultation Form states
+  // Circuit paiement : quand le médecin ouvre un dossier envoyé par
+  // l'infirmier (statut "Attente consultation médecin"), on garde son id ici
+  // pour mettre à jour ce dossier (au lieu d'en créer un nouveau) et calculer
+  // le bon statut de suite après la prescription.
+  const [queuedConsultationId, setQueuedConsultationId] = useState<string | null>(null);
+  const patientsEnAttenteMedecin = consultations.filter((c) => c.statut === "Attente consultation médecin");
+
   const [consPatient, setConsPatient] = useState("");
   const [consAge, setConsAge] = useState("");
   const [consSexe, setConsSexe] = useState("Masculin");
@@ -708,6 +715,33 @@ export default function TabConsultation({
     setIsDictating(field);
   };
 
+  // Charge dans le formulaire un dossier envoyé par l'infirmier (état civil +
+  // constantes déjà saisis), pour que le médecin n'ait plus qu'à ajouter le
+  // diagnostic et la prescription.
+  const handleOuvrirDossierPatient = (c: Consultation) => {
+    setQueuedConsultationId(c.id);
+    setConsPatient(c.patient);
+    setConsAge(c.age ? String(c.age) : "");
+    setConsSexe(c.sexe);
+    setConsContact(c.contact || "");
+    setConsProfession(c.profession || "");
+    setConsFemmeEnceinte(!!c.femmeEnceinte);
+    setConsCommune(c.commune || "");
+    setConsVillageSecteur(c.villageSecteur || "");
+    setConsZoneResidence(c.zoneResidence || "");
+    setConsModeEntree(c.modeEntree || "");
+    setConsAncienConsultant(!!c.ancienConsultant);
+    setConsObservations(c.observations || "");
+    setConsDate(c.date || getTodayStr());
+    setVTemp(c.vitals?.temperature ? String(c.vitals.temperature) : "");
+    setVPoids(c.vitals?.poids ? String(c.vitals.poids) : "");
+    setVTaille(c.vitals?.taille ? String(c.vitals.taille) : "");
+    setVTa(c.vitals?.tensionArterielle || "");
+    setVPouls(c.vitals?.pouls ? String(c.vitals.pouls) : "");
+    setVGlycemie(c.vitals?.glycemie ? String(c.vitals.glycemie) : "");
+    setConsPlainte(c.plainte || "");
+  };
+
   const handleSaveConsultation = () => {
     if (!consPatient.trim() || !consPlainte.trim() || !consDiagnostic.trim()) {
       alert("Veuillez renseigner le nom du patient, le motif de consultation, et le diagnostic de présomption.");
@@ -727,8 +761,20 @@ export default function TabConsultation({
       savedImc = parseFloat((weightNum / (heightM * heightM)).toFixed(2));
     }
 
+        // Circuit paiement : si ce dossier vient de la file d'attente médecin
+        // (envoyé par l'infirmier), on garde son id pour le mettre à jour
+        // plutôt que d'en créer un nouveau. Le statut suivant dépend de si
+        // une prescription (ordonnance ou labo) a été faite : dans ce cas le
+        // dossier repart au secrétariat pour paiement des actes, sinon il est
+        // clos directement.
+        const aDesActesPrescrits = presLines.length > 0 || tempLabResults.length > 0;
+        const statutApresConsultation: NonNullable<Consultation["statut"]> = aDesActesPrescrits
+          ? "Attente paiement actes"
+          : "Terminée";
+
         const newCons: Consultation = {
-      id: generateUid(),
+      id: queuedConsultationId || generateUid(),
+      statut: statutApresConsultation,
       patient: consPatient.trim(),
       age: parseFloat(consAge) || 0,
       sexe: consSexe as any,
@@ -851,7 +897,12 @@ export default function TabConsultation({
       }
     }
 
-    onUpdateConsultations([newCons, ...consultations]);
+    if (queuedConsultationId) {
+      onUpdateConsultations(consultations.map((c) => (c.id === queuedConsultationId ? newCons : c)));
+    } else {
+      onUpdateConsultations([newCons, ...consultations]);
+    }
+    setQueuedConsultationId(null);
 
     // Clear form
         setConsPatient("");
@@ -1368,6 +1419,31 @@ export default function TabConsultation({
 
   return (
     <div className="space-y-6">
+      {/* File d'attente médecin : dossiers envoyés par l'infirmier (état civil
+          + constantes déjà saisis), en attente de diagnostic/prescription. */}
+      {patientsEnAttenteMedecin.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-xs">
+          <div className="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2">
+            Patients en attente de consultation ({patientsEnAttenteMedecin.length})
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {patientsEnAttenteMedecin.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => handleOuvrirDossierPatient(c)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition ${
+                  queuedConsultationId === c.id
+                    ? "bg-amber-600 text-white border-amber-600"
+                    : "bg-white border-amber-300 text-amber-800 hover:bg-amber-100"
+                }`}
+              >
+                {c.patient}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-xs border-t-4 border-t-primary-600">

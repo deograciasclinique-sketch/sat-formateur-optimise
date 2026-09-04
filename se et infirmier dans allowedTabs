@@ -1,0 +1,29 @@
+[1mdiff --git a/src/App.tsx b/src/App.tsx[m
+[1mindex 5a79635..180e10c 100644[m
+[1m--- a/src/App.tsx[m
+[1m+++ b/src/App.tsx[m
+[36m@@ -550,7 +550,7 @@[m [mexport default function App() {[m
+     // Responsable has full control of all stations[m
+     if (p.includes("responsable") || p.includes("directeur") || p.includes("admin") || p.includes("chef") || currentUserPin === "0000") {[m
+       return [[m
+[31m-        "dashboard", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",[m
+[32m+[m[32m       "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_famil...[m
+         "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",[m
+         "assurances", "rh", "indicateurs", "qualite", "documents", "settings"[m
+       ];[m
+[36m@@ -562,13 +562,13 @@[m [mexport default function App() {[m
+     } else if (p.includes("sage-femme") || p.includes("maternité") || p.includes("maternite")) {[m
+       tabs.push("maternite", "vaccination", "rdv", "documents", "planif_familiale");[m
+     } else if (p.includes("infirmier") || p.includes("aide-soignant") || p.includes("triage")) {[m
+[31m-      tabs.push("urgences", "hospit", "vaccination", "rdv");[m
+[32m+[m[32m      tabs.push("infirmier", "urgences", "hospit", "vaccination", "rdv");[m
+     } else if (p.includes("labo") || p.includes("laborantin")) {[m
+       tabs.push("labo");[m
+     } else if (p.includes("pharma") || p.includes("pharmacien") || p.includes("stock")) {[m
+       tabs.push("pharma", "actes_tarifs");[m
+     } else if (p.includes("accueil") || p.includes("secrétaire") || p.includes("secretaire") || p.includes("réception") || p.includes("reception")) {[m
+[31m-      tabs.push("rdv", "rdv_en_ligne", "factures", "actes_tarifs");[m
+[32m+[m[32m      tabs.push("accueil_caisse", "rdv", "rdv_en_ligne", "factures", "actes_tarifs");[m
+     } else if (p.includes("comptable") || p.includes("finance") || p.includes("caissier")) {[m
+       tabs.push("factures", "assurances", "actes_tarifs");[m
+     } else {[m

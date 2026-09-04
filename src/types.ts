@@ -118,6 +118,10 @@ export interface Facture {
   montantPaye: number;
   statut: "Payée" | "Partielle" | "Impayée";
   createdAt: string;
+  // Lien vers le dossier de consultation, quand la facture correspond au
+  // paiement de la consultation ou des actes prescrits (circuit secrétariat).
+  consultationId?: string;
+  typePaiement?: "Consultation" | "Actes";
 }
 
 export interface Depense {
@@ -605,6 +609,17 @@ export interface LigneOrdonnance {
   quantitePrescrite?: number;
 }
 
+// Circuit du dossier patient : secrétariat (paiement consultation) -> infirmier
+// (constantes + état civil) -> médecin (diagnostic + prescription) -> secrétariat
+// (paiement des actes prescrits, si besoin) -> infirmier (soins) et/ou labo.
+export type StatutConsultation =
+  | "Attente paiement consultation"   // créé par le secrétariat, pas encore payé
+  | "Attente prise en charge infirmier" // consultation payée, en attente de l'infirmier
+  | "Attente consultation médecin"    // constantes prises, en attente du médecin
+  | "Attente paiement actes"          // prescription faite, actes à payer au secrétariat
+  | "Attente exécution actes"         // actes payés, en attente d'exécution (soins/labo)
+  | "Terminée";                       // dossier clos (aucun acte prescrit ou tout exécuté)
+
 export interface Consultation {
   id: string;
   patient: string;
@@ -618,8 +633,18 @@ export interface Consultation {
   zoneResidence?: "0-4 km" | "5-9 km" | "10 km et plus" | string;
   modeEntree?: "Auto orienté" | "Référé" | "Evacué" | "Transféré (CMA)" | string;
   ancienConsultant?: boolean;
+  // Prestataire de la salle infirmier (peut différer du médecin qui verra
+  // le patient ensuite) : renvoie vers Staff["id"] et son contact.
+  praticienId?: string;
+  telephonePraticien?: string;
   date: string;
   medecinId?: string;
+  // Statut du dossier dans le circuit secrétariat -> infirmier -> médecin ->
+  // secrétariat -> soins/labo. Absent = ancien dossier créé avant cette
+  // fonctionnalité (traité comme "Terminée" à l'affichage).
+  statut?: StatutConsultation;
+  // Montant de la consultation (fixé au secrétariat avant paiement).
+  montantConsultation?: number;
   vitals: {
     temperature: number;
     poids: number;
