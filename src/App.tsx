@@ -563,11 +563,11 @@ export default function App() {
     if (p.includes("médecin") || p.includes("medecin") || p.includes("pédiatre") || p.includes("pediatre") || p.includes("praticien")) {
       tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs");
     } else if (p.includes("sage-femme") || p.includes("maternité") || p.includes("maternite")) {
-      // Peut assurer une consultation complète (diagnostic + prescription) en l'absence du médecin
-      tabs.push("maternite", "medecine", "vaccination", "rdv", "documents", "planif_familiale");
+      // Accède aussi à la Salle des Infirmiers : c'est là que se trouve le
+      // circuit complet (constantes -> diagnostic/prescription -> transfert).
+      tabs.push("maternite", "infirmier", "vaccination", "rdv", "documents", "planif_familiale");
     } else if (p.includes("infirmier") || p.includes("aide-soignant") || p.includes("triage")) {
-      // Peut assurer une consultation complète (diagnostic + prescription) en l'absence du médecin
-      tabs.push("infirmier", "medecine", "urgences", "hospit", "vaccination", "rdv");
+      tabs.push("infirmier", "urgences", "hospit", "vaccination", "rdv");
     } else if (p.includes("labo") || p.includes("laborantin")) {
       tabs.push("labo");
     } else if (p.includes("pharma") || p.includes("pharmacien") || p.includes("stock")) {
@@ -2075,6 +2075,10 @@ export default function App() {
               onUpdateConsultations={handleUpdateConsultations}
               theme={theme}
               staff={staff}
+              hospitalisations={hospitalisations}
+              onUpdateHospitalisations={handleUpdateHospitalisations}
+              urgences={urgences}
+              onUpdateUrgences={handleUpdateUrgences}
             />
           )}
 

@@ -4,8 +4,9 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Consultation, Staff } from "../types";
-import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2 } from "lucide-react";
+import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence } from "../types";
+import { generateUid } from "../data";
+import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send } from "lucide-react";
 
 interface TabInfirmierProps {
   consultations: Consultation[];
@@ -14,7 +15,18 @@ interface TabInfirmierProps {
   // Liste du personnel (même source que l'onglet RH), pour choisir le
   // prestataire qui prend en charge le patient.
   staff?: Staff[];
+  // Optionnels : permettent à l'infirmier(ère) ou à la sage-femme de créer
+  // automatiquement le dossier correspondant lorsqu'il/elle conclut
+  // lui-même/elle-même une consultation avec décision d'hospitalisation ou
+  // d'admission aux urgences (même logique qu'en Consultation Générale).
+  hospitalisations?: Hospitalisation[];
+  onUpdateHospitalisations?: (h: Hospitalisation[]) => void;
+  urgences?: PatientUrgence[];
+  onUpdateUrgences?: (u: PatientUrgence[]) => void;
 }
+
+type ModeCloture = "transfert" | "moimeme";
+type DecisionFinale = "Retour à domicile" | "Référer vers un autre service" | "Hospitalisation" | "Mise en observation" | "Admission aux urgences";
 
 const ZONES_RESIDENCE = ["0-4 km", "5-9 km", "10 km et plus"];
 const MODES_ENTREE = ["Auto orienté", "Référé", "Evacué", "Transféré (CMA)"];
@@ -22,9 +34,34 @@ const MODES_ENTREE = ["Auto orienté", "Référé", "Evacué", "Transféré (CMA
 // Écran infirmier : liste des patients dont la consultation a été payée au
 // secrétariat et qui attendent la prise des constantes / complément d'état
 // civil. Une fois enregistré, le dossier passe au médecin.
-export default function TabInfirmier({ consultations, onUpdateConsultations, theme = "light", staff = [] }: TabInfirmierProps) {
+export default function TabInfirmier({
+  consultations,
+  onUpdateConsultations,
+  theme = "light",
+  staff = [],
+  hospitalisations = [],
+  onUpdateHospitalisations,
+  urgences = [],
+  onUpdateUrgences,
+}: TabInfirmierProps) {
   const isDark = theme === "dark";
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Choix fait par l'infirmier(ère)/sage-femme : conclure elle/lui-même la
+  // consultation (diagnostic + prescription) ou la transférer (au médecin,
+  // en Consultation Générale, ou vers un autre service).
+  const [modeCloture, setModeCloture] = useState<ModeCloture>("transfert");
+  const [examenPhysique, setExamenPhysique] = useState("");
+  const [diagnostic, setDiagnostic] = useState("");
+  const [diagnosticFinal, setDiagnosticFinal] = useState("");
+  const [decision, setDecision] = useState<DecisionFinale>("Retour à domicile");
+  const [referenceService, setReferenceService] = useState("");
+  const [ordonnance, setOrdonnance] = useState<LigneOrdonnance[]>([]);
+  const [ligneMedNom, setLigneMedNom] = useState("");
+  const [ligneMedPosologie, setLigneMedPosologie] = useState("");
+  const [ligneMedDuree, setLigneMedDuree] = useState("");
+  const [destinationTransfert, setDestinationTransfert] = useState<"medecin" | "autre">("medecin");
+  const [autreServiceTexte, setAutreServiceTexte] = useState("");
 
   const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -92,14 +129,42 @@ export default function TabInfirmier({ consultations, onUpdateConsultations, the
     setPouls(c.vitals?.pouls ? String(c.vitals.pouls) : "");
     setGlycemie(c.vitals?.glycemie ? String(c.vitals.glycemie) : "");
     setPlainte(c.plainte || "");
+    // Réinitialisation de la partie "conclusion de la consultation"
+    setModeCloture("transfert");
+    setExamenPhysique(c.examenPhysique || "");
+    setDiagnostic(c.diagnostic || "");
+    setDiagnosticFinal(c.diagnosticFinal || "");
+    setDecision((c.decision as DecisionFinale) || "Retour à domicile");
+    setReferenceService(c.referenceService || "");
+    setOrdonnance(c.ordonnance || []);
+    setLigneMedNom("");
+    setLigneMedPosologie("");
+    setLigneMedDuree("");
   };
 
-  const handleEnvoyerAuMedecin = () => {
-    if (!selected) return;
-    if (!plainte.trim()) {
-      alert("Veuillez renseigner le motif de consultation.");
-      return;
-    }
+  const handleAjouterLigneOrdonnance = () => {
+    if (!ligneMedNom.trim()) return;
+    setOrdonnance((prev) => [
+      ...prev,
+      {
+        id: generateUid(),
+        medicamentNom: ligneMedNom.trim(),
+        posologie: ligneMedPosologie.trim(),
+        duree: ligneMedDuree.trim(),
+      },
+    ]);
+    setLigneMedNom("");
+    setLigneMedPosologie("");
+    setLigneMedDuree("");
+  };
+
+  const handleSupprimerLigneOrdonnance = (id: string) => {
+    setOrdonnance((prev) => prev.filter((l) => l.id !== id));
+  };
+
+  // Construit les constantes + informations communes aux deux issues
+  // possibles (transfert ou clôture par l'infirmier/la sage-femme).
+  const buildBaseUpdate = (): Consultation => {
     const weightNum = parseFloat(poids) || 0;
     const heightNum = parseFloat(taille) || 0;
     let imc: number | undefined = undefined;
@@ -107,9 +172,8 @@ export default function TabInfirmier({ consultations, onUpdateConsultations, the
       const heightM = heightNum / 100;
       imc = parseFloat((weightNum / (heightM * heightM)).toFixed(2));
     }
-
-    const updated: Consultation = {
-      ...selected,
+    return {
+      ...selected!,
       date,
       profession: profession.trim(),
       commune: commune.trim(),
@@ -129,7 +193,104 @@ export default function TabInfirmier({ consultations, onUpdateConsultations, the
         taille: heightNum || undefined,
         imc,
       },
-      statut: "Attente consultation médecin",
+    };
+  };
+
+  const handleTerminerMoiMeme = () => {
+    if (!selected) return;
+    if (!plainte.trim()) {
+      alert("Veuillez renseigner le motif de consultation.");
+      return;
+    }
+    if (!diagnostic.trim()) {
+      alert("Veuillez renseigner le diagnostic avant de clôturer la consultation.");
+      return;
+    }
+    if (decision === "Référer vers un autre service" && !referenceService.trim()) {
+      alert("Veuillez préciser le service vers lequel le patient est référé.");
+      return;
+    }
+
+    const nowTime = new Date().toTimeString().slice(0, 5);
+    const praticienNom = staff.find((s) => s.id === praticienId)?.nom || "";
+
+    let updated: Consultation = {
+      ...buildBaseUpdate(),
+      examenPhysique: examenPhysique.trim(),
+      diagnostic: diagnostic.trim(),
+      diagnosticFinal: diagnosticFinal.trim() || undefined,
+      ordonnance: [...ordonnance],
+      decision,
+      referenceService: decision === "Référer vers un autre service" ? referenceService.trim() : undefined,
+      // Dossier clos par l'infirmier/la sage-femme : s'il reste des actes à
+      // payer (ordonnance), on repasse par le secrétariat, sinon le dossier
+      // est terminé.
+      statut: ordonnance.length > 0 ? "Attente paiement actes" : "Terminée",
+    };
+
+    if (decision === "Hospitalisation" || decision === "Mise en observation") {
+      if (onUpdateHospitalisations) {
+        const newHosp: Hospitalisation = {
+          id: generateUid(),
+          patient: updated.patient,
+          contact: updated.contact,
+          dateAdmission: updated.date,
+          heureAdmission: nowTime,
+          service: decision === "Mise en observation" ? "Observation" : "Hospitalisation",
+          chambre: "",
+          medecin: praticienNom,
+          motif: updated.plainte,
+          notesInitiales: `Diagnostic (Salle Infirmier/Maternité) : ${updated.diagnostic}${updated.examenPhysique ? "\nExamen clinique : " + updated.examenPhysique : ""}`,
+          typeAdmission: decision === "Mise en observation" ? "Mise en Observation (72h)" : "Hospitalisation",
+          statut: "En cours",
+          dateSortie: "",
+          statutSortie: "",
+          diagnosticSortie: "",
+          createdAt: new Date().toISOString(),
+        };
+        updated.linkedHospitalisationId = newHosp.id;
+        onUpdateHospitalisations([newHosp, ...hospitalisations]);
+      }
+    } else if (decision === "Admission aux urgences") {
+      if (onUpdateUrgences) {
+        const newUrg: PatientUrgence = {
+          id: generateUid(),
+          patient: updated.patient,
+          contact: updated.contact,
+          severite: "Urgent (Jaune)",
+          plainte: updated.plainte,
+          constantes: `T°: ${updated.vitals.temperature}°C | TA: ${updated.vitals.tensionArterielle} | Pouls: ${updated.vitals.pouls} | Glycémie: ${updated.vitals.glycemie}`,
+          medecinId: praticienId,
+          dateArrivee: updated.date,
+          heureArrivee: nowTime,
+          statut: "En attente de médecin",
+          createdAt: new Date().toISOString(),
+        };
+        updated.linkedUrgenceId = newUrg.id;
+        onUpdateUrgences([newUrg, ...urgences]);
+      }
+    }
+
+    onUpdateConsultations(consultations.map((c) => (c.id === selected.id ? updated : c)));
+    setSelectedId(null);
+    alert("Consultation clôturée et enregistrée pour : " + updated.patient);
+  };
+
+  const handleEnvoyerAuMedecin = () => {
+    if (!selected) return;
+    if (!plainte.trim()) {
+      alert("Veuillez renseigner le motif de consultation.");
+      return;
+    }
+    if (destinationTransfert === "autre" && !autreServiceTexte.trim()) {
+      alert("Veuillez préciser le service vers lequel le patient est transféré.");
+      return;
+    }
+
+    const updated: Consultation = {
+      ...buildBaseUpdate(),
+      referenceService: destinationTransfert === "autre" ? autreServiceTexte.trim() : undefined,
+      statut: destinationTransfert === "autre" ? "Transféré vers un autre service" : "Attente consultation médecin",
     };
 
     onUpdateConsultations(consultations.map((c) => (c.id === selected.id ? updated : c)));
@@ -331,12 +492,189 @@ export default function TabInfirmier({ consultations, onUpdateConsultations, the
               </div>
             </div>
 
-            <button
-              onClick={handleEnvoyerAuMedecin}
-              className="px-4 py-2 rounded bg-blue-600 text-white font-medium flex items-center gap-2 hover:bg-blue-700"
-            >
-              <Stethoscope className="w-4 h-4" /> Envoyer au médecin <ArrowRight className="w-4 h-4" />
-            </button>
+            <div className="pt-2 border-t border-dashed">
+              <h4 className="text-sm font-semibold mb-2">Suite à donner</h4>
+              <div className="flex gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setModeCloture("moimeme")}
+                  className={`flex-1 px-3 py-2 rounded border text-sm font-medium flex items-center justify-center gap-2 transition ${
+                    modeCloture === "moimeme"
+                      ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                      : isDark
+                      ? "border-gray-700 hover:bg-gray-700"
+                      : "border-gray-200 hover:bg-gray-50"
+                  }`}
+                >
+                  <ClipboardCheck className="w-4 h-4" /> Je termine la consultation moi-même
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModeCloture("transfert")}
+                  className={`flex-1 px-3 py-2 rounded border text-sm font-medium flex items-center justify-center gap-2 transition ${
+                    modeCloture === "transfert"
+                      ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-400"
+                      : isDark
+                      ? "border-gray-700 hover:bg-gray-700"
+                      : "border-gray-200 hover:bg-gray-50"
+                  }`}
+                >
+                  <Send className="w-4 h-4" /> Transférer le patient
+                </button>
+              </div>
+
+              {modeCloture === "moimeme" ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-sm font-medium">Examen clinique</label>
+                    <textarea
+                      className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                      rows={2}
+                      value={examenPhysique}
+                      onChange={(e) => setExamenPhysique(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Diagnostic *</label>
+                    <textarea
+                      className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                      rows={2}
+                      value={diagnostic}
+                      onChange={(e) => setDiagnostic(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Diagnostic final / de sortie (si nécessaire)</label>
+                    <textarea
+                      className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                      rows={2}
+                      value={diagnosticFinal}
+                      onChange={(e) => setDiagnosticFinal(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <h5 className="text-xs font-semibold mb-1">Ordonnance</h5>
+                    {ordonnance.length > 0 && (
+                      <div className="space-y-1 mb-2">
+                        {ordonnance.map((l) => (
+                          <div
+                            key={l.id}
+                            className={`flex items-center justify-between px-2 py-1.5 rounded border text-sm ${
+                              isDark ? "border-gray-700 bg-gray-900" : "border-gray-200 bg-gray-50"
+                            }`}
+                          >
+                            <span>
+                              {l.medicamentNom}
+                              {l.posologie ? ` — ${l.posologie}` : ""}
+                              {l.duree ? ` (${l.duree})` : ""}
+                            </span>
+                            <button type="button" onClick={() => handleSupprimerLigneOrdonnance(l.id)}>
+                              <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-4 gap-2">
+                      <input
+                        className="col-span-2 px-2 py-1.5 text-sm rounded border bg-transparent"
+                        placeholder="Médicament"
+                        value={ligneMedNom}
+                        onChange={(e) => setLigneMedNom(e.target.value)}
+                      />
+                      <input
+                        className="px-2 py-1.5 text-sm rounded border bg-transparent"
+                        placeholder="Posologie"
+                        value={ligneMedPosologie}
+                        onChange={(e) => setLigneMedPosologie(e.target.value)}
+                      />
+                      <input
+                        className="px-2 py-1.5 text-sm rounded border bg-transparent"
+                        placeholder="Durée"
+                        value={ligneMedDuree}
+                        onChange={(e) => setLigneMedDuree(e.target.value)}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAjouterLigneOrdonnance}
+                      className="mt-2 text-xs font-medium flex items-center gap-1 text-blue-600 hover:text-blue-700"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Ajouter une ligne
+                    </button>
+                    <p className={`text-xs mt-1 ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+                      Ces lignes ne sont pas reliées au stock de la pharmacie (contrairement à l'ordonnance faite en
+                      Consultation Générale) : le stock ne sera pas déduit automatiquement.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium">Décision</label>
+                    <select
+                      className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                      value={decision}
+                      onChange={(e) => setDecision(e.target.value as DecisionFinale)}
+                    >
+                      <option value="Retour à domicile">Retour à domicile</option>
+                      <option value="Référer vers un autre service">Référer vers un autre service</option>
+                      <option value="Hospitalisation">Hospitalisation</option>
+                      <option value="Mise en observation">Mise en observation</option>
+                      <option value="Admission aux urgences">Admission aux urgences</option>
+                    </select>
+                  </div>
+                  {decision === "Référer vers un autre service" && (
+                    <div>
+                      <label className="text-sm font-medium">Service de destination</label>
+                      <input
+                        className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                        placeholder="Ex: Kinésithérapie, clinique partenaire..."
+                        value={referenceService}
+                        onChange={(e) => setReferenceService(e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleTerminerMoiMeme}
+                    className="px-4 py-2 rounded bg-emerald-600 text-white font-medium flex items-center gap-2 hover:bg-emerald-700"
+                  >
+                    <ClipboardCheck className="w-4 h-4" /> Terminer la consultation
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-sm font-medium">Transférer vers</label>
+                    <select
+                      className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                      value={destinationTransfert}
+                      onChange={(e) => setDestinationTransfert(e.target.value as "medecin" | "autre")}
+                    >
+                      <option value="medecin">Le médecin (Consultation Générale)</option>
+                      <option value="autre">Un autre service</option>
+                    </select>
+                  </div>
+                  {destinationTransfert === "autre" && (
+                    <div>
+                      <label className="text-sm font-medium">Préciser le service</label>
+                      <input
+                        className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
+                        placeholder="Ex: Maternité, clinique partenaire..."
+                        value={autreServiceTexte}
+                        onChange={(e) => setAutreServiceTexte(e.target.value)}
+                      />
+                    </div>
+                  )}
+                  <button
+                    onClick={handleEnvoyerAuMedecin}
+                    className="px-4 py-2 rounded bg-blue-600 text-white font-medium flex items-center gap-2 hover:bg-blue-700"
+                  >
+                    <Stethoscope className="w-4 h-4" /> Transférer <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

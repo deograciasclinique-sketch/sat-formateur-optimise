@@ -616,6 +616,7 @@ export type StatutConsultation =
   | "Attente paiement consultation"   // créé par le secrétariat, pas encore payé
   | "Attente prise en charge infirmier" // consultation payée, en attente de l'infirmier
   | "Attente consultation médecin"    // constantes prises, en attente du médecin
+  | "Transféré vers un autre service" // l'infirmier/la sage-femme oriente le patient ailleurs qu'au médecin
   | "Attente paiement actes"          // prescription faite, actes à payer au secrétariat
   | "Attente exécution actes"         // actes payés, en attente d'exécution (soins/labo)
   | "Terminée";                       // dossier clos (aucun acte prescrit ou tout exécuté)
