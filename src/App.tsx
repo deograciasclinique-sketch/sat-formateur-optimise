@@ -546,40 +546,87 @@ export default function App() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const allowedTabs = React.useMemo(() => {
-    if (!currentUser) return [];
-    const p = currentUser.poste.toLowerCase();
-    
-    // Responsable has full control of all stations
-    if (p.includes("responsable") || p.includes("directeur") || p.includes("admin") || p.includes("chef") || currentUserPin === "0000") {
-      return [
-       "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
-        "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
-        "assurances", "rh", "indicateurs", "qualite", "documents", "settings"
-      ];
+  // Détermine les onglets accessibles à partir de l'intitulé de poste (champ
+  // RH en texte libre). Les accents sont retirés avant comparaison (é/è/ê -> e)
+  // pour que "Infirmière", "Infirmiere" et "infirmier" soient tous reconnus de
+  // la même façon, et les mots-clés utilisent la racine commune aux formes
+  // masculine/féminine (ex: "infirm" couvre infirmier ET infirmière) plutôt
+  // que de lister chaque variante séparément.
+  const detectPosteAccess = (posteRaw: string): { tabs: string[]; reconnu: boolean } => {
+    const p = (posteRaw || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, ""); // retire les accents
+
+    if (p.includes("responsable") || p.includes("directeur") || p.includes("directric") || p.includes("admin") || p.includes("chef")) {
+      return {
+        reconnu: true,
+        tabs: [
+          "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
+          "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
+          "assurances", "rh", "indicateurs", "qualite", "documents", "settings",
+        ],
+      };
     }
-    
-    const tabs = ["taches"]; // everyone can see tasks
-    if (p.includes("médecin") || p.includes("medecin") || p.includes("pédiatre") || p.includes("pediatre") || p.includes("praticien")) {
+
+    const tabs = ["taches"]; // tout le monde voit les tâches
+    if (p.includes("medecin") || p.includes("pediatre") || p.includes("praticien")) {
       tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs");
-    } else if (p.includes("sage-femme") || p.includes("maternité") || p.includes("maternite")) {
+      return { reconnu: true, tabs };
+    }
+    if (p.includes("sage-femme") || p.includes("maternit")) {
       // Accède aussi à la Salle des Infirmiers : c'est là que se trouve le
       // circuit complet (constantes -> diagnostic/prescription -> transfert).
       tabs.push("maternite", "infirmier", "vaccination", "rdv", "documents", "planif_familiale");
-    } else if (p.includes("infirmier") || p.includes("aide-soignant") || p.includes("triage")) {
-      tabs.push("infirmier", "urgences", "hospit", "vaccination", "rdv");
-    } else if (p.includes("labo") || p.includes("laborantin")) {
-      tabs.push("labo");
-    } else if (p.includes("pharma") || p.includes("pharmacien") || p.includes("stock")) {
-      tabs.push("pharma", "actes_tarifs");
-    } else if (p.includes("accueil") || p.includes("secrétaire") || p.includes("secretaire") || p.includes("réception") || p.includes("reception")) {
-      tabs.push("accueil_caisse", "rdv", "rdv_en_ligne", "factures", "actes_tarifs");
-    } else if (p.includes("comptable") || p.includes("finance") || p.includes("caissier")) {
-      tabs.push("factures", "assurances", "actes_tarifs");
-    } else {
-      tabs.push("dashboard", "rdv");
+      return { reconnu: true, tabs };
     }
-    return tabs;
+    if (p.includes("infirm") || p.includes("aide-soignant") || p.includes("triage")) {
+      tabs.push("infirmier", "urgences", "hospit", "vaccination", "rdv");
+      return { reconnu: true, tabs };
+    }
+    if (p.includes("labo")) {
+      tabs.push("labo");
+      return { reconnu: true, tabs };
+    }
+    if (p.includes("pharma") || p.includes("stock")) {
+      tabs.push("pharma", "actes_tarifs");
+      return { reconnu: true, tabs };
+    }
+    if (p.includes("accueil") || p.includes("secretair") || p.includes("reception")) {
+      tabs.push("accueil_caisse", "rdv", "rdv_en_ligne", "factures", "actes_tarifs");
+      return { reconnu: true, tabs };
+    }
+    if (p.includes("comptable") || p.includes("finance") || p.includes("caiss")) {
+      tabs.push("factures", "assurances", "actes_tarifs");
+      return { reconnu: true, tabs };
+    }
+
+    // Poste non reconnu : accès minimal (tableau de bord + tâches) au lieu
+    // d'un écran vide, mais on le signale (voir posteReconnu ci-dessous) pour
+    // que ça ne passe pas inaperçu.
+    tabs.push("dashboard", "rdv");
+    return { reconnu: false, tabs };
+  };
+
+  const allowedTabs = React.useMemo(() => {
+    if (!currentUser) return [];
+    if (currentUserPin === "0000") {
+      return [
+        "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
+        "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
+        "assurances", "rh", "indicateurs", "qualite", "documents", "settings",
+      ];
+    }
+    return detectPosteAccess(currentUser.poste).tabs;
+  }, [currentUser, currentUserPin]);
+
+  // Signale si le poste de l'agent connecté n'a correspondu à aucun rôle
+  // reconnu (faute de frappe, intitulé inhabituel...), pour afficher un
+  // avertissement au lieu de laisser l'accès restreint passer inaperçu.
+  const posteReconnu = React.useMemo(() => {
+    if (!currentUser) return true;
+    if (currentUserPin === "0000") return true;
+    return detectPosteAccess(currentUser.poste).reconnu;
   }, [currentUser, currentUserPin]);
 
   // Active Panel Route
@@ -2015,6 +2062,16 @@ export default function App() {
 
         {/* Panel render staging viewarea */}
         <main className="flex-1 overflow-y-auto p-6 max-w-7xl w-full mx-auto">
+          {!posteReconnu && (
+            <div className="mb-4 bg-red-50 border border-red-300 text-red-800 px-4 py-3 rounded-xl text-sm font-semibold flex items-start gap-2 shadow-xs">
+              <span className="text-lg leading-none">⚠️</span>
+              <span>
+                Le poste « {currentUser?.poste} » n'est pas reconnu par l'application : accès limité au tableau de
+                bord et aux rendez-vous. Demandez au responsable de vérifier l'intitulé exact du poste dans
+                Ressources Humaines (ex : « Infirmier », « Sage-femme », « Médecin », « Secrétaire »...).
+              </span>
+            </div>
+          )}
           {activeTab === "qualite" && (
             <TabQualite
               audits={audits}
