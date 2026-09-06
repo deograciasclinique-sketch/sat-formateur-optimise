@@ -6,6 +6,7 @@
 import React, { useState, useMemo } from "react";
 import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock } from "../types";
 import { generateUid } from "../data";
+import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send } from "lucide-react";
 
 interface TabInfirmierProps {
@@ -357,6 +358,11 @@ export default function TabInfirmier({
     onUpdateConsultations(consultations.map((c) => (c.id === selected.id ? updated : c)));
     setSelectedId(null);
     alert("Consultation clôturée et enregistrée pour : " + updated.patient);
+
+    const waLink = getConsultationWhatsAppLink(updated);
+    if (waLink && window.confirm("Envoyer le résumé de cette consultation au patient sur WhatsApp ?")) {
+      window.open(waLink, "_blank");
+    }
   };
 
   const handleEnvoyerAuMedecin = () => {
