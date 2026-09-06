@@ -91,13 +91,6 @@ export default function TabConsultation({
   })();
 
   // General Consultation Form states
-  // Circuit paiement : quand le médecin ouvre un dossier envoyé par
-  // l'infirmier (statut "Attente consultation médecin"), on garde son id ici
-  // pour mettre à jour ce dossier (au lieu d'en créer un nouveau) et calculer
-  // le bon statut de suite après la prescription.
-  const [queuedConsultationId, setQueuedConsultationId] = useState<string | null>(null);
-  const patientsEnAttenteMedecin = consultations.filter((c) => c.statut === "Attente consultation médecin");
-
   const [consPatient, setConsPatient] = useState("");
   const [consAge, setConsAge] = useState("");
   const [consSexe, setConsSexe] = useState("Masculin");
@@ -115,6 +108,12 @@ export default function TabConsultation({
   // Décision de Consultation Générale (cahier des charges, points 1-3)
   const [consDecision, setConsDecision] = useState<NonNullable<Consultation["decision"]>>("Retour à domicile");
   const [consReferenceService, setConsReferenceService] = useState("");
+
+  // Dossier repris depuis la file d'attente "Attente consultation médecin"
+  // (transféré par l'infirmier/la sage-femme) : si renseigné, l'enregistrement
+  // met à jour ce dossier existant au lieu d'en créer un nouveau, et conserve
+  // le praticien de la salle infirmier qui a pris les constantes.
+  const [pendingSource, setPendingSource] = useState<Consultation | null>(null);
 
   useEffect(() => {
     if (currentUser?.id && !consMedecin) {
@@ -606,6 +605,80 @@ export default function TabConsultation({
   const [viewingPatientKey, setViewingPatientKey] = useState<string | null>(null);
   const viewingPatientDossier = patientDossiers.find((p) => p.key === viewingPatientKey) || null;
 
+  // Dossiers transférés par l'infirmier/la sage-femme, en attente d'être
+  // repris ici par le médecin pour le diagnostic et la prescription.
+  const enAttenteMedecin = useMemo(
+    () => consultations.filter((c) => c.statut === "Attente consultation médecin"),
+    [consultations]
+  );
+
+  const resetConsultationForm = () => {
+    setConsPatient("");
+    setConsDate(getTodayStr());
+    setConsAge("");
+    setConsContact("");
+    setConsProfession("");
+    setConsFemmeEnceinte(false);
+    setConsCommune("");
+    setConsVillageSecteur("");
+    setConsZoneResidence("");
+    setConsModeEntree("");
+    setConsAncienConsultant(false);
+    setConsObservations("");
+    setVTemp("");
+    setVPoids("");
+    setVTaille("");
+    setVTa("");
+    setVPouls("");
+    setVGlycemie("");
+    setConsPlainte("");
+    setConsExamen("");
+    setConsDiagnostic("");
+    setConsDiagnosticFinal("");
+    setPresLines([]);
+    setTempPhotos([]);
+    setTempLabResults([]);
+    setShowFormCamera(false);
+    setConsDecision("Retour à domicile");
+    setConsReferenceService("");
+    setPendingSource(null);
+  };
+
+  const handleAnnulerReprise = () => {
+    resetConsultationForm();
+  };
+
+  const handleReprendreDossierInfirmier = (c: Consultation) => {
+    setPendingSource(c);
+    setConsPatient(c.patient || "");
+    setConsAge(c.age ? String(c.age) : "");
+    setConsSexe(c.sexe || "Masculin");
+    setConsContact(c.contact || "");
+    setConsProfession(c.profession || "");
+    setConsFemmeEnceinte(!!c.femmeEnceinte);
+    setConsCommune(c.commune || "");
+    setConsVillageSecteur(c.villageSecteur || "");
+    setConsZoneResidence(c.zoneResidence || "");
+    setConsModeEntree(c.modeEntree || "");
+    setConsAncienConsultant(!!c.ancienConsultant);
+    setConsDate(c.date || getTodayStr());
+    setConsObservations(c.observations || "");
+    setVTemp(c.vitals?.temperature ? String(c.vitals.temperature) : "");
+    setVPoids(c.vitals?.poids ? String(c.vitals.poids) : "");
+    setVTaille(c.vitals?.taille ? String(c.vitals.taille) : "");
+    setVTa(c.vitals?.tensionArterielle || "");
+    setVPouls(c.vitals?.pouls ? String(c.vitals.pouls) : "");
+    setVGlycemie(c.vitals?.glycemie ? String(c.vitals.glycemie) : "");
+    setConsPlainte(c.plainte || "");
+    setConsExamen(c.examenPhysique || "");
+    setConsDiagnostic(c.diagnostic || "");
+    setConsDiagnosticFinal(c.diagnosticFinal || "");
+    setPresLines(c.ordonnance || []);
+    setConsDecision((c.decision as any) || "Retour à domicile");
+    setConsReferenceService(c.referenceService || "");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   // Résultats de la recherche instantanée d'article à prescrire (médicaments,
   // consommables, matériel technique, réactifs confondus), limités à 20
   // résultats pour rester rapide même avec un stock très volumineux.
@@ -715,33 +788,6 @@ export default function TabConsultation({
     setIsDictating(field);
   };
 
-  // Charge dans le formulaire un dossier envoyé par l'infirmier (état civil +
-  // constantes déjà saisis), pour que le médecin n'ait plus qu'à ajouter le
-  // diagnostic et la prescription.
-  const handleOuvrirDossierPatient = (c: Consultation) => {
-    setQueuedConsultationId(c.id);
-    setConsPatient(c.patient);
-    setConsAge(c.age ? String(c.age) : "");
-    setConsSexe(c.sexe);
-    setConsContact(c.contact || "");
-    setConsProfession(c.profession || "");
-    setConsFemmeEnceinte(!!c.femmeEnceinte);
-    setConsCommune(c.commune || "");
-    setConsVillageSecteur(c.villageSecteur || "");
-    setConsZoneResidence(c.zoneResidence || "");
-    setConsModeEntree(c.modeEntree || "");
-    setConsAncienConsultant(!!c.ancienConsultant);
-    setConsObservations(c.observations || "");
-    setConsDate(c.date || getTodayStr());
-    setVTemp(c.vitals?.temperature ? String(c.vitals.temperature) : "");
-    setVPoids(c.vitals?.poids ? String(c.vitals.poids) : "");
-    setVTaille(c.vitals?.taille ? String(c.vitals.taille) : "");
-    setVTa(c.vitals?.tensionArterielle || "");
-    setVPouls(c.vitals?.pouls ? String(c.vitals.pouls) : "");
-    setVGlycemie(c.vitals?.glycemie ? String(c.vitals.glycemie) : "");
-    setConsPlainte(c.plainte || "");
-  };
-
   const handleSaveConsultation = () => {
     if (!consPatient.trim() || !consPlainte.trim() || !consDiagnostic.trim()) {
       alert("Veuillez renseigner le nom du patient, le motif de consultation, et le diagnostic de présomption.");
@@ -761,20 +807,8 @@ export default function TabConsultation({
       savedImc = parseFloat((weightNum / (heightM * heightM)).toFixed(2));
     }
 
-        // Circuit paiement : si ce dossier vient de la file d'attente médecin
-        // (envoyé par l'infirmier), on garde son id pour le mettre à jour
-        // plutôt que d'en créer un nouveau. Le statut suivant dépend de si
-        // une prescription (ordonnance ou labo) a été faite : dans ce cas le
-        // dossier repart au secrétariat pour paiement des actes, sinon il est
-        // clos directement.
-        const aDesActesPrescrits = presLines.length > 0 || tempLabResults.length > 0;
-        const statutApresConsultation: NonNullable<Consultation["statut"]> = aDesActesPrescrits
-          ? "Attente paiement actes"
-          : "Terminée";
-
         const newCons: Consultation = {
-      id: queuedConsultationId || generateUid(),
-      statut: statutApresConsultation,
+      id: pendingSource?.id || generateUid(),
       patient: consPatient.trim(),
       age: parseFloat(consAge) || 0,
       sexe: consSexe as any,
@@ -789,6 +823,10 @@ export default function TabConsultation({
       observations: consObservations.trim(),
       date: consDate || getTodayStr(),
       medecinId: consMedecin,
+      // Praticien de la salle infirmier ayant pris les constantes, conservé
+      // tel quel lorsqu'on reprend un dossier transféré.
+      praticienId: pendingSource?.praticienId,
+      telephonePraticien: pendingSource?.telephonePraticien,
       vitals: {
         temperature: parseFloat(vTemp) || 0,
         poids: weightNum,
@@ -805,10 +843,14 @@ export default function TabConsultation({
       ordonnance: [...presLines],
       photos: [...tempPhotos],
       labResults: [...tempLabResults],
-      createdAt: new Date().toISOString(),
+      createdAt: pendingSource?.createdAt || new Date().toISOString(),
       agentCode: currentUser?.codeEntree || "0000",
       decision: consDecision,
-      referenceService: consDecision === "Référer vers un autre service" ? consReferenceService.trim() : undefined
+      referenceService: consDecision === "Référer vers un autre service" ? consReferenceService.trim() : undefined,
+      // Dossier repris depuis la salle infirmier/maternité : une fois le
+      // médecin passé, il repasse par le circuit paiement des actes / clôture
+      // plutôt que de rester "Terminée" par défaut comme une saisie directe.
+      statut: pendingSource ? (presLines.length > 0 ? "Attente paiement actes" : "Terminée") : undefined,
     };
 
     const medecinNomForDecision = staff.find((s) => s.id === consMedecin)?.nom || currentUser?.nom || "";
@@ -897,42 +939,14 @@ export default function TabConsultation({
       }
     }
 
-    if (queuedConsultationId) {
-      onUpdateConsultations(consultations.map((c) => (c.id === queuedConsultationId ? newCons : c)));
+    if (pendingSource) {
+      onUpdateConsultations(consultations.map((c) => (c.id === newCons.id ? newCons : c)));
     } else {
       onUpdateConsultations([newCons, ...consultations]);
     }
-    setQueuedConsultationId(null);
 
     // Clear form
-        setConsPatient("");
-    setConsDate(getTodayStr());
-    setConsAge("");
-    setConsContact("");
-    setConsProfession("");
-    setConsFemmeEnceinte(false);
-    setConsCommune("");
-    setConsVillageSecteur("");
-    setConsZoneResidence("");
-    setConsModeEntree("");
-    setConsAncienConsultant(false);
-    setConsObservations("");
-    setVTemp("");
-    setVPoids("");
-    setVTaille("");
-    setVTa("");
-    setVPouls("");
-    setVGlycemie("");
-    setConsPlainte("");
-    setConsExamen("");
-    setConsDiagnostic("");
-    setConsDiagnosticFinal("");
-    setPresLines([]);
-    setTempPhotos([]);
-    setTempLabResults([]);
-    setShowFormCamera(false);
-    setConsDecision("Retour à domicile");
-    setConsReferenceService("");
+    resetConsultationForm();
 
     let decisionSuffix = "";
     if (newCons.decision === "Hospitalisation" || newCons.decision === "Mise en observation") {
@@ -1419,31 +1433,6 @@ export default function TabConsultation({
 
   return (
     <div className="space-y-6">
-      {/* File d'attente médecin : dossiers envoyés par l'infirmier (état civil
-          + constantes déjà saisis), en attente de diagnostic/prescription. */}
-      {patientsEnAttenteMedecin.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-xs">
-          <div className="text-xs font-bold uppercase tracking-wider text-amber-700 mb-2">
-            Patients en attente de consultation ({patientsEnAttenteMedecin.length})
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {patientsEnAttenteMedecin.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => handleOuvrirDossierPatient(c)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition ${
-                  queuedConsultationId === c.id
-                    ? "bg-amber-600 text-white border-amber-600"
-                    : "bg-white border-amber-300 text-amber-800 hover:bg-amber-100"
-                }`}
-              >
-                {c.patient}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-xs border-t-4 border-t-primary-600">
@@ -1480,6 +1469,32 @@ export default function TabConsultation({
         </div>
       )}
 
+      {enAttenteMedecin.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-xs space-y-2">
+          <h3 className="text-sm font-bold text-amber-800 flex items-center gap-2">
+            <Activity className="w-4 h-4" /> Patients transférés par la Salle des Infirmiers / Maternité ({enAttenteMedecin.length})
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {enAttenteMedecin.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => handleReprendreDossierInfirmier(c)}
+                className={`text-left px-3 py-2 rounded-xl border transition ${
+                  pendingSource?.id === c.id
+                    ? "border-amber-500 bg-amber-100"
+                    : "border-amber-200 bg-white hover:bg-amber-50"
+                }`}
+              >
+                <div className="font-semibold text-sm text-stone-900">{c.patient}</div>
+                <div className="text-xs text-stone-500">
+                  {c.age ? `${c.age} ans` : ""} {c.plainte ? `· ${c.plainte}` : ""}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Core Consultation form wizard */}
         <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4">
@@ -1487,6 +1502,19 @@ export default function TabConsultation({
             <Plus className="w-5 h-5 text-primary-700" />
             Nouvelle Consultation de Médecine Générale
           </h3>
+
+          {pendingSource && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between">
+              <span>Vous complétez le dossier transféré de {pendingSource.patient} (constantes déjà prises).</span>
+              <button
+                type="button"
+                onClick={handleAnnulerReprise}
+                className="underline font-normal"
+              >
+                Annuler la reprise
+              </button>
+            </div>
+          )}
 
           <div className="space-y-3">
             <div className="grid grid-cols-4 gap-2">
