@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence } from "../types";
+import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock } from "../types";
 import { generateUid } from "../data";
 import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send } from "lucide-react";
 
@@ -23,6 +23,13 @@ interface TabInfirmierProps {
   onUpdateHospitalisations?: (h: Hospitalisation[]) => void;
   urgences?: PatientUrgence[];
   onUpdateUrgences?: (u: PatientUrgence[]) => void;
+  // Optionnels : permettent de rattacher une ligne d'ordonnance à un article
+  // de la pharmacie et de déduire automatiquement le stock, exactement comme
+  // en Consultation Générale.
+  medicaments?: Medicament[];
+  onUpdateMedicaments?: (meds: Medicament[]) => void;
+  mouvements?: MouvementStock[];
+  onUpdateMouvements?: (movs: MouvementStock[]) => void;
 }
 
 type ModeCloture = "transfert" | "moimeme";
@@ -43,6 +50,10 @@ export default function TabInfirmier({
   onUpdateHospitalisations,
   urgences = [],
   onUpdateUrgences,
+  medicaments = [],
+  onUpdateMedicaments,
+  mouvements = [],
+  onUpdateMouvements,
 }: TabInfirmierProps) {
   const isDark = theme === "dark";
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -62,6 +73,20 @@ export default function TabInfirmier({
   const [ligneMedDuree, setLigneMedDuree] = useState("");
   const [destinationTransfert, setDestinationTransfert] = useState<"medecin" | "autre">("medecin");
   const [autreServiceTexte, setAutreServiceTexte] = useState("");
+  // Recherche d'un article de la pharmacie pour rattacher la ligne
+  // d'ordonnance et permettre la déduction automatique du stock.
+  const [ligneMedId, setLigneMedId] = useState<string | undefined>(undefined);
+  const [ligneMedQte, setLigneMedQte] = useState("1");
+  const [pharmacieSearchOpen, setPharmacieSearchOpen] = useState(false);
+
+  const pharmacieSearchResults = useMemo(() => {
+    const q = ligneMedNom.trim().toLowerCase();
+    if (!q || ligneMedId) return [];
+    return medicaments
+      .filter((m) => m.stock > 0 && m.nom.toLowerCase().includes(q))
+      .sort((a, b) => a.nom.localeCompare(b.nom, "fr"))
+      .slice(0, 15);
+  }, [medicaments, ligneMedNom, ligneMedId]);
 
   const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -140,10 +165,14 @@ export default function TabInfirmier({
     setLigneMedNom("");
     setLigneMedPosologie("");
     setLigneMedDuree("");
+    setLigneMedId(undefined);
+    setLigneMedQte("1");
+    setPharmacieSearchOpen(false);
   };
 
   const handleAjouterLigneOrdonnance = () => {
     if (!ligneMedNom.trim()) return;
+    const qte = parseFloat(ligneMedQte) || 0;
     setOrdonnance((prev) => [
       ...prev,
       {
@@ -151,11 +180,19 @@ export default function TabInfirmier({
         medicamentNom: ligneMedNom.trim(),
         posologie: ligneMedPosologie.trim(),
         duree: ligneMedDuree.trim(),
+        // Rattaché à un article de la pharmacie uniquement si sélectionné
+        // dans la liste (pas en saisie libre) : c'est ce qui permet la
+        // déduction automatique du stock à la clôture de la consultation.
+        medicamentId: ligneMedId,
+        quantitePrescrite: ligneMedId ? qte : undefined,
       },
     ]);
     setLigneMedNom("");
     setLigneMedPosologie("");
     setLigneMedDuree("");
+    setLigneMedId(undefined);
+    setLigneMedQte("1");
+    setPharmacieSearchOpen(false);
   };
 
   const handleSupprimerLigneOrdonnance = (id: string) => {
@@ -268,6 +305,52 @@ export default function TabInfirmier({
         };
         updated.linkedUrgenceId = newUrg.id;
         onUpdateUrgences([newUrg, ...urgences]);
+      }
+    }
+
+    // Déduction automatique du stock pharmacie pour chaque ligne d'ordonnance
+    // rattachée à un article de la pharmacie (même logique qu'en Consultation
+    // Générale).
+    if (onUpdateMedicaments && onUpdateMouvements) {
+      const workingStock = [...medicaments];
+      const newStockMovements: MouvementStock[] = [];
+      let stockShortfallWarnings: string[] = [];
+
+      updated.ordonnance.forEach((line) => {
+        if (!line.medicamentId || !line.quantitePrescrite || line.quantitePrescrite <= 0) return;
+        const idx = workingStock.findIndex((m) => m.id === line.medicamentId);
+        if (idx === -1) return;
+
+        const med = workingStock[idx];
+        const deduction = Math.min(line.quantitePrescrite, med.stock);
+        if (deduction < line.quantitePrescrite) {
+          stockShortfallWarnings.push(
+            `${med.nom} : ${line.quantitePrescrite} demandé(s), seulement ${med.stock} disponible(s) en stock.`
+          );
+        }
+        if (deduction <= 0) return;
+
+        workingStock[idx] = { ...med, stock: med.stock - deduction };
+
+        newStockMovements.push({
+          id: generateUid(),
+          medId: med.id,
+          type: "sortie",
+          qte: deduction,
+          motif: `Prescription — Salle Infirmier/Maternité — Patient : ${updated.patient}`,
+          prixUnitaire: med.prixVente || 0,
+          montant: (med.prixVente || 0) * deduction,
+          date: updated.date,
+          createdAt: new Date().toISOString(),
+        });
+      });
+
+      if (newStockMovements.length > 0) {
+        onUpdateMedicaments(workingStock);
+        onUpdateMouvements([...newStockMovements, ...mouvements]);
+      }
+      if (stockShortfallWarnings.length > 0) {
+        alert("Attention, stock insuffisant :\n" + stockShortfallWarnings.join("\n"));
       }
     }
 
@@ -576,13 +659,61 @@ export default function TabInfirmier({
                         ))}
                       </div>
                     )}
-                    <div className="grid grid-cols-4 gap-2">
-                      <input
-                        className="col-span-2 px-2 py-1.5 text-sm rounded border bg-transparent"
-                        placeholder="Médicament"
-                        value={ligneMedNom}
-                        onChange={(e) => setLigneMedNom(e.target.value)}
-                      />
+                    <div className="grid grid-cols-4 gap-2 relative">
+                      <div className="col-span-2 relative">
+                        <input
+                          className="w-full px-2 py-1.5 text-sm rounded border bg-transparent"
+                          placeholder="Rechercher un médicament en stock..."
+                          value={ligneMedNom}
+                          onChange={(e) => {
+                            setLigneMedNom(e.target.value);
+                            setLigneMedId(undefined);
+                            setPharmacieSearchOpen(true);
+                          }}
+                          onFocus={() => setPharmacieSearchOpen(true)}
+                        />
+                        {ligneMedId && (
+                          <span className="absolute right-2 top-1.5 text-xs text-emerald-600 font-medium">
+                            en stock
+                          </span>
+                        )}
+                        {pharmacieSearchOpen && ligneMedNom.trim() && !ligneMedId && (
+                          <div
+                            className={`absolute z-10 mt-1 w-full max-h-48 overflow-y-auto rounded border shadow-lg ${
+                              isDark ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200"
+                            }`}
+                          >
+                            {pharmacieSearchResults.length > 0 ? (
+                              pharmacieSearchResults.map((m) => (
+                                <button
+                                  type="button"
+                                  key={m.id}
+                                  onClick={() => {
+                                    setLigneMedId(m.id);
+                                    setLigneMedNom(m.nom);
+                                    setPharmacieSearchOpen(false);
+                                  }}
+                                  className={`w-full text-left px-2 py-1.5 text-sm flex items-center justify-between ${
+                                    isDark ? "hover:bg-gray-700" : "hover:bg-gray-50"
+                                  }`}
+                                >
+                                  <span>{m.nom}</span>
+                                  <span className="text-xs text-gray-400">stock : {m.stock}</span>
+                                </button>
+                              ))
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setPharmacieSearchOpen(false)}
+                                className="w-full text-left px-2 py-1.5 text-xs text-gray-400"
+                              >
+                                ✏️ Aucun article trouvé — utiliser « {ligneMedNom.trim()} » en saisie libre (stock non
+                                déduit)
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <input
                         className="px-2 py-1.5 text-sm rounded border bg-transparent"
                         placeholder="Posologie"
@@ -596,6 +727,18 @@ export default function TabInfirmier({
                         onChange={(e) => setLigneMedDuree(e.target.value)}
                       />
                     </div>
+                    {ligneMedId && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <label className="text-xs">Quantité à prescrire (déduite du stock) :</label>
+                        <input
+                          type="number"
+                          min="1"
+                          className="w-20 px-2 py-1 text-sm rounded border bg-transparent"
+                          value={ligneMedQte}
+                          onChange={(e) => setLigneMedQte(e.target.value)}
+                        />
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={handleAjouterLigneOrdonnance}
@@ -604,8 +747,8 @@ export default function TabInfirmier({
                       <Plus className="w-3.5 h-3.5" /> Ajouter une ligne
                     </button>
                     <p className={`text-xs mt-1 ${isDark ? "text-gray-500" : "text-gray-400"}`}>
-                      Ces lignes ne sont pas reliées au stock de la pharmacie (contrairement à l'ordonnance faite en
-                      Consultation Générale) : le stock ne sera pas déduit automatiquement.
+                      Choisir un médicament dans la liste déduit automatiquement le stock de la pharmacie à la
+                      clôture. En saisie libre (article non trouvé), le stock n'est pas déduit.
                     </p>
                   </div>
 

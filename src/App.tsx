@@ -2079,6 +2079,10 @@ export default function App() {
               onUpdateHospitalisations={handleUpdateHospitalisations}
               urgences={urgences}
               onUpdateUrgences={handleUpdateUrgences}
+              medicaments={medicaments}
+              onUpdateMedicaments={handleUpdateMedicaments}
+              mouvements={mouvements}
+              onUpdateMouvements={handleUpdateMouvements}
             />
           )}
 
