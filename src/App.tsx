@@ -17,7 +17,6 @@ import {
   Task,
   Medicament,
   MouvementStock,
-  ActeTarifaire,
   Facture,
   Depense,
   RendezVous,
@@ -60,8 +59,6 @@ import TabIndicateurs from "./components/TabIndicateurs";
 import TabTaches from "./components/TabTaches";
 import TabPharmacie from "./components/TabPharmacie";
 import TabFacturation from "./components/TabFacturation";
-import TabAccueilCaisse from "./components/TabAccueilCaisse";
-import TabInfirmier from "./components/TabInfirmier";
 import TabRDV from "./components/TabRDV";
 import TabRH from "./components/TabRH";
 import TabHospitalisation from "./components/TabHospitalisation";
@@ -73,7 +70,6 @@ import TabUrgences from "./components/TabUrgences";
 import TabPediatrie from "./components/TabPediatrie";
 import TabConsultation from "./components/TabConsultation";
 import TabDocuments from "./components/TabDocuments";
-import TabActesTarifs from "./components/TabActesTarifs";
 import TabOnlineRDV from "./components/TabOnlineRDV";
 import TabDashboardGlobal from "./components/TabDashboardGlobal";
 import TabSettings from "./components/TabSettings";
@@ -88,8 +84,6 @@ import {
   Users,
   Briefcase,
   FileText,
-  Receipt,
-  Wallet2,
   Activity,
   ClipboardList,
   ShieldCheck,
@@ -346,7 +340,6 @@ export default function App() {
   const [vaccinations, setVaccinations] = useState<Vaccination[]>([]);
   const [laboExamens, setLaboExamens] = useState<ExamenLabo[]>([]);
   const [documents, setDocuments] = useState<DocumentArchive[]>([]);
-  const [actesTarifaires, setActesTarifaires] = useState<ActeTarifaire[]>([]);
 
   // --- Synchronisation temps réel multi-appareils (Firestore) ---
   // Associe chaque clé de données à sa fonction de mise à jour locale.
@@ -376,7 +369,6 @@ export default function App() {
     dg_vaccinations: setVaccinations,
     dg_labo_examens: setLaboExamens,
     dg_documents: setDocuments,
-    dg_actes_tarifaires: setActesTarifaires,
   });
   // Garde en mémoire la dernière valeur confirmée comme envoyée au cloud pour chaque clé,
   // afin de ne renvoyer que ce qui a réellement changé (et d'éviter les boucles avec les
@@ -546,87 +538,38 @@ export default function App() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Détermine les onglets accessibles à partir de l'intitulé de poste (champ
-  // RH en texte libre). Les accents sont retirés avant comparaison (é/è/ê -> e)
-  // pour que "Infirmière", "Infirmiere" et "infirmier" soient tous reconnus de
-  // la même façon, et les mots-clés utilisent la racine commune aux formes
-  // masculine/féminine (ex: "infirm" couvre infirmier ET infirmière) plutôt
-  // que de lister chaque variante séparément.
-  const detectPosteAccess = (posteRaw: string): { tabs: string[]; reconnu: boolean } => {
-    const p = (posteRaw || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, ""); // retire les accents
-
-    if (p.includes("responsable") || p.includes("directeur") || p.includes("directric") || p.includes("admin") || p.includes("chef")) {
-      return {
-        reconnu: true,
-        tabs: [
-          "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
-          "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
-          "assurances", "rh", "indicateurs", "qualite", "documents", "settings",
-        ],
-      };
-    }
-
-    const tabs = ["taches"]; // tout le monde voit les tâches
-    if (p.includes("medecin") || p.includes("pediatre") || p.includes("praticien")) {
-      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs");
-      return { reconnu: true, tabs };
-    }
-    if (p.includes("sage-femme") || p.includes("maternit")) {
-      // Accède aussi à la Salle des Infirmiers : c'est là que se trouve le
-      // circuit complet (constantes -> diagnostic/prescription -> transfert).
-      tabs.push("maternite", "infirmier", "vaccination", "rdv", "documents", "planif_familiale");
-      return { reconnu: true, tabs };
-    }
-    if (p.includes("infirm") || p.includes("aide-soignant") || p.includes("triage")) {
-      tabs.push("infirmier", "urgences", "hospit", "vaccination", "rdv");
-      return { reconnu: true, tabs };
-    }
-    if (p.includes("labo")) {
-      tabs.push("labo");
-      return { reconnu: true, tabs };
-    }
-    if (p.includes("pharma") || p.includes("stock")) {
-      tabs.push("pharma", "actes_tarifs");
-      return { reconnu: true, tabs };
-    }
-    if (p.includes("accueil") || p.includes("secretair") || p.includes("reception")) {
-      tabs.push("accueil_caisse", "rdv", "rdv_en_ligne", "factures", "actes_tarifs");
-      return { reconnu: true, tabs };
-    }
-    if (p.includes("comptable") || p.includes("finance") || p.includes("caiss")) {
-      tabs.push("factures", "assurances", "actes_tarifs");
-      return { reconnu: true, tabs };
-    }
-
-    // Poste non reconnu : accès minimal (tableau de bord + tâches) au lieu
-    // d'un écran vide, mais on le signale (voir posteReconnu ci-dessous) pour
-    // que ça ne passe pas inaperçu.
-    tabs.push("dashboard", "rdv");
-    return { reconnu: false, tabs };
-  };
-
   const allowedTabs = React.useMemo(() => {
     if (!currentUser) return [];
-    if (currentUserPin === "0000") {
+    const p = currentUser.poste.toLowerCase();
+    
+    // Responsable has full control of all stations
+    if (p.includes("responsable") || p.includes("directeur") || p.includes("admin") || p.includes("chef") || currentUserPin === "0000") {
       return [
-        "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
-        "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
-        "assurances", "rh", "indicateurs", "qualite", "documents", "settings",
+        "dashboard", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
+        "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", 
+        "assurances", "rh", "indicateurs", "qualite", "documents", "settings"
       ];
     }
-    return detectPosteAccess(currentUser.poste).tabs;
-  }, [currentUser, currentUserPin]);
-
-  // Signale si le poste de l'agent connecté n'a correspondu à aucun rôle
-  // reconnu (faute de frappe, intitulé inhabituel...), pour afficher un
-  // avertissement au lieu de laisser l'accès restreint passer inaperçu.
-  const posteReconnu = React.useMemo(() => {
-    if (!currentUser) return true;
-    if (currentUserPin === "0000") return true;
-    return detectPosteAccess(currentUser.poste).reconnu;
+    
+    const tabs = ["taches"]; // everyone can see tasks
+    if (p.includes("médecin") || p.includes("medecin") || p.includes("pédiatre") || p.includes("pediatre") || p.includes("praticien")) {
+      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale");
+    } else if (p.includes("sage-femme") || p.includes("maternité") || p.includes("maternite")) {
+      tabs.push("maternite", "vaccination", "rdv", "documents", "planif_familiale");
+    } else if (p.includes("infirmier") || p.includes("aide-soignant") || p.includes("triage")) {
+      tabs.push("urgences", "hospit", "vaccination", "rdv");
+    } else if (p.includes("labo") || p.includes("laborantin")) {
+      tabs.push("labo");
+    } else if (p.includes("pharma") || p.includes("pharmacien") || p.includes("stock")) {
+      tabs.push("pharma");
+    } else if (p.includes("accueil") || p.includes("secrétaire") || p.includes("secretaire") || p.includes("réception") || p.includes("reception")) {
+      tabs.push("rdv", "rdv_en_ligne", "factures");
+    } else if (p.includes("comptable") || p.includes("finance") || p.includes("caissier")) {
+      tabs.push("factures", "assurances");
+    } else {
+      tabs.push("dashboard", "rdv");
+    }
+    return tabs;
   }, [currentUser, currentUserPin]);
 
   // Active Panel Route
@@ -974,7 +917,6 @@ export default function App() {
     setVaccinations(safeGet<Vaccination[]>("dg_vaccinations", []));
     setLaboExamens(safeGet<ExamenLabo[]>("dg_labo_examens", []));
     setDocuments(safeGet<DocumentArchive[]>("dg_documents", []));
-    setActesTarifaires(safeGet<ActeTarifaire[]>("dg_actes_tarifaires", []));
     setIsLoaded(true);
   }, []);
 
@@ -1105,15 +1047,14 @@ export default function App() {
       dg_urgences: urgences,
       dg_vaccinations: vaccinations,
       dg_labo_examens: laboExamens,
-      dg_documents: documents,
-      dg_actes_tarifaires: actesTarifaires
+      dg_documents: documents
     };
   }, [
     staff, medicaments, mouvements, tasks, consultations, pediatrie,
     materniteCpns, materniteAccouchements, rdv, hospitalisations, ficheReferences,
     hospEvolutions, factures, depenses, incidents, actions, audits,
     conges, absences, rhFiches, prisesEnCharge, urgences, vaccinations,
-    laboExamens, documents, actesTarifaires
+    laboExamens, documents
   ]);
 
   // Periodic auto-save effect
@@ -1327,11 +1268,6 @@ export default function App() {
     safeSet("dg_documents", newDocs);
   };
 
-  const handleUpdateActesTarifaires = (newActes: ActeTarifaire[]) => {
-    setActesTarifaires(newActes);
-    safeSet("dg_actes_tarifaires", newActes);
-  };
-
   // Memoized sidebar category definitions - compiled once or when key data updates
   const filteredMenuCategories = React.useMemo(() => {
     const pharmaAlertCount = medicaments.filter((m) => m.stock <= getMedEffectiveThreshold(m)).length;
@@ -1345,8 +1281,6 @@ export default function App() {
       {
         title: "🏥 Soins & Clinique",
         items: [
-          { id: "accueil_caisse", label: "Accueil & Caisse", icon: Wallet2 },
-          { id: "infirmier", label: "Salle des Infirmiers", icon: Activity, alertCount: consultations.filter((c) => c.statut === "Attente prise en charge infirmier").length },
           { id: "medecine", label: "Consultation Générale", icon: Stethoscope },
           { id: "urgences", label: "Triage & Urgences", icon: ShieldAlert, alertCount: urgences.filter((u) => u.statut !== "Sorti(e) ou Libéré(e)").length },
           { id: "hospit", label: "Hospitalisations", icon: HeartPulse, alertCount: hospitalisations.filter((h) => h.statut === "En cours").length },
@@ -1370,7 +1304,6 @@ export default function App() {
           { id: "rdv", label: "Planification & RDV", icon: Calendar, alertCount: rdv.filter((r) => r.date === new Date().toISOString().slice(0, 10)).length },
           { id: "rdv_en_ligne", label: "Portail RDV en ligne (Mobile)", icon: Smartphone },
           { id: "factures", label: "Factures & Journal", icon: TrendingUp },
-          { id: "actes_tarifs", label: "Actes & Tarifs", icon: Receipt },
           { id: "assurances", label: "Assurances & Tiers-Payant", icon: Briefcase },
           { id: "rh", label: "Ressources Humaines", icon: Users }
         ]
@@ -1419,12 +1352,12 @@ export default function App() {
         <div className="w-full max-w-md bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-850 rounded-3xl p-8 shadow-xl space-y-6">
           {/* Logo & Branding */}
           <div className="text-center space-y-2">
-            <div className={`mx-auto w-64 h-36 max-w-full bg-white dark:bg-stone-850 rounded-2xl flex items-center justify-center overflow-hidden border border-stone-100 dark:border-stone-800 shadow-md text-xl font-serif font-black p-1 ${clinicProfile.logoColor === "teal" ? "text-primary-600" : clinicProfile.logoColor === "indigo" ? "text-info-600" : clinicProfile.logoColor === "rose" ? "text-danger-600" : "text-success-600"}`}>
+            <div className={`mx-auto w-16 h-16 bg-white dark:bg-stone-850 rounded-2xl flex items-center justify-center overflow-hidden border border-stone-100 dark:border-stone-800 shadow-md text-xl font-serif font-black ${clinicProfile.logoColor === "teal" ? "text-primary-600" : clinicProfile.logoColor === "indigo" ? "text-info-600" : clinicProfile.logoColor === "rose" ? "text-danger-600" : "text-success-600"}`}>
               {clinicProfile.logoUrl ? (
                 <img
                   src={clinicProfile.logoUrl}
                   alt="Logo"
-                  className="w-full h-full object-contain"
+                  className="w-full h-full object-cover"
                   referrerPolicy="no-referrer"
                 />
               ) : (
@@ -1523,8 +1456,8 @@ export default function App() {
               💡 Aide à la connexion :
             </p>
             <ul className="list-disc pl-4 space-y-1">
-              <li>Chaque praticien doit utiliser son code d'entrée personnel, attribué par le responsable du service dans <strong>Ressources Humaines</strong>.</li>
-              <li>Code oublié ou perdu ? Contactez le responsable du service pour le récupérer ou en obtenir un nouveau.</li>
+              <li>Le code du <strong>Responsable du Service</strong> par défaut est <strong className="text-primary-600 dark:text-primary-400 font-mono">0000</strong>.</li>
+              <li>Chaque praticien doit utiliser son code d'entrée attribué par le responsable, à créer dans <strong>Ressources Humaines</strong>.</li>
             </ul>
           </div>
         </div>
@@ -2062,16 +1995,6 @@ export default function App() {
 
         {/* Panel render staging viewarea */}
         <main className="flex-1 overflow-y-auto p-6 max-w-7xl w-full mx-auto">
-          {!posteReconnu && (
-            <div className="mb-4 bg-red-50 border border-red-300 text-red-800 px-4 py-3 rounded-xl text-sm font-semibold flex items-start gap-2 shadow-xs">
-              <span className="text-lg leading-none">⚠️</span>
-              <span>
-                Le poste « {currentUser?.poste} » n'est pas reconnu par l'application : accès limité au tableau de
-                bord et aux rendez-vous. Demandez au responsable de vérifier l'intitulé exact du poste dans
-                Ressources Humaines (ex : « Infirmier », « Sage-femme », « Médecin », « Secrétaire »...).
-              </span>
-            </div>
-          )}
           {activeTab === "qualite" && (
             <TabQualite
               audits={audits}
@@ -2115,44 +2038,12 @@ export default function App() {
             />
           )}
 
-          {activeTab === "accueil_caisse" && (
-            <TabAccueilCaisse
-              consultations={consultations}
-              onUpdateConsultations={handleUpdateConsultations}
-              factures={factures}
-              onUpdateFactures={handleUpdateFactures}
-              actes={actesTarifaires}
-              theme={theme}
-            />
-          )}
-
-          {activeTab === "infirmier" && (
-            <TabInfirmier
-              consultations={consultations}
-              onUpdateConsultations={handleUpdateConsultations}
-              theme={theme}
-              staff={staff}
-              hospitalisations={hospitalisations}
-              onUpdateHospitalisations={handleUpdateHospitalisations}
-              urgences={urgences}
-              onUpdateUrgences={handleUpdateUrgences}
-              medicaments={medicaments}
-              onUpdateMedicaments={handleUpdateMedicaments}
-              mouvements={mouvements}
-              onUpdateMouvements={handleUpdateMouvements}
-            />
-          )}
-
           {activeTab === "factures" && (
             <TabFacturation
               factures={factures}
               depenses={depenses}
               onUpdateFactures={handleUpdateFactures}
               onUpdateDepenses={handleUpdateDepenses}
-              laboExamens={laboExamens}
-              onUpdateLaboExamens={handleUpdateLaboExamens}
-              actes={actesTarifaires}
-              medicaments={medicaments}
             />
           )}
 
@@ -2213,10 +2104,6 @@ export default function App() {
               staff={staff}
               onUpdateExamens={handleUpdateLaboExamens}
               consultations={consultations}
-              medicaments={medicaments}
-              onUpdateMedicaments={handleUpdateMedicaments}
-              mouvements={mouvements}
-              onUpdateMouvements={handleUpdateMouvements}
             />
           )}
 
@@ -2307,8 +2194,6 @@ export default function App() {
               onUpdateMedicaments={handleUpdateMedicaments}
               mouvements={mouvements}
               onUpdateMouvements={handleUpdateMouvements}
-              documents={documents}
-              actes={actesTarifaires}
             />
           )}
 
@@ -2318,15 +2203,6 @@ export default function App() {
               theme={theme}
               laboExamens={laboExamens}
               onUpdateLaboExamens={handleUpdateLaboExamens}
-              currentUser={currentUser}
-            />
-          )}
-
-          {activeTab === "actes_tarifs" && (
-            <TabActesTarifs
-              actes={actesTarifaires}
-              onUpdateActes={handleUpdateActesTarifaires}
-              isResponsable={currentUserPin === "0000" || (currentUser?.poste?.toLowerCase() || "").includes("responsable")}
               currentUser={currentUser}
             />
           )}
