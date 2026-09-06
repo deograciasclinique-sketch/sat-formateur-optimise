@@ -8,6 +8,7 @@ import { jsPDF } from "jspdf";
 import { logActivity } from "../lib/activityLogger";
 import { Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
+import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
 
@@ -962,6 +963,11 @@ export default function TabConsultation({
       : "";
 
     alert("Consultation enregistrée avec succès pour : " + newCons.patient + decisionSuffix + shortfallSuffix);
+
+    const waLink = getConsultationWhatsAppLink(newCons);
+    if (waLink && window.confirm("Envoyer le résumé de cette consultation au patient sur WhatsApp ?")) {
+      window.open(waLink, "_blank");
+    }
   };
 
   const handleAddPhotoToActiveConsultation = (photoBase64: string) => {
@@ -2718,6 +2724,22 @@ export default function TabConsultation({
                             <Printer className="w-3 h-3" /> Ordonnance
                           </button>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const link = getConsultationWhatsAppLink(c);
+                            if (!link) {
+                              alert(
+                                "Numéro de téléphone du patient invalide ou manquant : impossible d'envoyer sur WhatsApp."
+                              );
+                              return;
+                            }
+                            window.open(link, "_blank");
+                          }}
+                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-lg border border-emerald-200 transition-all inline-flex items-center gap-1 justify-center whitespace-nowrap"
+                        >
+                          <MessageCircle className="w-3 h-3" /> WhatsApp
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleDeleteConsult(c.id)}
