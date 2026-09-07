@@ -357,8 +357,11 @@ export default function App() {
 
   // --- Synchronisation temps réel multi-appareils (Firestore) ---
   // Associe chaque clé de données à sa fonction de mise à jour locale.
-  // "dg_staff" n'est pas ici : il a déjà son propre mécanisme de synchronisation cloud.
+  // "dg_staff" est maintenant inclus : les agents et leurs codes d'accès (PIN)
+  // sont désormais synchronisés en temps réel comme le reste des données,
+  // au lieu de dépendre uniquement d'une récupération ponctuelle au démarrage.
   const liveSyncSetters = React.useRef<Record<string, (data: any) => void>>({
+    dg_staff: setStaff,
     dg_pharma_stock: setMedicaments,
     dg_pharma_mouvements: setMouvements,
     dg_tasks: setTasks,
@@ -1161,9 +1164,9 @@ export default function App() {
             localStorage.setItem(key, JSON.stringify(state));
             lastSavedRef.current[key] = state; // update saved ref
 
-            // Envoie aussi vers le cloud (sauf le personnel, qui a son propre circuit),
+            // Envoie aussi vers le cloud, y compris le personnel (dg_staff),
             // pour que les autres appareils reçoivent la mise à jour en temps réel.
-            if (key !== "dg_staff" && liveSyncSetters.current[key] && db && authReadyState) {
+            if (liveSyncSetters.current[key] && db && authReadyState) {
               pushToCloudKey(key, state)
                 .then(() => {
                   lastCloudSyncedRef.current[key] = state;
