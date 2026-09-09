@@ -75,13 +75,32 @@ export function useCloudSyncedState<T>(
     if (json === lastSyncedJson.current) return;
 
     if (pushTimeout.current) clearTimeout(pushTimeout.current);
-    pushTimeout.current = setTimeout(() => {
-      lastSyncedJson.current = json;
-      pushToCloudKey(key, state).catch(() => {
-        // échec (hors-ligne) : la valeur locale reste correcte, on retentera
-        // au prochain changement ou au prochain montage.
-      });
-    }, 1000);
+
+    // Tente l'envoi vers le cloud, avec plusieurs essais en cas d'échec
+    // (connexion instable, etc.). Important : on ne marque la donnée comme
+    // "synchronisée" (lastSyncedJson) qu'une fois l'envoi RÉELLEMENT réussi —
+    // sinon une donnée jamais reçue par Firestore restait bloquée pour
+    // toujours sur l'appareil d'origine, sans jamais réessayer.
+    const attemptPush = (attempt: number) => {
+      pushToCloudKey(key, state)
+        .then(() => {
+          lastSyncedJson.current = json;
+        })
+        .catch((err) => {
+          console.error(`[sync] Échec de l'envoi de "${key}" (essai ${attempt}):`, err);
+          if (attempt < 5) {
+            // Nouvel essai avec un délai croissant (2s, 4s, 8s, 16s, 32s).
+            const delay = Math.min(2000 * 2 ** (attempt - 1), 32000);
+            pushTimeout.current = setTimeout(() => attemptPush(attempt + 1), delay);
+          }
+          // Après 5 essais infructueux, on abandonne pour cette modification
+          // précise : elle sera renvoyée automatiquement dès la prochaine
+          // modification de cette même donnée (ou au prochain montage du
+          // composant), car lastSyncedJson n'a jamais été mis à jour.
+        });
+    };
+
+    pushTimeout.current = setTimeout(() => attemptPush(1), 1000);
 
     return () => {
       if (pushTimeout.current) clearTimeout(pushTimeout.current);
