@@ -1144,38 +1144,50 @@ export default function App() {
     const interval = setInterval(() => {
       const data = latestDataRef.current;
       let hasChanges = false;
-      
-      // Perform fast reference checks to determine if anything is dirty
+
+      // Une clé est "à traiter" si elle a changé depuis la dernière
+      // sauvegarde locale, OU si elle n'a pas encore été confirmée comme
+      // réellement envoyée au cloud (ex: une tentative précédente a échoué
+      // — connexion instable, donnée trop volumineuse, etc.). Ce deuxième
+      // cas manquait avant : une fois sauvegardée localement, une donnée qui
+      // n'avait en réalité jamais atteint le cloud n'était plus jamais
+      // renvoyée, et n'apparaissait donc jamais sur les autres appareils.
       Object.entries(data).forEach(([key, state]) => {
-        if (state !== lastSavedRef.current[key]) {
+        if (state !== lastSavedRef.current[key] || state !== lastCloudSyncedRef.current[key]) {
           hasChanges = true;
         }
       });
 
       if (!hasChanges) {
-        // Nothing changed, skip expensive serialization and storage writes entirely
+        // Rien à sauvegarder localement ET tout est déjà confirmé envoyé au cloud.
         return;
       }
 
       setIsSaving(true);
       try {
         Object.entries(data).forEach(([key, state]) => {
-          if (state !== undefined && state !== lastSavedRef.current[key]) {
+          if (state === undefined) return;
+
+          if (state !== lastSavedRef.current[key]) {
             localStorage.setItem(key, JSON.stringify(state));
             lastSavedRef.current[key] = state; // update saved ref
+          }
 
-            // Envoie aussi vers le cloud, y compris le personnel (dg_staff),
-            // pour que les autres appareils reçoivent la mise à jour en temps réel.
-            if (liveSyncSetters.current[key] && db && authReadyState) {
-              pushToCloudKey(key, state)
-                .then(() => {
-                  lastCloudSyncedRef.current[key] = state;
-                })
-                .catch(() => {
-                  // Échec (ex: hors-ligne) : on retentera au prochain cycle
-                  // puisque lastCloudSyncedRef n'a pas été mis à jour.
-                });
-            }
+          // Envoie (ou renvoie) vers le cloud tant que ce n'est pas confirmé
+          // comme synchronisé — indépendamment de la sauvegarde locale, pour
+          // que les envois précédemment échoués soient bien retentés.
+          if (liveSyncSetters.current[key] && db && authReadyState && state !== lastCloudSyncedRef.current[key]) {
+            pushToCloudKey(key, state)
+              .then(() => {
+                lastCloudSyncedRef.current[key] = state;
+              })
+              .catch((err: any) => {
+                // Échec (ex: hors-ligne, donnée trop volumineuse) : on retentera
+                // au prochain cycle (15s) puisque lastCloudSyncedRef n'a pas été
+                // mis à jour. On journalise désormais l'erreur pour pouvoir
+                // diagnostiquer une cause persistante (avant, elle était invisible).
+                console.error(`[auto-save] Échec de l'envoi cloud de "${key}":`, err);
+              });
           }
         });
         setLastAutoSave(new Date().toLocaleTimeString("fr-FR"));
