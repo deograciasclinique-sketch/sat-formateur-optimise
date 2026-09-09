@@ -18,6 +18,14 @@ try {
     firebase.initializeApp(firebaseConfig);
   }
   db = firebase.firestore();
+  // Certains réseaux (pare-feu, antivirus, proxy du cabinet) coupent
+  // silencieusement les connexions longue durée qu'utilise Firestore par
+  // défaut pour le temps réel — les écritures et la lecture au chargement
+  // de la page fonctionnent alors normalement, mais les mises à jour reçues
+  // en direct depuis un autre appareil n'arrivent jamais tant que la page
+  // n'est pas rechargée. Ce réglage détecte automatiquement ce cas et
+  // bascule sur un mode de connexion ("long polling") plus compatible.
+  db.settings({ experimentalAutoDetectLongPolling: true, useFetchStreams: false });
 } catch (error) {
   console.error("Firebase initialization failed:", error);
 }
