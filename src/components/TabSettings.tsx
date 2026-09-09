@@ -479,13 +479,34 @@ export default function TabSettings({
       const sizeKB = Math.round((encrypted.length * 2) / 1024 * 10) / 10;
 
       const dateStr = new Date().toISOString();
-      await db.collection("dg_backups").add({
+
+      // Un document Firestore ne peut pas dépasser 1 Mo. On découpe donc le
+      // texte chiffré en plusieurs morceaux de 700 000 caractères maximum,
+      // stockés chacun dans un document séparé de la sous-collection "chunks".
+      const CHUNK_SIZE = 700000;
+      const totalChunks = Math.max(1, Math.ceil(encrypted.length / CHUNK_SIZE));
+
+      // 1. Créer d'abord le document Firestore parent (métadonnées seulement,
+      // pas de contenu volumineux) pour obtenir un ID unique.
+      const docRef = await db.collection("dg_backups").add({
         note: cloudBackupNote || "Sauvegarde manuelle standard",
         date: dateStr,
         sizeKB: sizeKB,
-        encryptedData: encrypted,
-        version: "1.0"
+        version: "2.0-chunked",
+        chunked: true,
+        chunkCount: totalChunks
       });
+
+      // 2. Envoyer chaque morceau dans la sous-collection dg_backups/{id}/chunks.
+      // Firestore limite chaque lot ("batch") à 500 écritures, largement
+      // suffisant ici vu la taille des morceaux.
+      const batch = db.batch();
+      for (let i = 0; i < totalChunks; i++) {
+        const chunkData = encrypted.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        const chunkRef = docRef.collection("chunks").doc(String(i));
+        batch.set(chunkRef, { data: chunkData });
+      }
+      await batch.commit();
 
       setBackupFeedback({
         type: "success",
@@ -519,7 +540,36 @@ export default function TabSettings({
     setBackupFeedback(null);
 
     try {
-      const decryptedJSON = await decryptData(backupItem.encryptedData, pwd);
+      let encryptedContent: string;
+
+      if (backupItem.chunked && db) {
+        // Nouvelles sauvegardes : le contenu chiffré est découpé en plusieurs
+        // documents dans la sous-collection dg_backups/{id}/chunks, à réassembler
+        // dans l'ordre.
+        const chunksSnapshot = await db
+          .collection("dg_backups")
+          .doc(backupItem.id)
+          .collection("chunks")
+          .get();
+
+        if (chunksSnapshot.empty) {
+          throw new Error("Cette sauvegarde est incomplète : aucun morceau de données trouvé.");
+        }
+
+        const chunks = chunksSnapshot.docs
+          .map((doc) => ({ index: parseInt(doc.id, 10), data: doc.data().data as string }))
+          .sort((a, b) => a.index - b.index);
+
+        encryptedContent = chunks.map((c) => c.data).join("");
+      } else if (backupItem.encryptedData) {
+        // Anciennes sauvegardes (avant ce correctif) : le contenu était encore
+        // stocké directement dans le document Firestore.
+        encryptedContent = backupItem.encryptedData;
+      } else {
+        throw new Error("Cette sauvegarde est introuvable ou corrompue (aucun contenu associé).");
+      }
+
+      const decryptedJSON = await decryptData(encryptedContent, pwd);
       const data = JSON.parse(decryptedJSON);
 
       // Purge and write
@@ -563,6 +613,14 @@ export default function TabSettings({
       return;
     }
     try {
+      // Supprime d'abord tous les morceaux de la sous-collection "chunks"
+      // (Firestore ne supprime pas les sous-collections automatiquement).
+      const chunksSnapshot = await db.collection("dg_backups").doc(id).collection("chunks").get();
+      if (!chunksSnapshot.empty) {
+        const deleteBatch = db.batch();
+        chunksSnapshot.docs.forEach((chunkDoc) => deleteBatch.delete(chunkDoc.ref));
+        await deleteBatch.commit();
+      }
       await db.collection("dg_backups").doc(id).delete();
       loadCloudBackups();
     } catch (err) {
