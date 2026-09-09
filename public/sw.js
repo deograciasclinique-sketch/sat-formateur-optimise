@@ -36,12 +36,8 @@ self.addEventListener("activate", (event) => {
 // Stratégie "réseau prioritaire" : on tente toujours le réseau en premier
 // pour être sûr d'avoir la dernière version du code. On ne se rabat sur le
 // cache que si la requête réseau échoue (pas de connexion).
-self.addEventListener("fetch", (event) => {
-  const { request } = event;
+self.addEventListener("fetch", (event) => { const { request } = event; // On ne gère que les requêtes GET (les autres, ex: POST vers Firebase, // doivent passer directement par le réseau sans interception). if (request.method !== "GET") return; // On laisse TOUJOURS passer les requêtes vers Firebase/Google directement // au réseau, sans interception ni mise en cache : ce sont des connexions // temps réel (Firestore, Auth) qui ne doivent jamais être mises en cache. const url = new URL(request.url); if (url.hostname.endsWith("googleapis.com") || url.hostname.endsWith("gstatic.com") || url.hostname.endsWith("firebaseio.com")) { return; }
 
-  // On ne gère que les requêtes GET (les autres, ex: POST vers Firebase,
-  // doivent passer directement par le réseau sans interception).
-  if (request.method !== "GET") return;
 
   event.respondWith(
     (async () => {
