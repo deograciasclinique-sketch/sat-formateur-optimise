@@ -10,6 +10,9 @@ import { Plus, Trash2, Printer, MessageCircle, Search, FlaskConical, CheckCircle
 
 interface TabLaboProps {
   consultations?: Consultation[];
+  // Permet de marquer une orientation caisse -> laboratoire comme traitée
+  // une fois la demande d'examen créée.
+  onUpdateConsultations?: (consults: Consultation[]) => void;
   examens: ExamenLabo[];
   staff: Staff[];
   onUpdateExamens: (examens: ExamenLabo[]) => void;
@@ -26,7 +29,7 @@ interface TabLaboProps {
   onUpdateMouvements?: (movs: MouvementStock[]) => void;
 }
 
-export default function TabLabo({ examens, staff, onUpdateExamens, consultations = [], medicaments = [], onUpdateMedicaments, mouvements = [], onUpdateMouvements }: TabLaboProps) {
+export default function TabLabo({ examens, staff, onUpdateExamens, consultations = [], onUpdateConsultations, medicaments = [], onUpdateMedicaments, mouvements = [], onUpdateMouvements }: TabLaboProps) {
   // Load dynamic clinic profile from LocalStorage safely
   
   const [showUrgentAlert, setShowUrgentAlert] = useState(false);
@@ -650,8 +653,59 @@ ${examen.analyses || "Aucune analyse spécifiée"}
     .filter((e) => e.patient.toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a, b) => b.dateDemande.localeCompare(a.dateDemande));
 
+  // Patients envoyés par la caisse, en attente de prise en charge ici.
+  const patientsOrientes = consultations.filter(
+    (c) => c.serviceDestination === "Laboratoire" && c.statut === "Attente prise en charge laboratoire"
+  );
+
+  const handlePrendreEnCharge = (c: Consultation) => {
+    // Préremplit le formulaire de nouvelle demande d'examen avec l'identité
+    // déjà saisie à la caisse ; le technicien complète le reste.
+    setExamPatient(c.patient);
+    setExamContact(c.contact || "");
+    setExamPrescripteur("Secrétariat (orientation directe)");
+    // Marque l'orientation comme traitée (le dossier réel vivra désormais
+    // dans la demande d'examen une fois enregistrée).
+    if (onUpdateConsultations) {
+      onUpdateConsultations(
+        consultations.map((cons) => (cons.id === c.id ? { ...cons, statut: "Terminée" } : cons))
+      );
+    }
+  };
+
   return (
     <div className="space-y-6">
+
+      {/* Patients envoyés par la caisse, en attente de prise en charge */}
+      {patientsOrientes.length > 0 && (
+        <div className="bg-primary-50 border border-primary-200 rounded-2xl p-5 shadow-xs space-y-3">
+          <h3 className="text-base font-serif font-bold text-primary-900 flex items-center gap-2">
+            <Beaker className="w-5 h-5" /> Patients envoyés par le secrétariat ({patientsOrientes.length})
+          </h3>
+          <div className="space-y-2">
+            {patientsOrientes.map((c) => (
+              <div
+                key={c.id}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white border border-primary-200 rounded-xl p-3"
+              >
+                <div>
+                  <div className="font-bold text-stone-800">{c.patient}</div>
+                  <div className="text-xs text-stone-500 dark:text-stone-400">
+                    {c.contact || "Sans contact"} · {c.age} ans
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handlePrendreEnCharge(c)}
+                  className="px-4 py-2 text-xs font-bold bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-all cursor-pointer"
+                >
+                  Prendre en charge (préremplir la demande)
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {showUrgentAlert && (
         <div className="bg-danger-600 text-white p-4 rounded-xl shadow-lg mb-6 flex items-center justify-between border-2 border-danger-400 animate-pulse-fast">

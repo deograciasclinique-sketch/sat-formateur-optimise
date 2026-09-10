@@ -2241,6 +2241,7 @@ export default function App() {
               staff={staff}
               onUpdateExamens={handleUpdateLaboExamens}
               consultations={consultations}
+              onUpdateConsultations={handleUpdateConsultations}
               medicaments={medicaments}
               onUpdateMedicaments={handleUpdateMedicaments}
               mouvements={mouvements}
@@ -2259,6 +2260,8 @@ export default function App() {
               onUpdateLaboExamens={handleUpdateLaboExamens}
               rdvs={rdv}
               currentUser={currentUser}
+              consultations={consultations}
+              onUpdateConsultations={handleUpdateConsultations}
             />
           )}
 

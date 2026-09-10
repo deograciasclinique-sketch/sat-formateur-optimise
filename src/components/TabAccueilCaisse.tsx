@@ -216,6 +216,10 @@ export default function TabAccueilCaisse({
   const [commune, setCommune] = useState("");
   const [modePaiement, setModePaiement] = useState("Espèces");
   const [panierNouveau, setPanierNouveau] = useState<LignePanier[]>([]);
+  // Orientation choisie par la secrétaire : vers l'infirmerie (circuit normal
+  // de consultation générale), la maternité (CPN, etc.), ou directement le
+  // laboratoire (examen demandé sans consultation médicale).
+  const [serviceDestination, setServiceDestination] = useState<"Infirmerie" | "Maternite" | "Laboratoire">("Infirmerie");
 
   // Facturation d'actes pour un patient déjà présent dans le circuit.
   const [rechercheExistant, setRechercheExistant] = useState("");
@@ -265,6 +269,7 @@ export default function TabAccueilCaisse({
     setContact("");
     setCommune("");
     setPanierNouveau([]);
+    setServiceDestination("Infirmerie");
   };
 
   const lignesPanierVersFacture = (lignes: LignePanier[]): FactureLigne[] =>
@@ -289,6 +294,12 @@ export default function TabAccueilCaisse({
       return;
     }
 
+    const statutParDestination: Record<typeof serviceDestination, Consultation["statut"]> = {
+      Infirmerie: "Attente prise en charge infirmier",
+      Maternite: "Attente prise en charge maternité",
+      Laboratoire: "Attente prise en charge laboratoire",
+    };
+
     const newCons: Consultation = {
       id: generateUid(),
       patient: patient.trim(),
@@ -297,7 +308,8 @@ export default function TabAccueilCaisse({
       contact: contact.trim(),
       commune: commune.trim(),
       date: getTodayStr(),
-      statut: "Attente prise en charge infirmier",
+      statut: statutParDestination[serviceDestination],
+      serviceDestination,
       montantConsultation: total,
       vitals: {
         temperature: 0,
@@ -438,6 +450,37 @@ export default function TabAccueilCaisse({
               <option value="Mobile Money">Mobile Money</option>
               <option value="Assurance">Assurance</option>
             </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="text-sm font-medium">Orienter le patient vers *</label>
+          <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {(
+              [
+                { value: "Infirmerie", label: "Infirmerie", sous: "Prise des constantes → consultation générale" },
+                { value: "Maternite", label: "Maternité", sous: "CPN ou autre suivi de grossesse" },
+                { value: "Laboratoire", label: "Laboratoire", sous: "Examen demandé directement" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setServiceDestination(opt.value)}
+                className={`text-left px-3 py-2 rounded-lg border transition-all ${
+                  serviceDestination === opt.value
+                    ? "border-primary-500 bg-primary-50 text-primary-800 ring-1 ring-primary-500"
+                    : isDark
+                    ? "border-gray-700 hover:bg-gray-700"
+                    : "border-gray-200 hover:bg-gray-50"
+                }`}
+              >
+                <div className="text-sm font-bold">{opt.label}</div>
+                <div className={`text-xs ${serviceDestination === opt.value ? "text-primary-700" : "text-gray-500"}`}>
+                  {opt.sous}
+                </div>
+              </button>
+            ))}
           </div>
         </div>
 

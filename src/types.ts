@@ -615,6 +615,8 @@ export interface LigneOrdonnance {
 export type StatutConsultation =
   | "Attente paiement consultation"   // créé par le secrétariat, pas encore payé
   | "Attente prise en charge infirmier" // consultation payée, en attente de l'infirmier
+  | "Attente prise en charge maternité" // orienté par le secrétariat vers la maternité (CPN, etc.)
+  | "Attente prise en charge laboratoire" // orienté par le secrétariat directement vers le labo
   | "Attente consultation médecin"    // constantes prises, en attente du médecin
   | "Transféré vers un autre service" // l'infirmier/la sage-femme oriente le patient ailleurs qu'au médecin
   | "Attente paiement actes"          // prescription faite, actes à payer au secrétariat
@@ -644,6 +646,12 @@ export interface Consultation {
   // secrétariat -> soins/labo. Absent = ancien dossier créé avant cette
   // fonctionnalité (traité comme "Terminée" à l'affichage).
   statut?: StatutConsultation;
+  // Destination choisie par le secrétariat à l'enregistrement du patient :
+  // Infirmerie (circuit normal vers consultation générale), Maternité
+  // (CPN ou autre suivi de grossesse), ou Laboratoire (examen demandé
+  // directement, sans passer par une consultation médicale). Absent =
+  // Infirmerie (comportement d'origine, avant l'ajout de cette fonctionnalité).
+  serviceDestination?: "Infirmerie" | "Maternite" | "Laboratoire";
   // Montant de la consultation (fixé au secrétariat avant paiement).
   montantConsultation?: number;
   vitals: {

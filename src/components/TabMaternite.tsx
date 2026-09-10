@@ -4,9 +4,9 @@
  */
 
 import React, { useState } from "react";
-import { ConsultationPrenatale, Accouchement, Staff, ExamenLabo, EchographieCPN } from "../types";
+import { ConsultationPrenatale, Accouchement, Staff, ExamenLabo, EchographieCPN, Consultation } from "../types";
 import { generateUid, getTodayStr } from "../data";
-import { Plus, Trash2, Calendar, Clipboard, Heart, HelpCircle, CheckCircle, FlaskConical, Upload, Image, Download, Eye, X, AlertTriangle, FolderOpen } from "lucide-react";
+import { Plus, Trash2, Calendar, Clipboard, Heart, HelpCircle, CheckCircle, FlaskConical, Upload, Image, Download, Eye, X, AlertTriangle, FolderOpen, UserPlus } from "lucide-react";
 
 interface TabMaterniteProps {
   cpns: ConsultationPrenatale[];
@@ -18,6 +18,10 @@ interface TabMaterniteProps {
   onUpdateLaboExamens?: (examens: ExamenLabo[]) => void;
   currentUser?: Staff | null;
   rdvs?: any[];
+  // Patientes envoyées directement par le secrétariat (caisse) vers la
+  // maternité, en attente d'être prises en charge par la sage-femme.
+  consultations?: Consultation[];
+  onUpdateConsultations?: (consults: Consultation[]) => void;
 }
 
 export default function TabMaternite({
@@ -28,7 +32,9 @@ export default function TabMaternite({
   onUpdateAccouchements,
   laboExamens = [],
   onUpdateLaboExamens,
-  currentUser
+  currentUser,
+  consultations = [],
+  onUpdateConsultations,
 }: TabMaterniteProps) {
   // --- Identification & terme ---
   const [cpnPatient, setCpnPatient] = useState("");
@@ -343,8 +349,58 @@ export default function TabMaternite({
     : [];
   const dossierPatienteEchos = dossierPatienteVisites.flatMap((c) => (c.echographies || []).map((e) => ({ ...e, visiteLabel: c.numeroVisite, visiteDate: c.dateVisite })));
 
+  // Patientes envoyées par la caisse, en attente de prise en charge ici.
+  const patientesOrientees = consultations.filter(
+    (c) => c.serviceDestination === "Maternite" && c.statut === "Attente prise en charge maternité"
+  );
+
+  const handlePrendreEnCharge = (c: Consultation) => {
+    // Préremplit le formulaire CPN avec l'identité déjà saisie à la caisse ;
+    // la sage-femme complète ensuite l'examen clinique.
+    setCpnPatient(c.patient);
+    setCpnContact(c.contact || "");
+    // Marque l'orientation comme traitée (le dossier clinique réel vivra
+    // désormais dans la fiche CPN une fois enregistrée).
+    if (onUpdateConsultations) {
+      onUpdateConsultations(
+        consultations.map((cons) => (cons.id === c.id ? { ...cons, statut: "Terminée" } : cons))
+      );
+    }
+  };
+
   return (
     <div className="space-y-6">
+      {/* Patientes orientées par la caisse, en attente de prise en charge */}
+      {patientesOrientees.length > 0 && (
+        <div className="bg-pink-50 border border-pink-200 rounded-2xl p-5 shadow-xs space-y-3">
+          <h3 className="text-base font-serif font-bold text-pink-900 flex items-center gap-2">
+            <UserPlus className="w-5 h-5" /> Patientes envoyées par le secrétariat ({patientesOrientees.length})
+          </h3>
+          <div className="space-y-2">
+            {patientesOrientees.map((c) => (
+              <div
+                key={c.id}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white border border-pink-200 rounded-xl p-3"
+              >
+                <div>
+                  <div className="font-bold text-stone-800">{c.patient}</div>
+                  <div className="text-xs text-stone-500 dark:text-stone-400">
+                    {c.contact || "Sans contact"} · {c.age} ans
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handlePrendreEnCharge(c)}
+                  className="px-4 py-2 text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-all cursor-pointer"
+                >
+                  Prendre en charge (préremplir la CPN)
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-xs border-t-4 border-t-primary-600">
