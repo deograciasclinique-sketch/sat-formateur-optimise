@@ -933,6 +933,38 @@ export default function App() {
     prevTasksRef.current = tasks;
   }, [tasks, currentUser, currentUserPin, isLoaded, staff]);
 
+  // Alerte (bip sonore + notification) quand un patient est envoyé vers
+  // l'infirmerie, la maternité, le laboratoire ou la consultation générale.
+  // Placé ici (niveau racine de l'app, toujours monté) plutôt que dans
+  // chaque onglet, pour que l'alerte se déclenche même si le praticien
+  // n'a pas l'onglet concerné ouvert à l'écran au moment de l'envoi.
+  const prevConsultationsRef = React.useRef<Consultation[]>([]);
+  useEffect(() => {
+    if (!isLoaded) return;
+    const prevConsultations = prevConsultationsRef.current;
+
+    if (prevConsultations && prevConsultations.length > 0) {
+      const prevIds = new Set(prevConsultations.map((c) => c.id));
+      const nouveaux = consultations.filter((c) => !prevIds.has(c.id));
+
+      const alertesParStatut: Record<string, { titre: string; icone: string }> = {
+        "Attente prise en charge infirmier": { titre: "Nouveau patient — Infirmerie", icone: "🩺" },
+        "Attente prise en charge maternité": { titre: "Nouvelle patiente — Maternité", icone: "🤰" },
+        "Attente prise en charge laboratoire": { titre: "Nouveau patient — Laboratoire", icone: "🧪" },
+        "Attente consultation médecin": { titre: "Dossier transféré — Consultation", icone: "👨‍⚕️" },
+      };
+
+      nouveaux.forEach((c) => {
+        const info = c.statut ? alertesParStatut[c.statut] : undefined;
+        if (!info) return;
+        showToast(`${info.icone} ${info.titre}`, `${c.patient} vient d'être envoyé(e).`, "info");
+        sendBrowserNotification(`${info.icone} ${info.titre}`, `${c.patient} vient d'être envoyé(e).`, `patient-${c.id}`);
+      });
+    }
+
+    prevConsultationsRef.current = consultations;
+  }, [consultations, isLoaded]);
+
   // Load and seed DB on initial mount
   useEffect(() => {
     seedLocalStorage();
