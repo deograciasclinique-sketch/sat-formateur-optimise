@@ -1017,7 +1017,13 @@ export default function App() {
     return () => {
       unsubscribers.forEach((unsub) => unsub());
     };
-  }, [isLoaded]);
+    // authReadyState est volontairement inclus ici : si la connexion Firebase
+    // devient prête APRÈS le chargement des données locales (isLoaded), cet
+    // effet doit se relancer pour mettre en place l'écoute temps réel — sinon
+    // elle ne démarrait jamais sur les machines où l'authentification met un
+    // peu plus de temps, et seul un rechargement complet de la page (F5)
+    // redonnait une chance que les deux surviennent dans le bon ordre.
+  }, [isLoaded, authReadyState]);
 
   // Load and restore staff from Firestore if available
   useEffect(() => {
