@@ -192,10 +192,11 @@ function SelecteurActes({
 
 // Écran secrétariat, étape 1 : le patient arrive, on l'enregistre (identité de
 // base) et on encaisse les actes demandés (consultation et/ou tout autre acte
-// du catalogue). Une fois payé, le dossier est envoyé à l'infirmier (statut
-// "Attente prise en charge infirmier"). Le reste du dossier (constantes,
+// du catalogue). Une fois payé, le dossier est envoyé vers la destination
+// choisie par la secrétaire (infirmerie, maternité ou laboratoire — statut
+// "Attente prise en charge ..."). Le reste du dossier (constantes,
 // diagnostic, prescription) est complété plus loin dans le circuit par
-// l'infirmier puis le médecin.
+// l'infirmier puis le médecin (ou directement par la sage-femme / le labo).
 //
 // La secrétaire peut aussi, à tout moment, facturer un acte supplémentaire à
 // un patient déjà présent dans le service (ex: certificat, pansement,
@@ -383,7 +384,8 @@ export default function TabAccueilCaisse({
         </h2>
         <p className={`text-sm ${isDark ? "text-gray-400" : "text-gray-500"}`}>
           Enregistrement du patient et facturation selon la demande (consultation et/ou tout autre
-          acte du catalogue). Le dossier est envoyé à l'infirmier une fois le paiement encaissé.
+          acte du catalogue). Le dossier est envoyé vers l'infirmerie, la maternité ou le
+          laboratoire une fois le paiement encaissé, selon l'orientation choisie ci-dessous.
         </p>
       </div>
 
@@ -496,7 +498,13 @@ export default function TabAccueilCaisse({
             onClick={handleEnregistrerEtEncaisser}
             className="px-4 py-2 rounded bg-emerald-600 text-white font-medium flex items-center gap-2 hover:bg-emerald-700"
           >
-            <Wallet className="w-4 h-4" /> Encaisser & envoyer à l'infirmier
+            <Wallet className="w-4 h-4" />
+            Encaisser &amp; envoyer{" "}
+            {serviceDestination === "Infirmerie"
+              ? "à l'infirmerie"
+              : serviceDestination === "Maternite"
+              ? "à la maternité"
+              : "au laboratoire"}
           </button>
         </div>
       </div>
