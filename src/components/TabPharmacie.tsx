@@ -1575,7 +1575,28 @@ export default function TabPharmacie({
                     <option value="Antidiabétique">Antidiabétique</option>
                     <option value="Vitamines / Minéraux">Vitamines / Minéraux</option>
                     <option value="Solutés / Perfusions">Solutés / Perfusions</option>
+                    <option value="Antispasmodique">Antispasmodique</option>
+                    <option value="Antiémétique">Antiémétique</option>
+                    <option value="Antitussif / ORL">Antitussif / ORL</option>
+                    <option value="Antihistaminique / Antiallergique">Antihistaminique / Antiallergique</option>
+                    <option value="Antifongique">Antifongique</option>
+                    <option value="Antiviral">Antiviral</option>
+                    <option value="Antiparasitaire / Antihelminthique">Antiparasitaire / Antihelminthique</option>
+                    <option value="Gastro-entérologique / Antiacide">Gastro-entérologique / Antiacide</option>
+                    <option value="Anxiolytique / Sédatif / Psychotrope">Anxiolytique / Sédatif / Psychotrope</option>
+                    <option value="Anesthésique / Anesthésie locale">Anesthésique / Anesthésie locale</option>
+                    <option value="Contraceptif / Planification familiale">Contraceptif / Planification familiale</option>
+                    <option value="Hormonal / Endocrinologie">Hormonal / Endocrinologie</option>
+                    <option value="Ocytocique / Gynéco-obstétrique">Ocytocique / Gynéco-obstétrique</option>
+                    <option value="Cardiovasculaire (autre)">Cardiovasculaire (autre)</option>
+                    <option value="Diurétique">Diurétique</option>
+                    <option value="Dermatologique">Dermatologique</option>
+                    <option value="Ophtalmologique">Ophtalmologique</option>
+                    <option value="Vaccin / Sérum">Vaccin / Sérum</option>
+                    <option value="Antiseptique / Désinfectant">Antiseptique / Désinfectant</option>
+                    <option value="Hématologique / Anti-anémique">Hématologique / Anti-anémique</option>
                     <option value="Matériel médical">Matériel médical / Consommables</option>
+                    <option value="Autre">Autre</option>
                   </select>
                 </div>
               </div>
