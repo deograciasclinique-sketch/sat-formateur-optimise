@@ -11,6 +11,8 @@ import { generateUid, getTodayStr } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
+import EpidemioAssistant from "./EpidemioAssistant";
+import { MDODiseaseOverview } from "../modules/epidemio/mdoData";
 
 interface TabConsultationProps {
   isLoading?: boolean;
@@ -158,6 +160,9 @@ export default function TabConsultation({
   const [consPlainte, setConsPlainte] = useState("");
   const [consExamen, setConsExamen] = useState("");
   const [consDiagnostic, setConsDiagnostic] = useState("");
+  // Maladie à Déclaration Obligatoire détectée via l'Assistant Épidémiologique
+  // (registre MDO Burkina Faso / SIMR), en attente de génération du bordereau.
+  const [detectedMDO, setDetectedMDO] = useState<MDODiseaseOverview | null>(null);
   const [consDiagnosticFinal, setConsDiagnosticFinal] = useState("");
 
   // AI Assistant states
@@ -635,6 +640,7 @@ export default function TabConsultation({
     setConsPlainte("");
     setConsExamen("");
     setConsDiagnostic("");
+    setDetectedMDO(null);
     setConsDiagnosticFinal("");
     setPresLines([]);
     setTempPhotos([]);
@@ -841,6 +847,9 @@ export default function TabConsultation({
       examenPhysique: consExamen.trim(),
       diagnostic: consDiagnostic.trim(),
       diagnosticFinal: consDiagnosticFinal.trim() || undefined,
+      mdoDeclare: detectedMDO?.name,
+      mdoDeclareCategorie: detectedMDO?.category,
+      mdoDeclareDate: detectedMDO ? new Date().toISOString() : undefined,
       ordonnance: [...presLines],
       photos: [...tempPhotos],
       labResults: [...tempLabResults],
@@ -1086,6 +1095,98 @@ export default function TabConsultation({
     `);
     printWindow.document.close();
     printWindow.print();
+  };
+
+  // Génère le bordereau officiel de notification d'une Maladie à Déclaration
+  // Obligatoire (MDO), à remettre/transmettre au Médecin Chef de District
+  // (MCD) et au CISSE, conformément au dispositif SIMR du Burkina Faso.
+  const generateMDOBordereau = (maladie: MDODiseaseOverview) => {
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const margin = 15;
+    const pageWidth = 210;
+    const contentWidth = pageWidth - margin * 2;
+    const orange = [217, 119, 6];
+    const dark = [30, 41, 59];
+    const gray = [100, 116, 139];
+    let y = 20;
+
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor(orange[0], orange[1], orange[2]);
+    doc.text("BORDEREAU DE NOTIFICATION MDO", pageWidth / 2, y, { align: "center" });
+    y += 5;
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(gray[0], gray[1], gray[2]);
+    doc.text("SURVEILLANCE INTÉGRÉE DES MALADIES ET RIPOSTE (SIMR) — MINISTÈRE DE LA SANTÉ DU BURKINA FASO", pageWidth / 2, y, { align: "center" });
+    y += 3;
+    doc.text(`${profile.name} — ${profile.address}`, pageWidth / 2, y, { align: "center" });
+    y += 8;
+
+    doc.setDrawColor(orange[0], orange[1], orange[2]);
+    doc.setLineWidth(0.6);
+    doc.line(margin, y, margin + contentWidth, y);
+    y += 8;
+
+    const field = (label: string, value: string) => {
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(dark[0], dark[1], dark[2]);
+      doc.text(label, margin, y);
+      doc.setFont("Helvetica", "normal");
+      const wrapped = doc.splitTextToSize(value || "—", contentWidth - 55);
+      doc.text(wrapped, margin + 55, y);
+      y += Math.max(6, wrapped.length * 4.5);
+    };
+
+    field("Patient (nom / initiales) :", consPatient);
+    field("Âge / Sexe :", `${consAge || "—"} ans / ${consSexe}`);
+    field("Date de consultation :", new Date(consDate).toLocaleDateString("fr-FR"));
+    field("Médecin / Agent notificateur :", staff.find((s) => s.id === consMedecin)?.nom || "—");
+    y += 2;
+
+    doc.setFillColor(255, 247, 237);
+    doc.rect(margin, y, contentWidth, 10, "F");
+    doc.setDrawColor(orange[0], orange[1], orange[2]);
+    doc.rect(margin, y, contentWidth, 10, "S");
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(orange[0], orange[1], orange[2]);
+    doc.text(maladie.name, pageWidth / 2, y + 6.5, { align: "center", maxWidth: contentWidth - 4 });
+    y += 16;
+
+    field("Catégorie de notification :", maladie.category === "IMMEDIATE_24H" ? "ALERTE IMMÉDIATE (< 24 HEURES)" : maladie.category === "HEBDO_TLM" ? "Notification hebdomadaire" : "Notification mensuelle");
+    field("Définition de cas (suspect) :", maladie.standardCaseDefinition.suspect);
+    field("Type de prélèvement :", maladie.sampleType);
+    field("Conservation / transport :", maladie.transportCondition);
+    field("Laboratoire de référence :", maladie.nationalRefLab);
+    field("À notifier à :", maladie.notificationTarget);
+    y += 2;
+
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text("MESURES DE RIPOSTE IMMÉDIATES :", margin, y);
+    y += 5;
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(8.5);
+    maladie.primaryResponseMeasures.forEach((m) => {
+      const wrapped = doc.splitTextToSize(`• ${m}`, contentWidth);
+      doc.text(wrapped, margin, y);
+      y += wrapped.length * 4.2 + 1.5;
+    });
+
+    y += 6;
+    doc.setDrawColor(200, 200, 200);
+    doc.line(margin, y, margin + 70, y);
+    doc.line(margin + contentWidth - 70, y, margin + contentWidth, y);
+    y += 4;
+    doc.setFontSize(7.5);
+    doc.setTextColor(gray[0], gray[1], gray[2]);
+    doc.text("Signature du notificateur", margin, y);
+    doc.text("Cachet du service", margin + contentWidth - 70, y);
+
+    doc.save(`Bordereau_MDO_${maladie.id}_${(consPatient || "patient").replace(/\s+/g, "_")}.pdf`);
   };
 
   const handleDownloadPDF = (cons: Consultation) => {
@@ -1874,6 +1975,26 @@ export default function TabConsultation({
                 </div>
               )}
             </div>
+
+            {/* Assistant de Surveillance Épidémiologique & Aide au Diagnostic
+                (module fusionné : évaluation immédiate des constantes selon
+                seuils SIMR/PCIME, catalogue de pathologies, registre MDO) */}
+            <EpidemioAssistant
+              theme={theme}
+              temperature={vTemp}
+              tension={vTa}
+              pouls={vPouls}
+              glycemie={vGlycemie}
+              ageAnnees={consAge}
+              femmeEnceinte={consFemmeEnceinte}
+              plainte={consPlainte}
+              onSelectDiagnostic={(nom) => setConsDiagnostic(nom)}
+              onDetectMDO={(maladie) => {
+                setDetectedMDO(maladie);
+                if (!consDiagnostic.trim()) setConsDiagnostic(maladie.name);
+                generateMDOBordereau(maladie);
+              }}
+            />
 
             <div>
               <div className="flex items-center justify-between mb-1">
@@ -3072,6 +3193,16 @@ export default function TabConsultation({
                   theme === "dark" ? "bg-primary-950/20 border-primary-900 text-primary-200" : "bg-primary-50/50 border-primary-150 text-primary-900"
                 }`}>
                   <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800 mb-1">5. Conclusion Clinique & Diagnostic</h3>
+                  {selectedConsultation.mdoDeclare && (
+                    <div className="bg-orange-100 border border-orange-300 text-orange-800 text-xs font-bold rounded-lg px-2.5 py-1.5 mb-2 flex items-center gap-1.5">
+                      ⚠️ MDO déclarée : {selectedConsultation.mdoDeclare}
+                      {selectedConsultation.mdoDeclareDate && (
+                        <span className="font-normal opacity-80">
+                          (le {new Date(selectedConsultation.mdoDeclareDate).toLocaleDateString("fr-FR")})
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {isEditingDetail ? (
                     <div className="space-y-3">
                       <div>

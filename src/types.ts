@@ -682,6 +682,12 @@ export interface Consultation {
   // (hospitalisation ou urgences), pour tracer le lien entre les deux dossiers.
   linkedHospitalisationId?: string;
   linkedUrgenceId?: string;
+  // Traçabilité d'une déclaration MDO (Maladie à Déclaration Obligatoire)
+  // générée depuis l'Assistant de Surveillance Épidémiologique pendant
+  // cette consultation (registre SIMR, Burkina Faso).
+  mdoDeclare?: string;
+  mdoDeclareCategorie?: "IMMEDIATE_24H" | "HEBDO_TLM" | "MENSUEL";
+  mdoDeclareDate?: string;
 }
 
 export interface DocumentArchive {
