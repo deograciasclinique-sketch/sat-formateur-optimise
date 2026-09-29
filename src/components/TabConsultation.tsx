@@ -12,7 +12,7 @@ import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
 import EpidemioAssistant from "./EpidemioAssistant";
-import { ConduiteATenirEditor, ConduiteATenirListe, catASoinsInfirmiers, conduiteEnLignes } from "./ConduiteATenir";
+import { ConduiteATenirEditor, ConduiteATenirListe, catASoinsInfirmiers, conduiteEnLignes, PrescInjectable } from "./ConduiteATenir";
 import { MDODiseaseOverview } from "../modules/epidemio/mdoData";
 
 interface TabConsultationProps {
@@ -428,6 +428,20 @@ export default function TabConsultation({
     setPresQuantite("1");
     setPresPosologie("");
     setPresDuree("");
+  };
+
+  // Injectable prescrit dans la conduite à tenir : ajouté aussi à l'ordonnance
+  // pour la facturation et la déduction du stock.
+  const injectableVersOrdonnance = (p: PrescInjectable, quantite: number) => {
+    const posologie = [p.voie, p.dose, p.frequence, p.dilution].filter(Boolean).join(", ");
+    setPresLines((lignes) => [...lignes, {
+      id: generateUid(),
+      medicamentNom: [p.produit, p.dosage].filter(Boolean).join(" "),
+      posologie,
+      duree: p.duree || "",
+      medicamentId: p.medicamentId,
+      quantitePrescrite: p.medicamentId ? quantite : undefined,
+    }]);
   };
 
   const handleRemovePrescriptionLine = (id: string) => {
@@ -2498,9 +2512,9 @@ export default function TabConsultation({
                 📋 Conduite à tenir
               </label>
               <p className="text-xs text-stone-500 dark:text-stone-400 italic mb-2">
-                Décrivez ce qui doit être fait après le diagnostic : traitement par voie orale, soins infirmiers à réaliser (injection, perfusion, pansement…), surveillance, examens, conseils. Les soins infirmiers apparaîtront dans la salle infirmier.
+                Décrivez ce qui doit être fait après le diagnostic : traitement par voie orale, produits injectables avec leur posologie, soins infirmiers à réaliser (pansement, nébulisation…), surveillance, examens, conseils. Les injectables et les soins infirmiers apparaîtront dans la salle infirmier.
               </p>
-              <ConduiteATenirEditor items={consCAT} onChange={setConsCAT} />
+              <ConduiteATenirEditor items={consCAT} onChange={setConsCAT} medicaments={medicaments} onAjouterOrdonnance={injectableVersOrdonnance} />
             </div>
 
             {/* Décision de Consultation Générale (cahier des charges, points 1-3) */}
@@ -3273,7 +3287,7 @@ export default function TabConsultation({
                       </div>
                       <div>
                         <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">📋 Conduite à tenir</label>
-                        <ConduiteATenirEditor items={editCAT} onChange={setEditCAT} />
+                        <ConduiteATenirEditor items={editCAT} onChange={setEditCAT} medicaments={medicaments} />
                       </div>
                       <div>
                         <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Observations / Conseils</label>

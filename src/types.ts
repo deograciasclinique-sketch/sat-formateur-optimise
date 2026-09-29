@@ -652,6 +652,17 @@ export interface ConduiteItem {
   id: string;
   type: string;
   description: string;
+  // Voie injectable : prescription structurée (la description reste le texte complet)
+  injectable?: {
+    produit: string;
+    medicamentId?: string;
+    dosage?: string;
+    voie: string;
+    dose: string;
+    frequence?: string;
+    duree?: string;
+    dilution?: string;
+  };
 }
 
 export interface Consultation {

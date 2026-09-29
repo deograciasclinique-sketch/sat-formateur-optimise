@@ -9,7 +9,7 @@ import { recuValide, dernierRecu, dateCourteFr } from "../lib/recuConsultation";
 import {
   construireDossiers, trouverDossier, ConstantesRdvForm, NouveauRdvForm, DossierPatientView, RdvDuJour, ListeDossiers,
 } from "./InfirmierDossiers";
-import { ConduiteATenirListe, catASoinsInfirmiers } from "./ConduiteATenir";
+import { ConduiteATenirListe, catASoinsInfirmiers, TYPES_INFIRMIER } from "./ConduiteATenir";
 import { generateUid } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send, CalendarDays, FolderOpen, CalendarPlus } from "lucide-react";
@@ -1050,12 +1050,12 @@ export default function TabInfirmier({
                     {(c.ordonnance || []).length > 0
                       ? `${c.ordonnance.length} ligne(s) d'ordonnance à exécuter`
                       : catASoinsInfirmiers(c.conduiteATenir)
-                      ? "Soins prescrits dans la conduite à tenir"
+                      ? "Injectables / soins prescrits dans la conduite à tenir"
                       : "Aucun soin à exécuter (voir Laboratoire pour les examens)"}
                   </div>
                   {catASoinsInfirmiers(c.conduiteATenir) && (
                     <div className="mt-1 text-emerald-700 dark:text-emerald-400">
-                      <ConduiteATenirListe items={c.conduiteATenir} seulementType="Soins infirmiers" compact />
+                      <ConduiteATenirListe items={c.conduiteATenir} seulementType={TYPES_INFIRMIER} compact />
                     </div>
                   )}
                 </div>
