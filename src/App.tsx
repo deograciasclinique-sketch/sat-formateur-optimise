@@ -2202,6 +2202,7 @@ export default function App() {
               onUpdateMouvements={handleUpdateMouvements}
               rdvs={rdv}
               onUpdateRdvs={handleUpdateRdv}
+              factures={factures}
             />
           )}
 

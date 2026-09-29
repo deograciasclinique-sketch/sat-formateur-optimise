@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv } from "../types";
+import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv, Facture } from "../types";
+import { recuValide, dernierRecu, dateCourteFr } from "../lib/recuConsultation";
 import {
   construireDossiers, trouverDossier, ConstantesRdvForm, NouveauRdvForm, DossierPatientView, RdvDuJour, ListeDossiers,
 } from "./InfirmierDossiers";
@@ -39,6 +40,9 @@ interface TabInfirmierProps {
   // des patients venus sur rendez-vous et de programmer le RDV suivant.
   rdvs?: RendezVous[];
   onUpdateRdvs?: (rdvs: RendezVous[]) => void;
+  // Factures : pour savoir si le patient venu sur RDV a encore un reçu de
+  // consultation valable (14 jours) ou s'il doit repasser par la caisse.
+  factures?: Facture[];
 }
 
 type ModeCloture = "transfert" | "moimeme";
@@ -65,6 +69,7 @@ export default function TabInfirmier({
   onUpdateMouvements,
   rdvs = [],
   onUpdateRdvs,
+  factures = [],
 }: TabInfirmierProps) {
   const isDark = theme === "dark";
 
@@ -81,6 +86,19 @@ export default function TabInfirmier({
     return rdvs.filter((r) => r.date === t && r.statut !== "Annulé");
   }, [rdvs]);
 
+  const etatRecu = (r: RendezVous) => {
+    const t = new Date().toISOString().slice(0, 10);
+    const v = recuValide(factures, consultations, r.patient, r.contact, t);
+    if (v) return { valide: true, texte: `Reçu de consultation valable jusqu'au ${dateCourteFr(v.valableJusquau)} : pas de paiement, direct chez le médecin.` };
+    const d = dernierRecu(factures, consultations, r.patient, r.contact, t);
+    return {
+      valide: false,
+      texte: d
+        ? `Reçu expiré depuis le ${dateCourteFr(d.valableJusquau)} : le patient passe d'abord à la caisse.`
+        : "Aucun reçu de consultation : le patient passe d'abord à la caisse.",
+    };
+  };
+
   const handleSaveConstantesRdv = (
     rdv: RendezVous,
     constantes: ConstantesRdv,
@@ -88,6 +106,7 @@ export default function TabInfirmier({
   ) => {
     if (!onUpdateRdvs) return;
     let consultationId = rdv.consultationId;
+    const recu = recuValide(factures, consultations, rdv.patient, rdv.contact, new Date().toISOString().slice(0, 10));
     if (envoi && !consultationId) {
       const dossier = trouverDossier(dossiers, rdv.patient, rdv.contact);
       const last = dossier?.consultations[0];
@@ -105,7 +124,12 @@ export default function TabInfirmier({
         ancienConsultant: !!last,
         praticienId: envoi.praticienId || undefined,
         date: new Date().toISOString().slice(0, 10),
-        statut: "Attente consultation médecin",
+        // Reçu encore valable : pas de nouveau paiement, direct chez le
+        // médecin. Sinon, le patient passe d'abord à la caisse (il ira
+        // ensuite directement chez le médecin, ses constantes étant prises).
+        statut: recu ? "Attente consultation médecin" : "Attente paiement consultation",
+        recuConsultationId: recu ? recu.facture.id : undefined,
+        montantConsultation: recu ? 0 : undefined,
         serviceDestination: "Infirmerie",
         vitals: {
           temperature: constantes.temperature || 0,
@@ -132,7 +156,9 @@ export default function TabInfirmier({
     onUpdateRdvs(rdvs.map((r) => (r.id === rdv.id ? { ...r, constantes, consultationId, statut: "Terminé" } : r)));
     setRdvConstantesId(null);
     alert(envoi && consultationId !== rdv.consultationId
-      ? `Constantes enregistrées. ${rdv.patient} est maintenant dans la liste d'attente du médecin.`
+      ? recu
+        ? `Constantes enregistrées. Reçu valable : ${rdv.patient} est maintenant dans la liste d'attente du médecin.`
+        : `Constantes enregistrées. ${rdv.patient} doit passer à la caisse (Accueil & Caisse → « À encaisser »), puis ira directement chez le médecin.`
       : `Constantes enregistrées pour ${rdv.patient}.`);
   };
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -493,6 +519,7 @@ export default function TabInfirmier({
             dossiers={dossiers}
             isDark={isDark}
             onConstantes={(r) => setRdvConstantesId(r.id)}
+            etatRecu={etatRecu}
             onDossier={(d) => setDossierKey(d.key)}
             onNouveauRdv={(r) => setNouveauRdv(r ? { patient: r.patient, contact: r.contact, rdvPrecedentId: r.id } : {})}
             onAbsent={(r) => {
@@ -527,6 +554,7 @@ export default function TabInfirmier({
           staff={staff}
           isDark={isDark}
           onClose={() => setRdvConstantesId(null)}
+          recu={etatRecu(rdvConstantes)}
           onSave={(k, envoi) => handleSaveConstantesRdv(rdvConstantes, k, envoi)}
         />
       )}

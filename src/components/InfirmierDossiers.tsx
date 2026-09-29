@@ -238,13 +238,19 @@ function AlertesBadges({ m }: { m: Partial<MesureConstantes> }) {
 /*  Prise des constantes pour un RDV                                   */
 /* ------------------------------------------------------------------ */
 
+export interface EtatRecu {
+  valide: boolean;
+  texte: string;
+}
+
 export function ConstantesRdvForm({
-  rdv, dossier, staff, isDark, onClose, onSave,
+  rdv, dossier, staff, isDark, onClose, onSave, recu,
 }: {
   rdv: RendezVous;
   dossier?: DossierPatient;
   staff: Staff[];
   isDark: boolean;
+  recu?: EtatRecu;
   onClose: () => void;
   onSave: (constantes: ConstantesRdv, envoiMedecin: null | { age: number; sexe: "Masculin" | "Féminin"; praticienId: string }) => void;
 }) {
@@ -344,6 +350,11 @@ export function ConstantesRdvForm({
               <input type="checkbox" checked={envoyer} onChange={(e) => setEnvoyer(e.target.checked)} />
               <Stethoscope className="w-4 h-4" /> Envoyer le patient au médecin (crée son dossier de consultation)
             </label>
+            {envoyer && recu && (
+              <p className={`text-sm mt-2 font-medium ${recu.valide ? "text-emerald-600" : "text-amber-600"}`}>
+                {recu.valide ? "✓ " : "⚠ "}{recu.texte}
+              </p>
+            )}
             {envoyer && (
               <div className="grid grid-cols-2 gap-3 mt-3">
                 <div>
@@ -366,7 +377,7 @@ export function ConstantesRdvForm({
 
       {erreur && <p className="text-sm text-red-600 font-medium mt-3">{erreur}</p>}
       <button onClick={submit} className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg py-2.5">
-        {envoyer ? "Enregistrer et envoyer au médecin" : "Enregistrer les constantes"}
+        {!envoyer ? "Enregistrer les constantes" : recu && !recu.valide ? "Enregistrer et envoyer à la caisse" : "Enregistrer et envoyer au médecin"}
       </button>
     </Modal>
   );
@@ -660,8 +671,9 @@ export function DossierPatientView({
 /* ------------------------------------------------------------------ */
 
 export function RdvDuJour({
-  rdvs, dossiers, isDark, onConstantes, onDossier, onNouveauRdv, onAbsent,
+  rdvs, dossiers, isDark, onConstantes, onDossier, onNouveauRdv, onAbsent, etatRecu,
 }: {
+  etatRecu?: (r: RendezVous) => EtatRecu | null;
   rdvs: RendezVous[];
   dossiers: DossierPatient[];
   isDark: boolean;
@@ -704,6 +716,12 @@ export function RdvDuJour({
               </div>
               <StatutRdv statut={r.statut} />
             </div>
+            {(() => {
+              const e = !r.consultationId && r.statut !== "Absent" ? etatRecu?.(r) : null;
+              return e ? (
+                <div className={`text-xs mt-1 font-medium ${e.valide ? "text-emerald-600" : "text-amber-600"}`}>{e.valide ? "✓ " : "⚠ "}{e.texte}</div>
+              ) : null;
+            })()}
             {r.constantes && (
               <div className="text-sm mt-2">
                 <span className={muted}>Constantes : </span>

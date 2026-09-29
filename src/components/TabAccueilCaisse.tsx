@@ -6,7 +6,8 @@
 import React, { useState, useMemo } from "react";
 import { Consultation, Facture, FactureLigne, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
-import { Plus, UserPlus, Wallet, ArrowRight, Clock, CheckCircle2, Trash2, ReceiptText, Search } from "lucide-react";
+import { Plus, UserPlus, Wallet, ArrowRight, Clock, CheckCircle2, Trash2, ReceiptText, Search, ShieldCheck, AlertTriangle } from "lucide-react";
+import { VALIDITE_RECU_JOURS, dernierRecu, listeRecusValides, dateCourteFr, RecuConsultation } from "../lib/recuConsultation";
 
 interface TabAccueilCaisseProps {
   consultations: Consultation[];
@@ -229,6 +230,28 @@ export default function TabAccueilCaisse({
   const [panierExistant, setPanierExistant] = useState<LignePanier[]>([]);
 
   const isDark = theme === "dark";
+  const today = getTodayStr();
+
+  // --- Reçus de consultation encore valables (14 jours) -------------------
+  const [rechercheRecus, setRechercheRecus] = useState("");
+  const [visiteRecuId, setVisiteRecuId] = useState<string | null>(null);
+  const [visiteDestination, setVisiteDestination] = useState<"Infirmerie" | "Maternite" | "Laboratoire">("Infirmerie");
+  const recusValides = useMemo(() => listeRecusValides(factures, consultations, today), [factures, consultations, today]);
+  const recusFiltres = useMemo(() => {
+    const q = rechercheRecus.trim().toLowerCase();
+    if (!q) return recusValides;
+    return recusValides.filter((r) => r.patient.toLowerCase().includes(q) || (r.contact || "").includes(q));
+  }, [recusValides, rechercheRecus]);
+  // Reçu retrouvé pendant la saisie du nom dans le formulaire "Nouveau patient".
+  const recuFormulaire = useMemo(
+    () => (patient.trim().length >= 3 ? dernierRecu(factures, consultations, patient, contact, today) : null),
+    [factures, consultations, patient, contact, today]
+  );
+
+  // --- Patients à encaisser (ex. venus sur RDV avec un reçu expiré) --------
+  const [encaisserId, setEncaisserId] = useState<string | null>(null);
+  const [panierEncaisser, setPanierEncaisser] = useState<LignePanier[]>([]);
+  const [modePaiementEncaisser, setModePaiementEncaisser] = useState("Espèces");
 
   const enAttentePaiementConsult = useMemo(
     () => consultations.filter((c) => c.statut === "Attente paiement consultation"),
@@ -263,6 +286,108 @@ export default function TabAccueilCaisse({
     [factures]
   );
 
+  const statutPourDestination = (d: "Infirmerie" | "Maternite" | "Laboratoire"): Consultation["statut"] =>
+    d === "Maternite" ? "Attente prise en charge maternité" : d === "Laboratoire" ? "Attente prise en charge laboratoire" : "Attente prise en charge infirmier";
+
+  // Nouvelle visite couverte par un reçu encore valable : aucun paiement de
+  // consultation. Les autres actes éventuels du panier sont facturés à part
+  // (type "Actes", ce qui ne prolonge pas la validité du reçu).
+  const creerVisiteAvecRecu = (
+    recu: RecuConsultation,
+    destination: "Infirmerie" | "Maternite" | "Laboratoire",
+    infos?: { patient?: string; age?: number; sexe?: "Masculin" | "Féminin"; contact?: string; commune?: string },
+    panierActes: LignePanier[] = [],
+    mode = "Espèces"
+  ) => {
+    const o = recu.consultationOrigine;
+    const newCons: Consultation = {
+      id: generateUid(),
+      patient: (infos?.patient || recu.patient).trim(),
+      age: infos?.age || o?.age || 0,
+      sexe: infos?.sexe || o?.sexe || "Masculin",
+      contact: (infos?.contact || recu.contact || "").trim(),
+      commune: (infos?.commune || o?.commune || "").trim(),
+      profession: o?.profession,
+      villageSecteur: o?.villageSecteur,
+      zoneResidence: o?.zoneResidence,
+      ancienConsultant: true,
+      date: today,
+      statut: statutPourDestination(destination),
+      serviceDestination: destination,
+      montantConsultation: 0,
+      recuConsultationId: recu.facture.id,
+      vitals: { temperature: 0, poids: 0, tensionArterielle: "", pouls: 0, glycemie: 0 },
+      plainte: "",
+      diagnostic: "",
+      ordonnance: [],
+      createdAt: new Date().toISOString(),
+    };
+    onUpdateConsultations([newCons, ...consultations]);
+    const totalActes = panierTotal(panierActes);
+    if (totalActes > 0) {
+      onUpdateFactures([
+        {
+          id: generateUid(), patient: newCons.patient, date: today, mode, lignes: lignesPanierVersFacture(panierActes),
+          total: totalActes, montantPaye: totalActes, statut: "Payée", createdAt: new Date().toISOString(),
+          consultationId: newCons.id, typePaiement: "Actes",
+        },
+        ...factures,
+      ]);
+    }
+    alert(
+      `${newCons.patient} envoyé(e) ${destination === "Maternite" ? "à la maternité" : destination === "Laboratoire" ? "au laboratoire" : "à l'infirmerie"} sans payer la consultation (reçu du ${dateCourteFr(recu.payeLe)} valable jusqu'au ${dateCourteFr(recu.valableJusquau)}).` +
+      (totalActes > 0 ? `\nAutres actes encaissés : ${totalActes.toLocaleString("fr-FR")} FCFA.` : "")
+    );
+  };
+
+  const handleEnregistrerAvecRecu = () => {
+    if (!recuFormulaire || !recuFormulaire.valide) return;
+    // Le sexe du formulaire vaut "Masculin" par défaut : on garde celui de
+    // la fiche d'origine quand elle existe, pour ne pas l'écraser.
+    const o = recuFormulaire.consultationOrigine;
+    creerVisiteAvecRecu(
+      recuFormulaire,
+      serviceDestination,
+      {
+        patient: o?.patient || patient,
+        age: parseFloat(age) || undefined,
+        sexe: o?.sexe || sexe,
+        contact: contact.trim() || undefined,
+        commune: commune.trim() || undefined,
+      },
+      panierNouveau,
+      modePaiement
+    );
+    resetForm();
+  };
+
+  // Encaissement de la consultation d'un patient déjà enregistré mais pas
+  // encore payé (ex. patient venu sur RDV dont le reçu a expiré, envoyé par
+  // la salle infirmier). Si ses constantes ont déjà été prises, il va
+  // directement chez le médecin.
+  const handleEncaisserEnAttente = (c: Consultation) => {
+    const total = panierTotal(panierEncaisser);
+    if (total <= 0) {
+      alert("Veuillez sélectionner au moins un acte à facturer (ex: consultation).");
+      return;
+    }
+    const constantesPrises = !!(c.vitals && (c.vitals.temperature || c.vitals.tensionArterielle || c.vitals.pouls || c.vitals.poids));
+    const destination = c.serviceDestination || "Infirmerie";
+    const statut: Consultation["statut"] =
+      constantesPrises && destination === "Infirmerie" ? "Attente consultation médecin" : statutPourDestination(destination);
+    onUpdateConsultations(consultations.map((x) => (x.id === c.id ? { ...x, statut, montantConsultation: total } : x)));
+    onUpdateFactures([
+      {
+        id: generateUid(), patient: c.patient, date: today, mode: modePaiementEncaisser, lignes: lignesPanierVersFacture(panierEncaisser),
+        total, montantPaye: total, statut: "Payée", createdAt: new Date().toISOString(), consultationId: c.id, typePaiement: "Consultation",
+      },
+      ...factures,
+    ]);
+    setEncaisserId(null);
+    setPanierEncaisser([]);
+    alert(`Consultation encaissée pour ${c.patient}. ${statut === "Attente consultation médecin" ? "Ses constantes sont déjà prises : il/elle va directement chez le médecin." : "Dossier envoyé."}`);
+  };
+
   const resetForm = () => {
     setPatient("");
     setAge("");
@@ -292,6 +417,14 @@ export default function TabAccueilCaisse({
     const total = panierTotal(panierNouveau);
     if (total <= 0) {
       alert("Veuillez sélectionner au moins un acte à facturer (ex: consultation).");
+      return;
+    }
+    if (
+      recuFormulaire?.valide &&
+      !window.confirm(
+        `${recuFormulaire.patient} a déjà un reçu de consultation valable jusqu'au ${dateCourteFr(recuFormulaire.valableJusquau)}.\n\nVoulez-vous quand même encaisser ${total.toLocaleString("fr-FR")} FCFA ?`
+      )
+    ) {
       return;
     }
 
@@ -389,6 +522,58 @@ export default function TabAccueilCaisse({
         </p>
       </div>
 
+      {enAttentePaiementConsult.length > 0 && (
+        <div className={`rounded-lg border-2 border-amber-400 p-4 space-y-3 ${isDark ? "bg-gray-800" : "bg-amber-50/40"}`}>
+          <h3 className="font-bold flex items-center gap-2">
+            <Clock className="w-5 h-5 text-amber-500" /> À encaisser ({enAttentePaiementConsult.length})
+          </h3>
+          <p className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+            Patients déjà enregistrés mais dont la consultation n'est pas payée (par exemple venus sur rendez-vous avec un reçu expiré).
+          </p>
+          {enAttentePaiementConsult.map((c) => {
+            const dr = dernierRecu(factures, consultations, c.patient, c.contact, today);
+            const ouvert = encaisserId === c.id;
+            return (
+              <div key={c.id} className={`rounded border p-3 ${isDark ? "border-gray-700" : "border-gray-200 bg-white"}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium">{c.patient}</div>
+                    <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                      {c.plainte || "Consultation"}
+                      {dr ? ` · dernier reçu du ${dateCourteFr(dr.payeLe)}, expiré le ${dateCourteFr(dr.valableJusquau)}` : " · aucun reçu antérieur"}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => { setEncaisserId(ouvert ? null : c.id); setPanierEncaisser([]); }}
+                    className="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm font-medium flex items-center gap-1.5 hover:bg-emerald-700"
+                  >
+                    <Wallet className="w-4 h-4" /> {ouvert ? "Fermer" : "Encaisser"}
+                  </button>
+                </div>
+                {ouvert && (
+                  <div className="mt-3 space-y-3">
+                    <SelecteurActes actes={actes} panier={panierEncaisser} setPanier={setPanierEncaisser} isDark={isDark} />
+                    <div className="flex flex-wrap items-end justify-between gap-2">
+                      <div>
+                        <label className="text-xs font-medium">Mode de paiement</label>
+                        <select className="w-full mt-1 px-2 py-1.5 text-sm rounded border bg-transparent" value={modePaiementEncaisser} onChange={(e) => setModePaiementEncaisser(e.target.value)}>
+                          <option value="Espèces">Espèces</option>
+                          <option value="Mobile Money">Mobile Money</option>
+                          <option value="Assurance">Assurance</option>
+                        </select>
+                      </div>
+                      <button onClick={() => handleEncaisserEnAttente(c)} className="px-4 py-2 rounded bg-emerald-600 text-white font-medium flex items-center gap-2 hover:bg-emerald-700">
+                        <Wallet className="w-4 h-4" /> Encaisser {panierTotal(panierEncaisser) > 0 ? `${panierTotal(panierEncaisser).toLocaleString("fr-FR")} FCFA` : ""}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       <div
         className={`rounded-lg border p-4 space-y-4 ${
           isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"
@@ -455,6 +640,45 @@ export default function TabAccueilCaisse({
           </div>
         </div>
 
+        {recuFormulaire && (
+          recuFormulaire.valide ? (
+            <div className="rounded-lg border-2 border-emerald-500 bg-emerald-500/10 p-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-600 mt-0.5 shrink-0" />
+                <div className="text-sm">
+                  <div className="font-bold text-emerald-700">Reçu de consultation valable — ne pas refacturer la consultation</div>
+                  <div>
+                    {recuFormulaire.patient} a payé le {dateCourteFr(recuFormulaire.payeLe)} ({recuFormulaire.facture.total.toLocaleString("fr-FR")} FCFA).
+                    Valable jusqu'au <b>{dateCourteFr(recuFormulaire.valableJusquau)}</b>
+                    {recuFormulaire.joursRestants === 0 ? " (dernier jour)" : ` (encore ${recuFormulaire.joursRestants + 1} jour${recuFormulaire.joursRestants > 0 ? "s" : ""})`}.
+                    {recuFormulaire.visitesGratuites.length > 0 && ` Déjà revenu(e) ${recuFormulaire.visitesGratuites.length} fois avec ce reçu.`}
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={handleEnregistrerAvecRecu}
+                  className="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm font-medium flex items-center gap-1.5 hover:bg-emerald-700"
+                >
+                  <CheckCircle2 className="w-4 h-4" /> Envoyer sans payer la consultation
+                  {panierTotal(panierNouveau) > 0 ? ` (+ ${panierTotal(panierNouveau).toLocaleString("fr-FR")} FCFA d'autres actes)` : ""}
+                </button>
+              </div>
+              <p className={`text-xs ${isDark ? "text-gray-400" : "text-gray-600"}`}>
+                Si le patient demande d'autres actes (pansement, examen…), ajoutez-les ci-dessous : ils seront encaissés à part. Ne mettez pas la consultation dans le panier.
+              </p>
+            </div>
+          ) : (
+            <div className={`rounded-lg border p-3 text-sm flex items-start gap-2 ${isDark ? "border-gray-700" : "border-gray-200 bg-gray-50"}`}>
+              <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+              <span>
+                Dernier reçu de consultation de {recuFormulaire.patient} : payé le {dateCourteFr(recuFormulaire.payeLe)}, expiré depuis le {dateCourteFr(recuFormulaire.valableJusquau)}. La consultation est à payer.
+              </span>
+            </div>
+          )
+        )}
+
         <div>
           <label className="text-sm font-medium">Orienter le patient vers *</label>
           <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -507,6 +731,104 @@ export default function TabAccueilCaisse({
               : "au laboratoire"}
           </button>
         </div>
+      </div>
+
+      <div className={`rounded-lg border p-4 space-y-3 ${isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"}`}>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-emerald-600" /> Reçus de consultation valables ({recusValides.length})
+            </h2>
+            <p className={`text-sm ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+              Un reçu de consultation reste valable {VALIDITE_RECU_JOURS} jours, jour du paiement compris. Ces patients ne repaient pas la consultation s'ils reviennent, en consultation ou sur rendez-vous.
+            </p>
+          </div>
+          <div className="relative w-full sm:w-64">
+            <Search className={`w-4 h-4 absolute left-2.5 top-2.5 ${isDark ? "text-gray-500" : "text-gray-400"}`} />
+            <input className="w-full pl-8 pr-3 py-2 rounded border bg-transparent text-sm" placeholder="Chercher un patient" value={rechercheRecus} onChange={(e) => setRechercheRecus(e.target.value)} />
+          </div>
+        </div>
+        {recusFiltres.length === 0 ? (
+          <p className={`text-sm italic ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+            {recusValides.length === 0 ? "Aucun reçu de consultation en cours de validité." : "Aucun patient ne correspond."}
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className={`text-left text-xs uppercase ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                  <th className="py-2 pr-3">Patient</th>
+                  <th className="py-2 pr-3">Payé le</th>
+                  <th className="py-2 pr-3">Valable jusqu'au</th>
+                  <th className="py-2 pr-3">Retours</th>
+                  <th className="py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {recusFiltres.map((r) => {
+                  const ouvert = visiteRecuId === r.facture.id;
+                  const dejaAujourdhui = consultations.some((c) => c.recuConsultationId === r.facture.id && c.date === today) || (r.payeLe === today);
+                  return (
+                    <React.Fragment key={r.facture.id}>
+                      <tr className={`border-t ${isDark ? "border-gray-700" : "border-gray-100"}`}>
+                        <td className="py-2 pr-3">
+                          <div className="font-medium">{r.patient}</div>
+                          <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>{r.contact || "—"}</div>
+                        </td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{dateCourteFr(r.payeLe)}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
+                          <span className={r.joursRestants <= 1 ? "text-amber-600 font-semibold" : ""}>{dateCourteFr(r.valableJusquau)}</span>
+                          <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                            {r.joursRestants === 0 ? "dernier jour" : `encore ${r.joursRestants + 1} j`}
+                          </div>
+                        </td>
+                        <td className="py-2 pr-3">{r.visitesGratuites.length}</td>
+                        <td className="py-2 text-right">
+                          {dejaAujourdhui ? (
+                            <span className="text-xs text-emerald-600 font-medium">Déjà vu aujourd'hui</span>
+                          ) : (
+                            <button
+                              onClick={() => { setVisiteRecuId(ouvert ? null : r.facture.id); setVisiteDestination("Infirmerie"); }}
+                              className="px-3 py-1.5 rounded bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 whitespace-nowrap"
+                            >
+                              {ouvert ? "Annuler" : "Il/elle revient"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                      {ouvert && (
+                        <tr>
+                          <td colSpan={5} className="pb-3">
+                            <div className={`rounded-lg p-3 space-y-2 ${isDark ? "bg-gray-900" : "bg-emerald-50"}`}>
+                              <div className="text-sm font-medium">Envoyer {r.patient} sans payer la consultation vers :</div>
+                              <div className="flex flex-wrap gap-2">
+                                {(["Infirmerie", "Maternite", "Laboratoire"] as const).map((d) => (
+                                  <button key={d} type="button" onClick={() => setVisiteDestination(d)}
+                                    className={`px-3 py-1.5 rounded-full text-sm border ${visiteDestination === d ? "bg-emerald-600 text-white border-emerald-600" : isDark ? "border-gray-600" : "border-gray-300 bg-white"}`}>
+                                    {d === "Maternite" ? "Maternité" : d}
+                                  </button>
+                                ))}
+                              </div>
+                              <button
+                                onClick={() => { creerVisiteAvecRecu(r, visiteDestination); setVisiteRecuId(null); }}
+                                className="px-4 py-2 rounded bg-emerald-600 text-white text-sm font-medium flex items-center gap-2 hover:bg-emerald-700"
+                              >
+                                <ArrowRight className="w-4 h-4" /> Envoyer (0 FCFA)
+                              </button>
+                              <p className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                                Pour facturer d'autres actes à ce patient, utilisez plutôt le formulaire « Nouveau patient » en tapant son nom.
+                              </p>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div

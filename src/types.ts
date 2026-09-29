@@ -677,6 +677,9 @@ export interface Consultation {
   serviceDestination?: "Infirmerie" | "Maternite" | "Laboratoire";
   // Montant de la consultation (fixé au secrétariat avant paiement).
   montantConsultation?: number;
+  // Visite non facturée car le patient a un reçu de consultation encore
+  // valable (voir src/lib/recuConsultation.ts) : id de la facture d'origine.
+  recuConsultationId?: string;
   vitals: {
     temperature: number;
     poids: number;
