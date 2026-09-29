@@ -2200,6 +2200,8 @@ export default function App() {
               onUpdateMedicaments={handleUpdateMedicaments}
               mouvements={mouvements}
               onUpdateMouvements={handleUpdateMouvements}
+              rdvs={rdv}
+              onUpdateRdvs={handleUpdateRdv}
             />
           )}
 

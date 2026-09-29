@@ -146,6 +146,29 @@ export interface RendezVous {
   notes: string;
   statut: "Planifié" | "Confirmé" | "Terminé" | "Annulé" | "Absent";
   createdAt: string;
+  // Constantes prises en salle infirmier le jour du rendez-vous.
+  constantes?: ConstantesRdv;
+  // Dossier de consultation créé quand l'infirmier(ère) envoie le patient
+  // venu sur rendez-vous vers le médecin.
+  consultationId?: string;
+  // RDV d'origine quand ce RDV a été programmé depuis un autre (suivi).
+  rdvPrecedentId?: string;
+  creePar?: string;
+}
+
+export interface ConstantesRdv {
+  temperature?: number;
+  poids?: number;
+  taille?: number;
+  imc?: number;
+  tensionArterielle?: string;
+  pouls?: number;
+  frequenceRespiratoire?: number;
+  saturationO2?: number;
+  glycemie?: number;
+  observations?: string;
+  prisesLe: string;
+  prisesPar?: string;
 }
 
 export interface RhFiche {

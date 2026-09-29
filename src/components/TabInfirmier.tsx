@@ -4,10 +4,13 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock } from "../types";
+import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv } from "../types";
+import {
+  construireDossiers, trouverDossier, ConstantesRdvForm, NouveauRdvForm, DossierPatientView, RdvDuJour, ListeDossiers,
+} from "./InfirmierDossiers";
 import { generateUid } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
-import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send } from "lucide-react";
+import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send, CalendarDays, FolderOpen, CalendarPlus } from "lucide-react";
 
 interface TabInfirmierProps {
   consultations: Consultation[];
@@ -31,6 +34,11 @@ interface TabInfirmierProps {
   onUpdateMedicaments?: (meds: Medicament[]) => void;
   mouvements?: MouvementStock[];
   onUpdateMouvements?: (movs: MouvementStock[]) => void;
+  // Rendez-vous (même source que l'onglet RDV) : permettent à la salle
+  // infirmier de consulter les dossiers patients, de prendre les constantes
+  // des patients venus sur rendez-vous et de programmer le RDV suivant.
+  rdvs?: RendezVous[];
+  onUpdateRdvs?: (rdvs: RendezVous[]) => void;
 }
 
 type ModeCloture = "transfert" | "moimeme";
@@ -55,8 +63,78 @@ export default function TabInfirmier({
   onUpdateMedicaments,
   mouvements = [],
   onUpdateMouvements,
+  rdvs = [],
+  onUpdateRdvs,
 }: TabInfirmierProps) {
   const isDark = theme === "dark";
+
+  // --- Rendez-vous et dossiers patients ---------------------------------
+  const [vueInf, setVueInf] = useState<"attente" | "rdv" | "dossiers">("attente");
+  const [dossierKey, setDossierKey] = useState<string | null>(null);
+  const [rdvConstantesId, setRdvConstantesId] = useState<string | null>(null);
+  const [nouveauRdv, setNouveauRdv] = useState<null | { patient?: string; contact?: string; rdvPrecedentId?: string }>(null);
+  const dossiers = useMemo(() => construireDossiers(consultations, rdvs, hospitalisations), [consultations, rdvs, hospitalisations]);
+  const dossierOuvert = dossierKey ? dossiers.find((d) => d.key === dossierKey) || null : null;
+  const rdvConstantes = rdvConstantesId ? rdvs.find((r) => r.id === rdvConstantesId) || null : null;
+  const rdvsDuJour = useMemo(() => {
+    const t = new Date().toISOString().slice(0, 10);
+    return rdvs.filter((r) => r.date === t && r.statut !== "Annulé");
+  }, [rdvs]);
+
+  const handleSaveConstantesRdv = (
+    rdv: RendezVous,
+    constantes: ConstantesRdv,
+    envoi: null | { age: number; sexe: "Masculin" | "Féminin"; praticienId: string }
+  ) => {
+    if (!onUpdateRdvs) return;
+    let consultationId = rdv.consultationId;
+    if (envoi && !consultationId) {
+      const dossier = trouverDossier(dossiers, rdv.patient, rdv.contact);
+      const last = dossier?.consultations[0];
+      const nouvelle: Consultation = {
+        id: generateUid(),
+        patient: rdv.patient,
+        age: envoi.age,
+        sexe: envoi.sexe,
+        contact: rdv.contact || last?.contact || "",
+        profession: last?.profession,
+        commune: last?.commune,
+        villageSecteur: last?.villageSecteur,
+        zoneResidence: last?.zoneResidence,
+        modeEntree: "Auto orienté",
+        ancienConsultant: !!last,
+        praticienId: envoi.praticienId || undefined,
+        date: new Date().toISOString().slice(0, 10),
+        statut: "Attente consultation médecin",
+        serviceDestination: "Infirmerie",
+        vitals: {
+          temperature: constantes.temperature || 0,
+          poids: constantes.poids || 0,
+          tensionArterielle: constantes.tensionArterielle || "",
+          pouls: constantes.pouls || 0,
+          glycemie: constantes.glycemie || 0,
+          taille: constantes.taille,
+          imc: constantes.imc,
+        },
+        plainte: [`Venu sur rendez-vous (${rdv.type})`, rdv.motif].filter(Boolean).join(" — "),
+        observations: [
+          constantes.saturationO2 ? `SpO₂ : ${constantes.saturationO2} %` : "",
+          constantes.frequenceRespiratoire ? `FR : ${constantes.frequenceRespiratoire}/min` : "",
+          constantes.observations || "",
+        ].filter(Boolean).join(" · ") || undefined,
+        diagnostic: "",
+        ordonnance: [],
+        createdAt: new Date().toISOString(),
+      };
+      consultationId = nouvelle.id;
+      onUpdateConsultations([nouvelle, ...consultations]);
+    }
+    onUpdateRdvs(rdvs.map((r) => (r.id === rdv.id ? { ...r, constantes, consultationId, statut: "Terminé" } : r)));
+    setRdvConstantesId(null);
+    alert(envoi && consultationId !== rdv.consultationId
+      ? `Constantes enregistrées. ${rdv.patient} est maintenant dans la liste d'attente du médecin.`
+      : `Constantes enregistrées pour ${rdv.patient}.`);
+  };
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Choix fait par l'infirmier(ère)/sage-femme : conclure elle/lui-même la
@@ -386,7 +464,86 @@ export default function TabInfirmier({
     setSelectedId(null);
   };
 
+  const ongletsInf: [typeof vueInf, string, React.ReactNode][] = [
+    ["attente", `Patients en attente (${enAttente.length})`, <Activity key="a" className="w-4 h-4" />],
+    ["rdv", `Rendez-vous du jour (${rdvsDuJour.length})`, <CalendarDays key="r" className="w-4 h-4" />],
+    ["dossiers", "Dossiers patients", <FolderOpen key="d" className="w-4 h-4" />],
+  ];
+
   return (
+    <div className={isDark ? "text-gray-100" : "text-gray-900"}>
+      <div className={`flex gap-1 overflow-x-auto px-4 pt-4 border-b ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+        {ongletsInf.map(([k, l, icon]) => (
+          <button
+            key={k}
+            onClick={() => setVueInf(k)}
+            className={`px-3 py-2 text-sm font-semibold whitespace-nowrap border-b-2 -mb-px flex items-center gap-1.5 ${
+              vueInf === k ? "border-emerald-600 text-emerald-600" : `border-transparent ${isDark ? "text-gray-400" : "text-gray-500"}`
+            }`}
+          >
+            {icon} {l}
+          </button>
+        ))}
+      </div>
+
+      {vueInf === "rdv" && (
+        <div className="p-4 max-w-3xl">
+          <RdvDuJour
+            rdvs={rdvs}
+            dossiers={dossiers}
+            isDark={isDark}
+            onConstantes={(r) => setRdvConstantesId(r.id)}
+            onDossier={(d) => setDossierKey(d.key)}
+            onNouveauRdv={(r) => setNouveauRdv(r ? { patient: r.patient, contact: r.contact, rdvPrecedentId: r.id } : {})}
+            onAbsent={(r) => {
+              if (!onUpdateRdvs) return;
+              if (window.confirm(`Marquer ${r.patient} absent à son rendez-vous ?`)) {
+                onUpdateRdvs(rdvs.map((x) => (x.id === r.id ? { ...x, statut: "Absent" } : x)));
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {vueInf === "dossiers" && (
+        <div className="p-4">
+          <ListeDossiers dossiers={dossiers} isDark={isDark} onDossier={(d) => setDossierKey(d.key)} />
+        </div>
+      )}
+
+      {dossierOuvert && (
+        <DossierPatientView
+          dossier={dossierOuvert}
+          isDark={isDark}
+          onClose={() => setDossierKey(null)}
+          onNouveauRdv={() => setNouveauRdv({ patient: dossierOuvert.nom, contact: dossierOuvert.contact, rdvPrecedentId: dossierOuvert.rdvs[0]?.id })}
+          onConstantes={(r) => setRdvConstantesId(r.id)}
+        />
+      )}
+      {rdvConstantes && (
+        <ConstantesRdvForm
+          rdv={rdvConstantes}
+          dossier={trouverDossier(dossiers, rdvConstantes.patient, rdvConstantes.contact)}
+          staff={staff}
+          isDark={isDark}
+          onClose={() => setRdvConstantesId(null)}
+          onSave={(k, envoi) => handleSaveConstantesRdv(rdvConstantes, k, envoi)}
+        />
+      )}
+      {nouveauRdv && (
+        <NouveauRdvForm
+          patient={nouveauRdv.patient}
+          contact={nouveauRdv.contact}
+          rdvPrecedentId={nouveauRdv.rdvPrecedentId}
+          rdvs={rdvs}
+          staff={staff}
+          isDark={isDark}
+          onClose={() => setNouveauRdv(null)}
+          onSave={(r) => onUpdateRdvs && onUpdateRdvs([r, ...rdvs])}
+        />
+      )}
+
+      {vueInf === "attente" && (
     <div className={`p-4 grid grid-cols-1 md:grid-cols-3 gap-4 ${isDark ? "text-gray-100" : "text-gray-900"}`}>
       <div className="md:col-span-1 space-y-2">
         <h2 className="text-lg font-bold flex items-center gap-2">
@@ -425,7 +582,22 @@ export default function TabInfirmier({
           </div>
         ) : (
           <div className={`rounded-lg border p-4 space-y-4 ${isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"}`}>
-            <h3 className="font-semibold text-lg">{selected.patient}</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-semibold text-lg">{selected.patient}</h3>
+              <div className="flex gap-2">
+                {(() => {
+                  const d = trouverDossier(dossiers, selected.patient, selected.contact);
+                  return d && (d.consultations.length > 1 || d.rdvs.length > 0 || d.hospitalisations.length > 0) ? (
+                    <button onClick={() => setDossierKey(d.key)} className={`text-sm font-semibold rounded-lg px-3 py-1.5 border flex items-center gap-1 ${isDark ? "border-gray-600" : "border-gray-300"}`}>
+                      <FolderOpen className="w-4 h-4" /> Dossier
+                    </button>
+                  ) : null;
+                })()}
+                <button onClick={() => setNouveauRdv({ patient: selected.patient, contact: selected.contact })} className={`text-sm font-semibold rounded-lg px-3 py-1.5 border flex items-center gap-1 ${isDark ? "border-gray-600" : "border-gray-300"}`}>
+                  <CalendarPlus className="w-4 h-4" /> Programmer un RDV
+                </button>
+              </div>
+            </div>
 
             <div>
               <label className="text-sm font-medium">Date de la consultation</label>
@@ -861,6 +1033,8 @@ export default function TabInfirmier({
             ))}
           </div>
         </div>
+      )}
+    </div>
       )}
     </div>
   );
