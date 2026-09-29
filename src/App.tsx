@@ -57,6 +57,8 @@ import { sendBrowserNotification } from "./lib/browserNotifications";
 // Import all 16 operational tab panels
 import TabQualite from "./components/TabQualite";
 import TabIndicateurs from "./components/TabIndicateurs";
+import TabTHLO from "./components/TabTHLO";
+import { RapportTHLO, ConfigTHLO, CONFIG_THLO_DEFAUT, semainePrecedente, dateLimite } from "./modules/thlo/thloData";
 import TabTaches from "./components/TabTaches";
 import TabPharmacie from "./components/TabPharmacie";
 import TabFacturation from "./components/TabFacturation";
@@ -125,7 +127,7 @@ import {
 const ALL_TABS = [
   "dashboard", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", 
   "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", 
-  "assurances", "rh", "indicateurs", "qualite", "documents", "settings"
+  "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings"
 ];
 
 const getTabLabel = (id: string): string => {
@@ -145,6 +147,7 @@ const getTabLabel = (id: string): string => {
     factures: "Factures & Journal",
     assurances: "Assurances & Tiers-Payant",
     rh: "Ressources Humaines",
+    thlo: "THLO — Surveillance hebdo",
     indicateurs: "Indicateurs Épidémio",
     qualite: "Démarche Qualité",
     documents: "Coffre-fort Documents",
@@ -354,6 +357,9 @@ export default function App() {
   const [laboExamens, setLaboExamens] = useState<ExamenLabo[]>([]);
   const [documents, setDocuments] = useState<DocumentArchive[]>([]);
   const [actesTarifaires, setActesTarifaires] = useState<ActeTarifaire[]>([]);
+  // THLO : rapports hebdomadaires de surveillance épidémiologique et réglages.
+  const [thloRapports, setThloRapports] = useState<RapportTHLO[]>([]);
+  const [thloConfig, setThloConfig] = useState<ConfigTHLO>(CONFIG_THLO_DEFAUT);
 
   // --- Synchronisation temps réel multi-appareils (Firestore) ---
   // Associe chaque clé de données à sa fonction de mise à jour locale.
@@ -387,6 +393,8 @@ export default function App() {
     dg_labo_examens: setLaboExamens,
     dg_documents: setDocuments,
     dg_actes_tarifaires: setActesTarifaires,
+    dg_thlo_rapports: setThloRapports,
+    dg_thlo_config: setThloConfig,
   });
   // Garde en mémoire la dernière valeur confirmée comme envoyée au cloud pour chaque clé,
   // afin de ne renvoyer que ce qui a réellement changé (et d'éviter les boucles avec les
@@ -574,14 +582,14 @@ export default function App() {
         tabs: [
           "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
           "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
-          "assurances", "rh", "indicateurs", "qualite", "documents", "settings",
+          "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings",
         ],
       };
     }
 
     const tabs = ["taches"]; // tout le monde voit les tâches
     if (p.includes("medecin") || p.includes("pediatre") || p.includes("praticien")) {
-      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs");
+      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs", "thlo");
       return { reconnu: true, tabs };
     }
     if (p.includes("sage-femme") || p.includes("maternit")) {
@@ -591,7 +599,7 @@ export default function App() {
       return { reconnu: true, tabs };
     }
     if (p.includes("infirm") || p.includes("aide-soignant") || p.includes("triage")) {
-      tabs.push("infirmier", "urgences", "hospit", "vaccination", "rdv");
+      tabs.push("infirmier", "urgences", "hospit", "vaccination", "rdv", "thlo");
       return { reconnu: true, tabs };
     }
     if (p.includes("labo")) {
@@ -624,7 +632,7 @@ export default function App() {
       return [
         "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
         "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
-        "assurances", "rh", "indicateurs", "qualite", "documents", "settings",
+        "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings",
       ];
     }
     return detectPosteAccess(currentUser.poste).tabs;
@@ -1017,6 +1025,8 @@ export default function App() {
     setLaboExamens(safeGet<ExamenLabo[]>("dg_labo_examens", []));
     setDocuments(safeGet<DocumentArchive[]>("dg_documents", []));
     setActesTarifaires(safeGet<ActeTarifaire[]>("dg_actes_tarifaires", []));
+    setThloRapports(safeGet<RapportTHLO[]>("dg_thlo_rapports", []));
+    setThloConfig({ ...CONFIG_THLO_DEFAUT, ...safeGet<Partial<ConfigTHLO>>("dg_thlo_config", {}) });
     setIsLoaded(true);
   }, []);
 
@@ -1154,14 +1164,16 @@ export default function App() {
       dg_vaccinations: vaccinations,
       dg_labo_examens: laboExamens,
       dg_documents: documents,
-      dg_actes_tarifaires: actesTarifaires
+      dg_actes_tarifaires: actesTarifaires,
+      dg_thlo_rapports: thloRapports,
+      dg_thlo_config: thloConfig
     };
   }, [
     staff, medicaments, mouvements, tasks, consultations, pediatrie,
     materniteCpns, materniteAccouchements, rdv, hospitalisations, ficheReferences,
     hospEvolutions, factures, depenses, incidents, actions, audits,
     conges, absences, rhFiches, prisesEnCharge, urgences, vaccinations,
-    laboExamens, documents, actesTarifaires
+    laboExamens, documents, actesTarifaires, thloRapports, thloConfig
   ]);
 
   // Periodic auto-save effect
@@ -1290,6 +1302,15 @@ export default function App() {
   const handleUpdateMaterniteAccouchements = (newAccs: Accouchement[]) => {
     setMaterniteAccouchements(newAccs);
     safeSet("dg_maternite_accouchements", newAccs);
+  };
+
+  const handleUpdateThloRapports = (r: RapportTHLO[]) => {
+    setThloRapports(r);
+    safeSet("dg_thlo_rapports", r);
+  };
+  const handleUpdateThloConfig = (c: ConfigTHLO) => {
+    setThloConfig(c);
+    safeSet("dg_thlo_config", c);
   };
 
   const handleUpdateRdv = (newRdv: RendezVous[]) => {
@@ -1438,6 +1459,12 @@ export default function App() {
       {
         title: "📊 Qualité & Configuration",
         items: [
+          { id: "thlo", label: "THLO — Surveillance hebdo", icon: Activity, alertCount: (() => {
+            // Rapport de la semaine passée pas encore transmis alors que la date limite est dépassée.
+            const s = semainePrecedente();
+            const r = thloRapports.find((x) => x.id === s.id);
+            return (!r || r.statut !== "Transmis") && new Date().toISOString().slice(0, 10) > dateLimite(s, thloConfig) ? 1 : 0;
+          })() },
           { id: "indicateurs", label: "Indicateurs Épidémio", icon: TrendingUp },
           { id: "qualite", label: "Démarche Qualité", icon: ShieldCheck },
           { id: "documents", label: "Coffre-fort Documents", icon: FileText },
@@ -2141,6 +2168,20 @@ export default function App() {
               onUpdateAudits={handleUpdateAudits}
               onUpdateIncidents={handleUpdateIncidents}
               onUpdateActions={handleUpdateActions}
+            />
+          )}
+
+          {activeTab === "thlo" && (
+            <TabTHLO
+              consultations={consultations}
+              pediatrie={pediatrie}
+              hospitalisations={hospitalisations}
+              rapports={thloRapports}
+              onUpdateRapports={handleUpdateThloRapports}
+              config={thloConfig}
+              onUpdateConfig={handleUpdateThloConfig}
+              theme={theme}
+              agentNom={currentUser?.nom}
             />
           )}
 
