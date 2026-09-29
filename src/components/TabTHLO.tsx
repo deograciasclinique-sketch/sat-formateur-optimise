@@ -43,7 +43,18 @@ export default function TabTHLO({
   const card = `rounded-lg border ${isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"}`;
   const today = isoDate(new Date());
 
-  const [semaine, setSemaine] = useState<SemaineEpi>(() => semainePrecedente());
+  // Par défaut : la semaine en cours, qui se remplit au fil des consultations.
+  const [semaine, setSemaine] = useState<SemaineEpi>(() => semaineDe(isoDate(new Date())));
+  const [choixManuel, setChoixManuel] = useState(false);
+  const allerA = (s: SemaineEpi) => { setSemaine(s); setChoixManuel(s.id !== semaineDe(isoDate(new Date())).id); };
+  // Si l'app reste ouverte au passage à une nouvelle semaine, on suit le calendrier.
+  React.useEffect(() => {
+    const t = setInterval(() => {
+      const courante = semaineDe(isoDate(new Date()));
+      if (!choixManuel && courante.id !== semaine.id) setSemaine(courante);
+    }, 60000);
+    return () => clearInterval(t);
+  }, [choixManuel, semaine.id]);
   const [seulementAvecCas, setSeulementAvecCas] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [showConfig, setShowConfig] = useState(!config?.district);
@@ -89,8 +100,10 @@ export default function TabTHLO({
   const corriger = (maladieId: string, type: "cas" | "deces", tranche: number, valeur: string) => {
     if (verrouille) return;
     const r = baseRapport();
-    const actuel: Compte = [...((r.corrections[maladieId]?.[type]) || auto[type][maladieId])] as Compte;
-    actuel[tranche] = Math.max(0, parseInt(valeur, 10) || 0);
+    // Seule la case modifiée est corrigée ; les autres restent automatiques.
+    const actuel = [...((r.corrections[maladieId]?.[type]) || [null, null, null, null])];
+    const v = Math.max(0, parseInt(valeur, 10) || 0);
+    actuel[tranche] = v === auto[type][maladieId][tranche] ? null : v;
     sauver({
       ...r, observations: obs, redigePar: redige,
       corrections: { ...r.corrections, [maladieId]: { ...(r.corrections[maladieId] || {}), [type]: actuel } },
@@ -192,7 +205,8 @@ export default function TabTHLO({
   // pendant la saisie.
   const cellule = (m: (typeof MALADIES_THLO)[number], type: "cas" | "deces", i: number) => {
     const v = valeurs[type][m.id][i];
-    const corrige = !verrouille && rapport?.corrections?.[m.id]?.[type] && rapport.corrections[m.id][type]![i] !== auto[type][m.id][i];
+    const cc = rapport?.corrections?.[m.id]?.[type]?.[i];
+    const corrige = !verrouille && cc !== null && cc !== undefined && cc !== auto[type][m.id][i];
     if (verrouille) return <td key={type + i} className={`px-1 py-1 text-center ${v ? "font-bold" : muted}`}>{v}</td>;
     return (
       <td key={type + i} className="px-1 py-1 text-center">
@@ -253,7 +267,7 @@ export default function TabTHLO({
       {/* Choix de la semaine */}
       <div className={`${card} p-3 flex flex-wrap items-center justify-between gap-3`}>
         <div className="flex items-center gap-2">
-          <button onClick={() => setSemaine(decalerSemaine(semaine, -1))} aria-label="Semaine précédente" className={`p-2 rounded border ${isDark ? "border-gray-600" : "border-gray-300"}`}><ChevronLeft className="w-4 h-4" /></button>
+          <button onClick={() => allerA(decalerSemaine(semaine, -1))} aria-label="Semaine précédente" className={`p-2 rounded border ${isDark ? "border-gray-600" : "border-gray-300"}`}><ChevronLeft className="w-4 h-4" /></button>
           <div>
             <div className="font-bold">Semaine épidémiologique {libelleSemaine(semaine)}</div>
             <div className={`text-xs ${muted}`}>
@@ -261,13 +275,44 @@ export default function TabTHLO({
               À transmettre au plus tard le {dateFr(limite)}
             </div>
           </div>
-          <button onClick={() => setSemaine(decalerSemaine(semaine, 1))} disabled={semaine.id === semaineCourante.id} aria-label="Semaine suivante" className={`p-2 rounded border disabled:opacity-30 ${isDark ? "border-gray-600" : "border-gray-300"}`}><ChevronRight className="w-4 h-4" /></button>
+          <button onClick={() => allerA(decalerSemaine(semaine, 1))} disabled={semaine.id === semaineCourante.id} aria-label="Semaine suivante" className={`p-2 rounded border disabled:opacity-30 ${isDark ? "border-gray-600" : "border-gray-300"}`}><ChevronRight className="w-4 h-4" /></button>
         </div>
         <div className="flex items-center gap-2">
           {statutChip(rapport?.statut)}
           {rapport?.transmisLe && <span className={`text-xs ${muted}`}>transmis le {dateFr(rapport.transmisLe)}{rapport.moyenTransmission ? ` (${rapport.moyenTransmission})` : ""}</span>}
         </div>
       </div>
+
+      {(() => {
+        const prec = semainePrecedente(today);
+        const rp = rapports.find((x) => x.id === prec.id);
+        if (semaine.id === prec.id || rp?.statut === "Transmis") return null;
+        return (
+          <div className="rounded-lg border-2 border-amber-400 bg-amber-500/10 p-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>
+              <b>Rapport de la semaine passée (S{String(prec.numero).padStart(2, "0")}) à transmettre</b> au plus tard le {dateFr(dateLimite(prec, cfg))}
+              {today > dateLimite(prec, cfg) ? <b className="text-red-600"> — en retard</b> : ""}.
+            </span>
+            <button onClick={() => allerA(prec)} className="px-3 py-1.5 rounded bg-amber-500 text-white font-semibold">Ouvrir S{String(prec.numero).padStart(2, "0")}</button>
+          </div>
+        );
+      })()}
+
+      {verrouille && (() => {
+        const autoCas = MALADIES_THLO.reduce((x, m) => x + somme(auto.cas[m.id]), 0);
+        const autoDeces = MALADIES_THLO.reduce((x, m) => x + somme(auto.deces[m.id]), 0);
+        const change = MALADIES_THLO.some((m) => auto.cas[m.id].some((v, i) => v !== valeurs.cas[m.id][i]) || auto.deces[m.id].some((v, i) => v !== valeurs.deces[m.id][i]));
+        if (!change) return null;
+        return (
+          <div className="rounded-lg border-2 border-amber-400 bg-amber-500/10 p-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>
+              <b>Des dossiers de cette semaine ont changé depuis la validation</b> : les dossiers comptent maintenant {autoCas} cas et {autoDeces} décès, contre {totalCas} cas et {totalDeces} décès dans le rapport figé.
+              {" "}Rouvrez le rapport pour le mettre à jour{rapport?.statut === "Transmis" ? " puis transmettez un rectificatif au District" : ""}.
+            </span>
+            <button onClick={rouvrir} className="px-3 py-1.5 rounded bg-amber-500 text-white font-semibold">Rouvrir et mettre à jour</button>
+          </div>
+        );
+      })()}
 
       {immediates.length > 0 && (
         <div className="rounded-lg border-2 border-red-500 bg-red-500/10 p-3 flex items-start gap-2">
@@ -279,9 +324,10 @@ export default function TabTHLO({
         </div>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           ["Dossiers de la semaine", auto.nbDossiersAnalyses],
+          ["Encore sans diagnostic", auto.sansDiagnostic],
           ["Cas notifiés", totalCas],
           ["Décès", totalDeces],
           ["Maladies avec cas", maladiesAvecCas.length],
@@ -437,7 +483,7 @@ export default function TabTHLO({
             const enRetard = !r || r.statut !== "Transmis" ? today > dateLimite(s, cfg) : r.transmisLe!.slice(0, 10) > dateLimite(s, cfg);
             const tc = r?.valeursFigees ? MALADIES_THLO.reduce((x, m) => x + somme(r.valeursFigees!.cas[m.id] || zero()), 0) : null;
             return (
-              <button key={s.id} onClick={() => setSemaine(s)}
+              <button key={s.id} onClick={() => allerA(s)}
                 className={`text-left rounded border p-2 ${s.id === semaine.id ? "ring-2 ring-emerald-500" : ""} ${isDark ? "border-gray-700 hover:bg-gray-700" : "border-gray-200 hover:bg-gray-50"}`}>
                 <div className="flex justify-between items-center gap-1">
                   <b className="text-sm">S{String(s.numero).padStart(2, "0")}</b>

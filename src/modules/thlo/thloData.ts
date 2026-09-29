@@ -38,8 +38,8 @@ export const MALADIES_THLO: MaladieTHLO[] = [
   { id: "rage", nom: "Rage humaine", immediate: true, motsCles: ["rage humaine", "rage"] , exclut: ["morsure"] },
   { id: "covid", nom: "COVID-19", immediate: true, motsCles: ["covid", "sars-cov"] },
   { id: "diphterie", nom: "Diphtérie", immediate: true, motsCles: ["diphter"] },
-  { id: "palu_grave", nom: "Paludisme grave", motsCles: ["paludisme grave", "palu grave", "paludisme severe", "neuropalu", "paludisme compliqu"] },
-  { id: "palu_simple", nom: "Paludisme simple", motsCles: ["paludisme", "palu "], exclut: ["grave", "severe", "neuropalu", "compliqu"] },
+  { id: "palu_grave", nom: "Paludisme grave", motsCles: ["paludisme grave", "palu grave", "paludisme severe", "neuropalu", "paludisme compliqu", "acces palustre grave", "palustre grave", "palustre severe"] },
+  { id: "palu_simple", nom: "Paludisme simple", motsCles: ["paludisme", "palu ", "palustre", "plasmodium", "tdr positif", "tdr palu positif", "ge positive", "goutte epaisse positive"], exclut: ["grave", "severe", "neuropalu", "compliqu"] },
   { id: "diarrhee_sanglante", nom: "Diarrhée sanglante (shigellose)", motsCles: ["diarrhee sanglante", "shigell", "dysenter"] },
   { id: "typhoide", nom: "Fièvre typhoïde", motsCles: ["typho"] },
   { id: "tuberculose", nom: "Tuberculose", motsCles: ["tubercul"] },
@@ -110,7 +110,8 @@ function estNie(texte: string, pos: number, longueur: number): boolean {
 
 /** Maladies reconnues dans un texte de diagnostic. */
 export function maladiesDansTexte(texte?: string): MaladieTHLO[] {
-  const t = norm(texte);
+  // "TDR+", "GE +" : le signe + veut dire positif.
+  const t = norm((texte || "").replace(/\+/g, " positif "));
   if (t.trim() === "") return [];
   return MALADIES_THLO.filter((m) => {
     const trouve = m.motsCles.some((k) => {
@@ -160,6 +161,7 @@ export interface ResultatAuto {
   deces: Record<string, Compte>;
   details: CasTHLO[];
   nbDossiersAnalyses: number;
+  sansDiagnostic: number; // consultations de la semaine encore sans diagnostic
 }
 
 const normNom = (s: string) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -174,6 +176,7 @@ export function compterSemaine(
   const details: CasTHLO[] = [];
   const dejaCompte = new Set<string>(); // un patient = un cas par maladie et par semaine
   let nb = 0;
+  let sansDiag = 0;
 
   const ajouter = (c: CasTHLO) => {
     const k = `${c.maladieId}|${normNom(c.patient)}|${c.deces ? "d" : "c"}`;
@@ -186,6 +189,7 @@ export function compterSemaine(
     nb++;
     // Le diagnostic final (de sortie) prime sur le diagnostic de présomption.
     const texte = [c.diagnosticFinal || c.diagnostic, c.mdoDeclare].filter(Boolean).join(" · ");
+    if (!texte.trim()) sansDiag++;
     maladiesDansTexte(texte).forEach((m) =>
       ajouter({
         // Un âge à 0 correspond le plus souvent à un âge non saisi à
@@ -231,7 +235,7 @@ export function compterSemaine(
     if (!dejaCompte.has(k)) { dejaCompte.add(k); cas[d.maladieId][d.tranche]++; }
   });
 
-  return { cas, deces, details, nbDossiersAnalyses: nb };
+  return { cas, deces, details, nbDossiersAnalyses: nb, sansDiagnostic: sansDiag };
 }
 
 /* ------------------------------------------------------------------ */
@@ -247,7 +251,8 @@ export interface RapportTHLO {
   debut: string;
   fin: string;
   // Valeurs corrigées à la main (sinon, valeurs automatiques).
-  corrections: Record<string, { cas?: Compte; deces?: Compte }>;
+  // Correction case par case : null = valeur automatique conservée.
+  corrections: Record<string, { cas?: (number | null)[]; deces?: (number | null)[] }>;
   // Chiffres figés au moment de la validation (ce qui a été transmis).
   valeursFigees?: { cas: Record<string, Compte>; deces: Record<string, Compte> };
   observations: string;
@@ -288,8 +293,10 @@ export function valeursFinales(r: RapportTHLO | undefined, auto: ResultatAuto) {
       cas[m.id] = r.valeursFigees.cas[m.id] || zero();
       deces[m.id] = r.valeursFigees.deces[m.id] || zero();
     } else {
-      cas[m.id] = r?.corrections?.[m.id]?.cas || auto.cas[m.id];
-      deces[m.id] = r?.corrections?.[m.id]?.deces || auto.deces[m.id];
+      const fusion = (corr: (number | null)[] | undefined, a: Compte): Compte =>
+        a.map((v, i) => (corr && corr[i] !== null && corr[i] !== undefined ? (corr[i] as number) : v)) as Compte;
+      cas[m.id] = fusion(r?.corrections?.[m.id]?.cas, auto.cas[m.id]);
+      deces[m.id] = fusion(r?.corrections?.[m.id]?.deces, auto.deces[m.id]);
     }
   });
   return { cas, deces };
