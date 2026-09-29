@@ -646,6 +646,14 @@ export type StatutConsultation =
   | "Attente exécution actes"         // actes payés, en attente d'exécution (soins/labo)
   | "Terminée";                       // dossier clos (aucun acte prescrit ou tout exécuté)
 
+// Élément de la conduite à tenir décidée après le diagnostic de certitude
+// (voie orale, soins infirmiers, surveillance, examens, conseils, autre).
+export interface ConduiteItem {
+  id: string;
+  type: string;
+  description: string;
+}
+
 export interface Consultation {
   id: string;
   patient: string;
@@ -693,6 +701,8 @@ export interface Consultation {
   examenPhysique?: string;
   diagnostic: string;
   diagnosticFinal?: string;
+  // Conduite à tenir après le diagnostic de certitude, avant l'ordonnance.
+  conduiteATenir?: ConduiteItem[];
   ordonnance: LigneOrdonnance[];
   photos?: string[];
   createdAt: string;
