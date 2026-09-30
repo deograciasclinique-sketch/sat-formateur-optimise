@@ -854,4 +854,47 @@ export interface SoinRealise {
   observations?: string;
   agentNom: string;
   createdAt: string;
+  // Plusieurs médicaments administrés au cours du même soin.
+  medicaments?: MedicamentAdministre[];
+  // Soin fait dans le cadre d'un plan de traitement (relais entre collègues).
+  planId?: string;
+  jourTraitement?: number;
+}
+
+export interface MedicamentAdministre {
+  produit: string;
+  dose?: string;
+  voie?: string;
+  // Ligne du plan de traitement à laquelle correspond cette prise.
+  ligneId?: string;
+}
+
+// Plan de traitement : ce qu'il faut administrer chaque jour, pendant combien
+// de jours, pour que les collègues poursuivent les soins jusqu'à la fin.
+export interface LigneTraitement {
+  id: string;
+  produit: string;
+  dose?: string;
+  voie?: string;
+  frequence: string;        // libellé : "2 fois / jour (toutes les 12 h)"
+  prisesParJour: number;
+  dureeJours: number;
+  horaires?: string[];      // horaires indicatifs : ["08:00", "20:00"]
+}
+
+export interface PlanSoins {
+  id: string;
+  patient: string;
+  contact?: string;
+  consultationId?: string;
+  hospitalisationId?: string;
+  dateDebut: string;        // AAAA-MM-JJ (jour 1)
+  lignes: LigneTraitement[];
+  statut: "En cours" | "Terminé" | "Arrêté";
+  motifArret?: string;
+  arretePar?: string;
+  dateArret?: string;
+  notes?: string;
+  creePar: string;
+  createdAt: string;
 }

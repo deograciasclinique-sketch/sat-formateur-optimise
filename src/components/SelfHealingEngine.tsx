@@ -87,7 +87,7 @@ export function runDatabaseIntegrityDiagnostics(): {
       "dg_rdv", "dg_hospitalisations", "dg_hosp_evolutions", "dg_factures",
       "dg_depenses", "dg_incidents", "dg_actions", "dg_audits", "dg_conges",
       "dg_absences", "dg_rh", "dg_prises_charge", "dg_urgences", "dg_vaccinations",
-      "dg_labo_examens", "dg_documents", "dg_soins"
+      "dg_labo_examens", "dg_documents", "dg_soins", "dg_plans_soins"
     ];
 
     keys.forEach((key) => {

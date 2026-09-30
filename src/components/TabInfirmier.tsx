@@ -4,8 +4,8 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv, Facture, SoinRealise } from "../types";
-import SalleDesSoins, { FormulaireSoin, PreRemplissageSoin } from "./SalleDesSoins";
+import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv, Facture, SoinRealise, PlanSoins } from "../types";
+import SalleDesSoins, { FormulaireSoin, PreRemplissageSoin, cloturerPlansComplets, prisesAFaireAujourdhui, dureeDepuisTexte } from "./SalleDesSoins";
 import { recuValide, dernierRecu, dateCourteFr } from "../lib/recuConsultation";
 import {
   construireDossiers, trouverDossier, ConstantesRdvForm, NouveauRdvForm, DossierPatientView, RdvDuJour, ListeDossiers,
@@ -48,6 +48,9 @@ interface TabInfirmierProps {
   // Salle des soins : registre des soins réalisés (clé "dg_soins").
   soins?: SoinRealise[];
   onUpdateSoins?: (s: SoinRealise[]) => void;
+  // Plans de traitement (clé "dg_plans_soins") : relais des soins entre collègues.
+  plansSoins?: PlanSoins[];
+  onUpdatePlansSoins?: (p: PlanSoins[]) => void;
   // Nom de l'agent connecté, pré-rempli comme auteur du soin.
   agentNom?: string;
 }
@@ -79,6 +82,8 @@ export default function TabInfirmier({
   factures = [],
   soins = [],
   onUpdateSoins,
+  plansSoins = [],
+  onUpdatePlansSoins,
   agentNom = "",
 }: TabInfirmierProps) {
   const isDark = theme === "dark";
@@ -254,9 +259,7 @@ export default function TabInfirmier({
   // « Noter les soins » : ouvre le registre de la Salle des soins pré-rempli
   // avec la prescription (injectables / soins de la conduite à tenir, ordonnance).
   const ouvrirSoinDepuisConsultation = (c: Consultation) => {
-    const inj = (c.conduiteATenir || []).find((i) => i.type === "Voie injectable" && i.injectable)?.injectable;
-    const typeDepuisVoie = (v?: string) =>
-      !v ? undefined : v === "IM" ? "Injection IM" : v === "SC" ? "Injection SC" : v === "Perfusion IV" ? "Perfusion" : v.startsWith("IV") ? "Injection IV" : undefined;
+    const injs = (c.conduiteATenir || []).filter((i) => i.type === "Voie injectable" && i.injectable).map((i) => i.injectable!);
     const rappel = [
       ...conduiteEnLignes((c.conduiteATenir || []).filter((i) => TYPES_INFIRMIER.includes(i.type))),
       ...(c.ordonnance || []).map((l) => `${l.medicamentNom}${l.posologie ? " — " + l.posologie : ""}${l.duree ? " (" + l.duree + ")" : ""}`),
@@ -266,18 +269,28 @@ export default function TabInfirmier({
         patient: c.patient,
         contact: c.contact,
         consultationId: c.id,
-        typeSoin: typeDepuisVoie(inj?.voie),
-        produit: inj ? [inj.produit, inj.dosage].filter(Boolean).join(" ") : undefined,
-        dose: inj?.dose,
-        voie: inj?.voie,
+        typeSoin: injs.length ? "Administration de médicaments" : undefined,
+        lignes: injs.map((inj) => ({
+          produit: [inj.produit, inj.dosage].filter(Boolean).join(" "),
+          dose: inj.dose,
+          voie: inj.voie,
+          frequence: inj.frequence,
+          dureeJours: /unique/i.test(inj.frequence || "") ? 1 : dureeDepuisTexte(inj.duree),
+        })),
         rappel,
       },
       terminerConsultationId: c.id,
     });
   };
 
-  const enregistrerSoin = (s: SoinRealise) => {
-    if (onUpdateSoins) onUpdateSoins([s, ...soins]);
+  const enregistrerSoin = (s: SoinRealise, nouveauPlan?: PlanSoins) => {
+    const nouveauxSoins = [s, ...soins];
+    if (onUpdateSoins) onUpdateSoins(nouveauxSoins);
+    if (onUpdatePlansSoins) {
+      const plans = nouveauPlan ? [nouveauPlan, ...plansSoins] : plansSoins;
+      const clos = cloturerPlansComplets(plans, nouveauxSoins);
+      if (nouveauPlan || clos !== plans) onUpdatePlansSoins(clos);
+    }
     if (formSoin?.terminerConsultationId) {
       const id = formSoin.terminerConsultationId;
       onUpdateConsultations(consultations.map((cons) => (cons.id === id ? { ...cons, statut: "Terminée" } : cons)));
@@ -539,7 +552,7 @@ export default function TabInfirmier({
 
   const ongletsInf: [typeof vueInf, string, React.ReactNode][] = [
     ["attente", `Patients en attente (${enAttente.length})`, <Activity key="a" className="w-4 h-4" />],
-    ["soins", `Salle des soins (${soins.filter((x) => x.date === new Date().toLocaleDateString("sv-SE")).length})`, <Syringe key="s" className="w-4 h-4" />],
+    ["soins", (() => { const n = prisesAFaireAujourdhui(plansSoins, soins); return n ? `Salle des soins (${n} à faire)` : "Salle des soins"; })(), <Syringe key="s" className="w-4 h-4" />],
     ["rdv", `Rendez-vous du jour (${rdvsDuJour.length})`, <CalendarDays key="r" className="w-4 h-4" />],
     ["dossiers", "Dossiers patients", <FolderOpen key="d" className="w-4 h-4" />],
   ];
@@ -584,6 +597,8 @@ export default function TabInfirmier({
         <SalleDesSoins
           soins={soins}
           onUpdateSoins={(s) => onUpdateSoins && onUpdateSoins(s)}
+          plans={plansSoins}
+          onUpdatePlans={(p) => onUpdatePlansSoins && onUpdatePlansSoins(p)}
           consultations={consultations}
           hospitalisations={hospitalisations}
           medicaments={medicaments}
@@ -603,6 +618,9 @@ export default function TabInfirmier({
           medicaments={medicaments}
           agentNom={agentNom}
           preRemplissage={formSoin.pre}
+          plans={plansSoins}
+          soins={soins}
+          onOuvrirPlan={(planId) => { const p = plansSoins.find((x) => x.id === planId); setFormSoin({ pre: { patient: p?.patient || "", planId }, terminerConsultationId: formSoin.terminerConsultationId }); }}
           onAnnuler={() => setFormSoin(null)}
           onEnregistrer={enregistrerSoin}
         />

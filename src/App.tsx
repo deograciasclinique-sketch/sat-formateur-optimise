@@ -37,6 +37,7 @@ import {
   ConsultationPrenatale,
   DocumentArchive,
   SoinRealise,
+  PlanSoins,
 } from "./types";
 import {
   seedLocalStorage,
@@ -65,6 +66,7 @@ import TabPharmacie from "./components/TabPharmacie";
 import TabFacturation from "./components/TabFacturation";
 import TabAccueilCaisse from "./components/TabAccueilCaisse";
 import TabInfirmier from "./components/TabInfirmier";
+import { prisesAFaireAujourdhui } from "./components/SalleDesSoins";
 import TabRDV from "./components/TabRDV";
 import TabRH from "./components/TabRH";
 import TabHospitalisation from "./components/TabHospitalisation";
@@ -362,6 +364,7 @@ export default function App() {
   const [thloRapports, setThloRapports] = useState<RapportTHLO[]>([]);
   // Salle des soins : registre des soins réalisés (Salle des Infirmiers)
   const [soins, setSoins] = useState<SoinRealise[]>([]);
+  const [plansSoins, setPlansSoins] = useState<PlanSoins[]>([]);
   const [thloConfig, setThloConfig] = useState<ConfigTHLO>(CONFIG_THLO_DEFAUT);
 
   // --- Synchronisation temps réel multi-appareils (Firestore) ---
@@ -399,6 +402,7 @@ export default function App() {
     dg_thlo_rapports: setThloRapports,
     dg_thlo_config: setThloConfig,
     dg_soins: setSoins,
+    dg_plans_soins: setPlansSoins,
   });
   // Garde en mémoire la dernière valeur confirmée comme envoyée au cloud pour chaque clé,
   // afin de ne renvoyer que ce qui a réellement changé (et d'éviter les boucles avec les
@@ -1032,6 +1036,7 @@ export default function App() {
     setThloRapports(safeGet<RapportTHLO[]>("dg_thlo_rapports", []));
     setThloConfig({ ...CONFIG_THLO_DEFAUT, ...safeGet<Partial<ConfigTHLO>>("dg_thlo_config", {}) });
     setSoins(safeGet<SoinRealise[]>("dg_soins", []));
+    setPlansSoins(safeGet<PlanSoins[]>("dg_plans_soins", []));
     setIsLoaded(true);
   }, []);
 
@@ -1172,14 +1177,15 @@ export default function App() {
       dg_actes_tarifaires: actesTarifaires,
       dg_thlo_rapports: thloRapports,
       dg_thlo_config: thloConfig,
-      dg_soins: soins
+      dg_soins: soins,
+      dg_plans_soins: plansSoins
     };
   }, [
     staff, medicaments, mouvements, tasks, consultations, pediatrie,
     materniteCpns, materniteAccouchements, rdv, hospitalisations, ficheReferences,
     hospEvolutions, factures, depenses, incidents, actions, audits,
     conges, absences, rhFiches, prisesEnCharge, urgences, vaccinations,
-    laboExamens, documents, actesTarifaires, thloRapports, thloConfig, soins
+    laboExamens, documents, actesTarifaires, thloRapports, thloConfig, soins, plansSoins
   ]);
 
   // Periodic auto-save effect
@@ -1414,6 +1420,11 @@ export default function App() {
     safeSet("dg_documents", newDocs);
   };
 
+  const handleUpdatePlansSoins = (p: PlanSoins[]) => {
+    setPlansSoins(p);
+    safeSet("dg_plans_soins", p);
+  };
+
   const handleUpdateSoins = (newSoins: SoinRealise[]) => {
     setSoins(newSoins);
     safeSet("dg_soins", newSoins);
@@ -1438,7 +1449,7 @@ export default function App() {
         title: "🏥 Soins & Clinique",
         items: [
           { id: "accueil_caisse", label: "Accueil & Caisse", icon: Wallet2 },
-          { id: "infirmier", label: "Salle des Infirmiers", icon: Activity, alertCount: consultations.filter((c) => c.statut === "Attente prise en charge infirmier").length },
+          { id: "infirmier", label: "Salle des Infirmiers", icon: Activity, alertCount: consultations.filter((c) => c.statut === "Attente prise en charge infirmier").length + prisesAFaireAujourdhui(plansSoins, soins) },
           { id: "medecine", label: "Consultation Générale", icon: Stethoscope },
           { id: "urgences", label: "Triage & Urgences", icon: ShieldAlert, alertCount: urgences.filter((u) => u.statut !== "Sorti(e) ou Libéré(e)").length },
           { id: "hospit", label: "Hospitalisations", icon: HeartPulse, alertCount: hospitalisations.filter((h) => h.statut === "En cours").length },
@@ -1492,6 +1503,8 @@ export default function App() {
       .filter((cat) => cat.items.length > 0);
   }, [
     allowedTabs,
+    plansSoins,
+    soins,
     urgences,
     hospitalisations,
     laboExamens,
@@ -2257,6 +2270,8 @@ export default function App() {
               factures={factures}
               soins={soins}
               onUpdateSoins={handleUpdateSoins}
+              plansSoins={plansSoins}
+              onUpdatePlansSoins={handleUpdatePlansSoins}
               agentNom={currentUser?.nom || ""}
             />
           )}
