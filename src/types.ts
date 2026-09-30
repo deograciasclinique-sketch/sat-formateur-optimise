@@ -827,3 +827,31 @@ export interface ClinicProfile {
 
 
 
+
+// Salle des soins (Salle des Infirmiers) : registre des soins réalisés.
+export interface ConstantesSoin {
+  temperature?: number;
+  tensionArterielle?: string;
+  pouls?: number;
+  saturationO2?: number;
+  glycemie?: number;
+}
+
+export interface SoinRealise {
+  id: string;
+  date: string;   // AAAA-MM-JJ
+  heure: string;  // HH:MM
+  patient: string;
+  contact?: string;
+  consultationId?: string;
+  hospitalisationId?: string;
+  typeSoin: string;
+  produit?: string;
+  dose?: string;
+  voie?: string;
+  constantesAvant?: ConstantesSoin;
+  constantesApres?: ConstantesSoin;
+  observations?: string;
+  agentNom: string;
+  createdAt: string;
+}

@@ -4,12 +4,13 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv, Facture } from "../types";
+import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv, Facture, SoinRealise } from "../types";
+import SalleDesSoins, { FormulaireSoin, PreRemplissageSoin } from "./SalleDesSoins";
 import { recuValide, dernierRecu, dateCourteFr } from "../lib/recuConsultation";
 import {
   construireDossiers, trouverDossier, ConstantesRdvForm, NouveauRdvForm, DossierPatientView, RdvDuJour, ListeDossiers,
 } from "./InfirmierDossiers";
-import { ConduiteATenirListe, catASoinsInfirmiers, TYPES_INFIRMIER } from "./ConduiteATenir";
+import { ConduiteATenirListe, catASoinsInfirmiers, TYPES_INFIRMIER, conduiteEnLignes } from "./ConduiteATenir";
 import { generateUid } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send, CalendarDays, FolderOpen, CalendarPlus } from "lucide-react";
@@ -44,6 +45,11 @@ interface TabInfirmierProps {
   // Factures : pour savoir si le patient venu sur RDV a encore un reçu de
   // consultation valable (14 jours) ou s'il doit repasser par la caisse.
   factures?: Facture[];
+  // Salle des soins : registre des soins réalisés (clé "dg_soins").
+  soins?: SoinRealise[];
+  onUpdateSoins?: (s: SoinRealise[]) => void;
+  // Nom de l'agent connecté, pré-rempli comme auteur du soin.
+  agentNom?: string;
 }
 
 type ModeCloture = "transfert" | "moimeme";
@@ -71,11 +77,17 @@ export default function TabInfirmier({
   rdvs = [],
   onUpdateRdvs,
   factures = [],
+  soins = [],
+  onUpdateSoins,
+  agentNom = "",
 }: TabInfirmierProps) {
   const isDark = theme === "dark";
 
   // --- Rendez-vous et dossiers patients ---------------------------------
-  const [vueInf, setVueInf] = useState<"attente" | "rdv" | "dossiers">("attente");
+  const [vueInf, setVueInf] = useState<"attente" | "soins" | "rdv" | "dossiers">("attente");
+  // Formulaire « Enregistrer un soin » : pré-rempli éventuellement, et
+  // consultation à clôturer une fois le soin noté (depuis « Soins à exécuter »).
+  const [formSoin, setFormSoin] = useState<null | { pre: PreRemplissageSoin | null; terminerConsultationId?: string }>(null);
   const [dossierKey, setDossierKey] = useState<string | null>(null);
   const [rdvConstantesId, setRdvConstantesId] = useState<string | null>(null);
   const [nouveauRdv, setNouveauRdv] = useState<null | { patient?: string; contact?: string; rdvPrecedentId?: string }>(null);
@@ -237,6 +249,40 @@ export default function TabInfirmier({
     onUpdateConsultations(
       consultations.map((cons) => (cons.id === c.id ? { ...cons, statut: "Terminée" } : cons))
     );
+  };
+
+  // « Noter les soins » : ouvre le registre de la Salle des soins pré-rempli
+  // avec la prescription (injectables / soins de la conduite à tenir, ordonnance).
+  const ouvrirSoinDepuisConsultation = (c: Consultation) => {
+    const inj = (c.conduiteATenir || []).find((i) => i.type === "Voie injectable" && i.injectable)?.injectable;
+    const typeDepuisVoie = (v?: string) =>
+      !v ? undefined : v === "IM" ? "Injection IM" : v === "SC" ? "Injection SC" : v === "Perfusion IV" ? "Perfusion" : v.startsWith("IV") ? "Injection IV" : undefined;
+    const rappel = [
+      ...conduiteEnLignes((c.conduiteATenir || []).filter((i) => TYPES_INFIRMIER.includes(i.type))),
+      ...(c.ordonnance || []).map((l) => `${l.medicamentNom}${l.posologie ? " — " + l.posologie : ""}${l.duree ? " (" + l.duree + ")" : ""}`),
+    ];
+    setFormSoin({
+      pre: {
+        patient: c.patient,
+        contact: c.contact,
+        consultationId: c.id,
+        typeSoin: typeDepuisVoie(inj?.voie),
+        produit: inj ? [inj.produit, inj.dosage].filter(Boolean).join(" ") : undefined,
+        dose: inj?.dose,
+        voie: inj?.voie,
+        rappel,
+      },
+      terminerConsultationId: c.id,
+    });
+  };
+
+  const enregistrerSoin = (s: SoinRealise) => {
+    if (onUpdateSoins) onUpdateSoins([s, ...soins]);
+    if (formSoin?.terminerConsultationId) {
+      const id = formSoin.terminerConsultationId;
+      onUpdateConsultations(consultations.map((cons) => (cons.id === id ? { ...cons, statut: "Terminée" } : cons)));
+    }
+    setFormSoin(null);
   };
 
   const selected = consultations.find((c) => c.id === selectedId) || null;
@@ -493,6 +539,7 @@ export default function TabInfirmier({
 
   const ongletsInf: [typeof vueInf, string, React.ReactNode][] = [
     ["attente", `Patients en attente (${enAttente.length})`, <Activity key="a" className="w-4 h-4" />],
+    ["soins", `Salle des soins (${soins.filter((x) => x.date === new Date().toLocaleDateString("sv-SE")).length})`, <Syringe key="s" className="w-4 h-4" />],
     ["rdv", `Rendez-vous du jour (${rdvsDuJour.length})`, <CalendarDays key="r" className="w-4 h-4" />],
     ["dossiers", "Dossiers patients", <FolderOpen key="d" className="w-4 h-4" />],
   ];
@@ -533,6 +580,34 @@ export default function TabInfirmier({
         </div>
       )}
 
+      {vueInf === "soins" && (
+        <SalleDesSoins
+          soins={soins}
+          onUpdateSoins={(s) => onUpdateSoins && onUpdateSoins(s)}
+          consultations={consultations}
+          hospitalisations={hospitalisations}
+          medicaments={medicaments}
+          agentNom={agentNom}
+          isDark={isDark}
+          onOuvrirFormulaire={(pre) => setFormSoin({ pre: pre || null })}
+        />
+      )}
+
+      {formSoin && (
+        <FormulaireSoin
+          isDark={isDark}
+          patientsSuggeres={[
+            ...hospitalisations.filter((h) => h.statut === "En cours").map((h) => ({ nom: h.patient, hospitalisationId: h.id, origine: h.typeAdmission || "Hospitalisé(e)" })),
+            ...consultations.slice(0, 200).map((c) => ({ nom: c.patient, contact: c.contact, consultationId: c.id, origine: c.date })),
+          ]}
+          medicaments={medicaments}
+          agentNom={agentNom}
+          preRemplissage={formSoin.pre}
+          onAnnuler={() => setFormSoin(null)}
+          onEnregistrer={enregistrerSoin}
+        />
+      )}
+
       {vueInf === "dossiers" && (
         <div className="p-4">
           <ListeDossiers dossiers={dossiers} isDark={isDark} onDossier={(d) => setDossierKey(d.key)} />
@@ -546,6 +621,7 @@ export default function TabInfirmier({
           onClose={() => setDossierKey(null)}
           onNouveauRdv={() => setNouveauRdv({ patient: dossierOuvert.nom, contact: dossierOuvert.contact, rdvPrecedentId: dossierOuvert.rdvs[0]?.id })}
           onConstantes={(r) => setRdvConstantesId(r.id)}
+          soins={soins}
         />
       )}
       {rdvConstantes && (
@@ -1059,12 +1135,20 @@ export default function TabInfirmier({
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={() => handleMarquerSoinsExecutes(c)}
-                  className="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm font-medium flex items-center gap-1.5 hover:bg-emerald-700"
-                >
-                  <CheckCircle2 className="w-4 h-4" /> Soins exécutés
-                </button>
+                <div className="flex flex-col items-end gap-1 flex-none">
+                  <button
+                    onClick={() => ouvrirSoinDepuisConsultation(c)}
+                    className="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm font-medium flex items-center gap-1.5 hover:bg-emerald-700"
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> Noter les soins et terminer
+                  </button>
+                  <button
+                    onClick={() => { if (window.confirm(`Terminer le dossier de ${c.patient} sans noter le soin dans la Salle des soins ?`)) handleMarquerSoinsExecutes(c); }}
+                    className={`text-xs underline ${isDark ? "text-gray-400" : "text-gray-500"}`}
+                  >
+                    Terminer sans noter
+                  </button>
+                </div>
               </div>
             ))}
           </div>

@@ -13,7 +13,8 @@ import React, { useMemo, useState } from "react";
 import {
   CalendarDays, CalendarPlus, ClipboardList, FolderOpen, HeartPulse, Search, Send, Stethoscope, UserX, X, AlertTriangle, CheckCircle2,
 } from "lucide-react";
-import { Consultation, ConstantesRdv, Hospitalisation, RendezVous, Staff } from "../types";
+import { Consultation, ConstantesRdv, Hospitalisation, RendezVous, Staff, SoinRealise } from "../types";
+import { CarteSoin, soinsDuPatient } from "./SalleDesSoins";
 import { generateUid, getTodayStr } from "../data";
 import { formatWhatsAppNumber } from "../lib/whatsapp";
 
@@ -523,15 +524,17 @@ export function NouveauRdvForm({
 /* ------------------------------------------------------------------ */
 
 export function DossierPatientView({
-  dossier, isDark, onClose, onNouveauRdv, onConstantes,
+  dossier, isDark, onClose, onNouveauRdv, onConstantes, soins = [],
 }: {
   dossier: DossierPatient;
   isDark: boolean;
   onClose: () => void;
   onNouveauRdv: () => void;
   onConstantes: (r: RendezVous) => void;
+  soins?: SoinRealise[];
 }) {
-  const [onglet, setOnglet] = useState<"constantes" | "consultations" | "rdv" | "hospit">("constantes");
+  const [onglet, setOnglet] = useState<"constantes" | "soins" | "consultations" | "rdv" | "hospit">("constantes");
+  const soinsPatient = useMemo(() => soinsDuPatient(soins, dossier.nom), [soins, dossier.nom]);
   const muted = isDark ? "text-gray-400" : "text-gray-500";
   const bord = isDark ? "border-gray-700" : "border-gray-200";
   const today = getTodayStr();
@@ -539,6 +542,7 @@ export function DossierPatientView({
 
   const onglets: [typeof onglet, string][] = [
     ["constantes", `Constantes (${d.mesures.length})`],
+    ["soins", `Soins réalisés (${soinsPatient.length})`],
     ["consultations", `Consultations (${d.consultations.length})`],
     ["rdv", `Rendez-vous (${d.rdvs.length})`],
     ["hospit", `Hospitalisations (${d.hospitalisations.length})`],
@@ -645,6 +649,14 @@ export function DossierPatientView({
                 )}
               </div>
             ))}
+          </div>
+        )
+      )}
+
+      {onglet === "soins" && (
+        soinsPatient.length === 0 ? <p className={`text-sm ${muted}`}>Aucun soin enregistré dans la Salle des soins.</p> : (
+          <div className="space-y-2">
+            {soinsPatient.map((s) => <CarteSoin key={s.id} s={s} isDark={isDark} afficherPatient={false} afficherDate />)}
           </div>
         )
       )}

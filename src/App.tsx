@@ -35,7 +35,8 @@ import {
   PatientUrgence,
   FichePediatrique,
   ConsultationPrenatale,
-  DocumentArchive
+  DocumentArchive,
+  SoinRealise,
 } from "./types";
 import {
   seedLocalStorage,
@@ -359,6 +360,8 @@ export default function App() {
   const [actesTarifaires, setActesTarifaires] = useState<ActeTarifaire[]>([]);
   // THLO : rapports hebdomadaires de surveillance épidémiologique et réglages.
   const [thloRapports, setThloRapports] = useState<RapportTHLO[]>([]);
+  // Salle des soins : registre des soins réalisés (Salle des Infirmiers)
+  const [soins, setSoins] = useState<SoinRealise[]>([]);
   const [thloConfig, setThloConfig] = useState<ConfigTHLO>(CONFIG_THLO_DEFAUT);
 
   // --- Synchronisation temps réel multi-appareils (Firestore) ---
@@ -395,6 +398,7 @@ export default function App() {
     dg_actes_tarifaires: setActesTarifaires,
     dg_thlo_rapports: setThloRapports,
     dg_thlo_config: setThloConfig,
+    dg_soins: setSoins,
   });
   // Garde en mémoire la dernière valeur confirmée comme envoyée au cloud pour chaque clé,
   // afin de ne renvoyer que ce qui a réellement changé (et d'éviter les boucles avec les
@@ -1027,6 +1031,7 @@ export default function App() {
     setActesTarifaires(safeGet<ActeTarifaire[]>("dg_actes_tarifaires", []));
     setThloRapports(safeGet<RapportTHLO[]>("dg_thlo_rapports", []));
     setThloConfig({ ...CONFIG_THLO_DEFAUT, ...safeGet<Partial<ConfigTHLO>>("dg_thlo_config", {}) });
+    setSoins(safeGet<SoinRealise[]>("dg_soins", []));
     setIsLoaded(true);
   }, []);
 
@@ -1166,14 +1171,15 @@ export default function App() {
       dg_documents: documents,
       dg_actes_tarifaires: actesTarifaires,
       dg_thlo_rapports: thloRapports,
-      dg_thlo_config: thloConfig
+      dg_thlo_config: thloConfig,
+      dg_soins: soins
     };
   }, [
     staff, medicaments, mouvements, tasks, consultations, pediatrie,
     materniteCpns, materniteAccouchements, rdv, hospitalisations, ficheReferences,
     hospEvolutions, factures, depenses, incidents, actions, audits,
     conges, absences, rhFiches, prisesEnCharge, urgences, vaccinations,
-    laboExamens, documents, actesTarifaires, thloRapports, thloConfig
+    laboExamens, documents, actesTarifaires, thloRapports, thloConfig, soins
   ]);
 
   // Periodic auto-save effect
@@ -1406,6 +1412,11 @@ export default function App() {
   const handleUpdateDocuments = (newDocs: DocumentArchive[]) => {
     setDocuments(newDocs);
     safeSet("dg_documents", newDocs);
+  };
+
+  const handleUpdateSoins = (newSoins: SoinRealise[]) => {
+    setSoins(newSoins);
+    safeSet("dg_soins", newSoins);
   };
 
   const handleUpdateActesTarifaires = (newActes: ActeTarifaire[]) => {
@@ -2244,6 +2255,9 @@ export default function App() {
               rdvs={rdv}
               onUpdateRdvs={handleUpdateRdv}
               factures={factures}
+              soins={soins}
+              onUpdateSoins={handleUpdateSoins}
+              agentNom={currentUser?.nom || ""}
             />
           )}
 
