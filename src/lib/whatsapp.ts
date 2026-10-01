@@ -42,6 +42,11 @@ export function buildConsultationWhatsAppMessage(c: Consultation, clinicName = "
     lines.push("");
     lines.push(`Diagnostic : ${c.diagnostic}`);
   }
+  if (c.conduiteATenir && c.conduiteATenir.length > 0) {
+    lines.push("");
+    lines.push("Conduite à tenir :");
+    c.conduiteATenir.forEach((i) => lines.push(`• ${i.type} : ${i.description}`));
+  }
   if (c.ordonnance && c.ordonnance.length > 0) {
     lines.push("");
     lines.push("Ordonnance :");

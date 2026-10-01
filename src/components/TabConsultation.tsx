@@ -12,6 +12,7 @@ import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
 import EpidemioAssistant from "./EpidemioAssistant";
+import { ConduiteATenirEditor, ConduiteATenirListe, catASoinsInfirmiers, conduiteEnLignes, PrescInjectable } from "./ConduiteATenir";
 import { MDODiseaseOverview } from "../modules/epidemio/mdoData";
 
 interface TabConsultationProps {
@@ -164,6 +165,7 @@ export default function TabConsultation({
   // (registre MDO Burkina Faso / SIMR), en attente de génération du bordereau.
   const [detectedMDO, setDetectedMDO] = useState<MDODiseaseOverview | null>(null);
   const [consDiagnosticFinal, setConsDiagnosticFinal] = useState("");
+  const [consCAT, setConsCAT] = useState<NonNullable<Consultation["conduiteATenir"]>>([]);
 
   // AI Assistant states
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -192,6 +194,7 @@ export default function TabConsultation({
   const [editExamenPhysique, setEditExamenPhysique] = useState("");
   const [editDiagnostic, setEditDiagnostic] = useState("");
   const [editDiagnosticFinal, setEditDiagnosticFinal] = useState("");
+  const [editCAT, setEditCAT] = useState<NonNullable<Consultation["conduiteATenir"]>>([]);
   const [editObservations, setEditObservations] = useState("");
 
   const startEditingDetail = () => {
@@ -200,6 +203,7 @@ export default function TabConsultation({
     setEditExamenPhysique(selectedConsultation.examenPhysique || "");
     setEditDiagnostic(selectedConsultation.diagnostic || "");
     setEditDiagnosticFinal(selectedConsultation.diagnosticFinal || "");
+    setEditCAT(selectedConsultation.conduiteATenir || []);
     setEditObservations(selectedConsultation.observations || "");
     setIsEditingDetail(true);
   };
@@ -228,6 +232,7 @@ export default function TabConsultation({
       examenPhysique: editExamenPhysique.trim(),
       diagnostic: editDiagnostic.trim(),
       diagnosticFinal: editDiagnosticFinal.trim() || undefined,
+      conduiteATenir: editCAT,
       observations: editObservations.trim()
     };
 
@@ -423,6 +428,20 @@ export default function TabConsultation({
     setPresQuantite("1");
     setPresPosologie("");
     setPresDuree("");
+  };
+
+  // Injectable prescrit dans la conduite à tenir : ajouté aussi à l'ordonnance
+  // pour la facturation et la déduction du stock.
+  const injectableVersOrdonnance = (p: PrescInjectable, quantite: number) => {
+    const posologie = [p.voie, p.dose, p.frequence, p.dilution].filter(Boolean).join(", ");
+    setPresLines((lignes) => [...lignes, {
+      id: generateUid(),
+      medicamentNom: [p.produit, p.dosage].filter(Boolean).join(" "),
+      posologie,
+      duree: p.duree || "",
+      medicamentId: p.medicamentId,
+      quantitePrescrite: p.medicamentId ? quantite : undefined,
+    }]);
   };
 
   const handleRemovePrescriptionLine = (id: string) => {
@@ -642,6 +661,7 @@ export default function TabConsultation({
     setConsDiagnostic("");
     setDetectedMDO(null);
     setConsDiagnosticFinal("");
+    setConsCAT([]);
     setPresLines([]);
     setTempPhotos([]);
     setTempLabResults([]);
@@ -680,6 +700,7 @@ export default function TabConsultation({
     setConsExamen(c.examenPhysique || "");
     setConsDiagnostic(c.diagnostic || "");
     setConsDiagnosticFinal(c.diagnosticFinal || "");
+    setConsCAT(c.conduiteATenir || []);
     setPresLines(c.ordonnance || []);
     setConsDecision((c.decision as any) || "Retour à domicile");
     setConsReferenceService(c.referenceService || "");
@@ -847,6 +868,7 @@ export default function TabConsultation({
       examenPhysique: consExamen.trim(),
       diagnostic: consDiagnostic.trim(),
       diagnosticFinal: consDiagnosticFinal.trim() || undefined,
+      conduiteATenir: consCAT.length ? consCAT : undefined,
       mdoDeclare: detectedMDO?.name,
       mdoDeclareCategorie: detectedMDO?.category,
       mdoDeclareDate: detectedMDO ? new Date().toISOString() : undefined,
@@ -860,7 +882,9 @@ export default function TabConsultation({
       // Dossier repris depuis la salle infirmier/maternité : une fois le
       // médecin passé, il repasse par le circuit paiement des actes / clôture
       // plutôt que de rester "Terminée" par défaut comme une saisie directe.
-      statut: pendingSource ? (presLines.length > 0 ? "Attente paiement actes" : "Terminée") : undefined,
+      // Des soins infirmiers prévus dans la conduite à tenir passent aussi par
+      // le paiement des actes puis la salle infirmier.
+      statut: pendingSource ? (presLines.length > 0 || catASoinsInfirmiers(consCAT) ? "Attente paiement actes" : "Terminée") : undefined,
     };
 
     const medecinNomForDecision = staff.find((s) => s.id === consMedecin)?.nom || currentUser?.nom || "";
@@ -1382,6 +1406,27 @@ export default function TabConsultation({
     doc.setTextColor(15, 23, 42);
     doc.text(cons.diagnosticFinal || "Non renseigné", margin + 3, y + 9);
     y += 17;
+
+    // Conduite à tenir
+    if (cons.conduiteATenir && cons.conduiteATenir.length > 0) {
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(13, 148, 136);
+      doc.text("CONDUITE À TENIR :", margin, y);
+      y += 5;
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+      conduiteEnLignes(cons.conduiteATenir).forEach((ligne, i) => {
+        const wrapped = doc.splitTextToSize(`${i + 1}. ${ligne}`, contentWidth - 4);
+        wrapped.forEach((w: string) => {
+          if (y > pageHeight - 30) { doc.addPage(); y = 20; }
+          doc.text(w, margin + 2, y);
+          y += 4.5;
+        });
+      });
+      y += 4;
+    }
 
     // Prescription Section
     drawSectionHeader("5. Prescription / Traitement Ordonné");
@@ -2461,6 +2506,17 @@ export default function TabConsultation({
               </p>
             </div>
 
+            {/* Conduite à tenir, après le diagnostic de certitude et avant l'ordonnance */}
+            <div className="pt-3 border-t border-stone-100">
+              <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">
+                📋 Conduite à tenir
+              </label>
+              <p className="text-xs text-stone-500 dark:text-stone-400 italic mb-2">
+                Décrivez ce qui doit être fait après le diagnostic : traitement par voie orale, produits injectables avec leur posologie, soins infirmiers à réaliser (pansement, nébulisation…), surveillance, examens, conseils. Les injectables et les soins infirmiers apparaîtront dans la salle infirmier.
+              </p>
+              <ConduiteATenirEditor items={consCAT} onChange={setConsCAT} medicaments={medicaments} onAjouterOrdonnance={injectableVersOrdonnance} />
+            </div>
+
             {/* Décision de Consultation Générale (cahier des charges, points 1-3) */}
             <div className="pt-3 border-t border-stone-100">
               <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-2">
@@ -3230,6 +3286,10 @@ export default function TabConsultation({
                         />
                       </div>
                       <div>
+                        <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">📋 Conduite à tenir</label>
+                        <ConduiteATenirEditor items={editCAT} onChange={setEditCAT} medicaments={medicaments} />
+                      </div>
+                      <div>
                         <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Observations / Conseils</label>
                         <textarea
                           value={editObservations}
@@ -3254,6 +3314,12 @@ export default function TabConsultation({
                           )}
                         </p>
                       </div>
+                      {selectedConsultation.conduiteATenir && selectedConsultation.conduiteATenir.length > 0 && (
+                        <div>
+                          <span className="text-xs uppercase font-semibold tracking-wider text-primary-700/70">Conduite à tenir :</span>
+                          <div className="mt-1"><ConduiteATenirListe items={selectedConsultation.conduiteATenir} /></div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

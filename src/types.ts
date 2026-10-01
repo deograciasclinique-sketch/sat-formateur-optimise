@@ -146,6 +146,29 @@ export interface RendezVous {
   notes: string;
   statut: "Planifié" | "Confirmé" | "Terminé" | "Annulé" | "Absent";
   createdAt: string;
+  // Constantes prises en salle infirmier le jour du rendez-vous.
+  constantes?: ConstantesRdv;
+  // Dossier de consultation créé quand l'infirmier(ère) envoie le patient
+  // venu sur rendez-vous vers le médecin.
+  consultationId?: string;
+  // RDV d'origine quand ce RDV a été programmé depuis un autre (suivi).
+  rdvPrecedentId?: string;
+  creePar?: string;
+}
+
+export interface ConstantesRdv {
+  temperature?: number;
+  poids?: number;
+  taille?: number;
+  imc?: number;
+  tensionArterielle?: string;
+  pouls?: number;
+  frequenceRespiratoire?: number;
+  saturationO2?: number;
+  glycemie?: number;
+  observations?: string;
+  prisesLe: string;
+  prisesPar?: string;
 }
 
 export interface RhFiche {
@@ -623,6 +646,25 @@ export type StatutConsultation =
   | "Attente exécution actes"         // actes payés, en attente d'exécution (soins/labo)
   | "Terminée";                       // dossier clos (aucun acte prescrit ou tout exécuté)
 
+// Élément de la conduite à tenir décidée après le diagnostic de certitude
+// (voie orale, soins infirmiers, surveillance, examens, conseils, autre).
+export interface ConduiteItem {
+  id: string;
+  type: string;
+  description: string;
+  // Voie injectable : prescription structurée (la description reste le texte complet)
+  injectable?: {
+    produit: string;
+    medicamentId?: string;
+    dosage?: string;
+    voie: string;
+    dose: string;
+    frequence?: string;
+    duree?: string;
+    dilution?: string;
+  };
+}
+
 export interface Consultation {
   id: string;
   patient: string;
@@ -654,6 +696,9 @@ export interface Consultation {
   serviceDestination?: "Infirmerie" | "Maternite" | "Laboratoire";
   // Montant de la consultation (fixé au secrétariat avant paiement).
   montantConsultation?: number;
+  // Visite non facturée car le patient a un reçu de consultation encore
+  // valable (voir src/lib/recuConsultation.ts) : id de la facture d'origine.
+  recuConsultationId?: string;
   vitals: {
     temperature: number;
     poids: number;
@@ -667,6 +712,8 @@ export interface Consultation {
   examenPhysique?: string;
   diagnostic: string;
   diagnosticFinal?: string;
+  // Conduite à tenir après le diagnostic de certitude, avant l'ordonnance.
+  conduiteATenir?: ConduiteItem[];
   ordonnance: LigneOrdonnance[];
   photos?: string[];
   createdAt: string;
@@ -780,3 +827,74 @@ export interface ClinicProfile {
 
 
 
+
+// Salle des soins (Salle des Infirmiers) : registre des soins réalisés.
+export interface ConstantesSoin {
+  temperature?: number;
+  tensionArterielle?: string;
+  pouls?: number;
+  saturationO2?: number;
+  glycemie?: number;
+}
+
+export interface SoinRealise {
+  id: string;
+  date: string;   // AAAA-MM-JJ
+  heure: string;  // HH:MM
+  patient: string;
+  contact?: string;
+  consultationId?: string;
+  hospitalisationId?: string;
+  typeSoin: string;
+  produit?: string;
+  dose?: string;
+  voie?: string;
+  constantesAvant?: ConstantesSoin;
+  constantesApres?: ConstantesSoin;
+  observations?: string;
+  agentNom: string;
+  createdAt: string;
+  // Plusieurs médicaments administrés au cours du même soin.
+  medicaments?: MedicamentAdministre[];
+  // Soin fait dans le cadre d'un plan de traitement (relais entre collègues).
+  planId?: string;
+  jourTraitement?: number;
+}
+
+export interface MedicamentAdministre {
+  produit: string;
+  dose?: string;
+  voie?: string;
+  // Ligne du plan de traitement à laquelle correspond cette prise.
+  ligneId?: string;
+}
+
+// Plan de traitement : ce qu'il faut administrer chaque jour, pendant combien
+// de jours, pour que les collègues poursuivent les soins jusqu'à la fin.
+export interface LigneTraitement {
+  id: string;
+  produit: string;
+  dose?: string;
+  voie?: string;
+  frequence: string;        // libellé : "2 fois / jour (toutes les 12 h)"
+  prisesParJour: number;
+  dureeJours: number;
+  horaires?: string[];      // horaires indicatifs : ["08:00", "20:00"]
+}
+
+export interface PlanSoins {
+  id: string;
+  patient: string;
+  contact?: string;
+  consultationId?: string;
+  hospitalisationId?: string;
+  dateDebut: string;        // AAAA-MM-JJ (jour 1)
+  lignes: LigneTraitement[];
+  statut: "En cours" | "Terminé" | "Arrêté";
+  motifArret?: string;
+  arretePar?: string;
+  dateArret?: string;
+  notes?: string;
+  creePar: string;
+  createdAt: string;
+}

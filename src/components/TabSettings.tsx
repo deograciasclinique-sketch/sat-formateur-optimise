@@ -648,6 +648,8 @@ export default function TabSettings({
       "dg_rdv": "Rendez-vous",
       "dg_hospitalisations": "Hospitalisations",
       "dg_hosp_evolutions": "Évolutions de garde",
+      "dg_soins": "Salle des soins (soins réalisés)",
+      "dg_plans_soins": "Plans de traitement (Salle des soins)",
       "dg_factures": "Factures clients",
       "dg_depenses": "Dépenses cliniques",
       "dg_incidents": "Registre des incidents",
@@ -731,7 +733,7 @@ export default function TabSettings({
         "dg_rdv", "dg_hospitalisations", "dg_hosp_evolutions", "dg_factures",
         "dg_depenses", "dg_incidents", "dg_actions", "dg_audits", "dg_conges",
         "dg_absences", "dg_rh", "dg_prises_charge", "dg_urgences", "dg_vaccinations",
-        "dg_labo_examens", "dg_documents"
+        "dg_labo_examens", "dg_documents", "dg_soins", "dg_plans_soins"
       ];
 
       keysToOptimize.forEach((key) => {
