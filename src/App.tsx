@@ -35,7 +35,9 @@ import {
   PatientUrgence,
   FichePediatrique,
   ConsultationPrenatale,
-  DocumentArchive
+  DocumentArchive,
+  SoinRealise,
+  PlanSoins,
 } from "./types";
 import {
   seedLocalStorage,
@@ -57,11 +59,15 @@ import { sendBrowserNotification } from "./lib/browserNotifications";
 // Import all 16 operational tab panels
 import TabQualite from "./components/TabQualite";
 import TabIndicateurs from "./components/TabIndicateurs";
+import TabTHLO from "./components/TabTHLO";
+import { RapportTHLO, ConfigTHLO, CONFIG_THLO_DEFAUT, semainePrecedente, dateLimite } from "./modules/thlo/thloData";
 import TabTaches from "./components/TabTaches";
 import TabPharmacie from "./components/TabPharmacie";
 import TabFacturation from "./components/TabFacturation";
 import TabAccueilCaisse from "./components/TabAccueilCaisse";
 import TabInfirmier from "./components/TabInfirmier";
+import { prisesAFaireAujourdhui } from "./components/SalleDesSoins";
+import AlertesSoins from "./components/AlertesSoins";
 import TabRDV from "./components/TabRDV";
 import TabRH from "./components/TabRH";
 import TabHospitalisation from "./components/TabHospitalisation";
@@ -125,7 +131,7 @@ import {
 const ALL_TABS = [
   "dashboard", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", 
   "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", 
-  "assurances", "rh", "indicateurs", "qualite", "documents", "settings"
+  "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings"
 ];
 
 const getTabLabel = (id: string): string => {
@@ -145,6 +151,7 @@ const getTabLabel = (id: string): string => {
     factures: "Factures & Journal",
     assurances: "Assurances & Tiers-Payant",
     rh: "Ressources Humaines",
+    thlo: "THLO — Surveillance hebdo",
     indicateurs: "Indicateurs Épidémio",
     qualite: "Démarche Qualité",
     documents: "Coffre-fort Documents",
@@ -354,6 +361,12 @@ export default function App() {
   const [laboExamens, setLaboExamens] = useState<ExamenLabo[]>([]);
   const [documents, setDocuments] = useState<DocumentArchive[]>([]);
   const [actesTarifaires, setActesTarifaires] = useState<ActeTarifaire[]>([]);
+  // THLO : rapports hebdomadaires de surveillance épidémiologique et réglages.
+  const [thloRapports, setThloRapports] = useState<RapportTHLO[]>([]);
+  // Salle des soins : registre des soins réalisés (Salle des Infirmiers)
+  const [soins, setSoins] = useState<SoinRealise[]>([]);
+  const [plansSoins, setPlansSoins] = useState<PlanSoins[]>([]);
+  const [thloConfig, setThloConfig] = useState<ConfigTHLO>(CONFIG_THLO_DEFAUT);
 
   // --- Synchronisation temps réel multi-appareils (Firestore) ---
   // Associe chaque clé de données à sa fonction de mise à jour locale.
@@ -387,6 +400,10 @@ export default function App() {
     dg_labo_examens: setLaboExamens,
     dg_documents: setDocuments,
     dg_actes_tarifaires: setActesTarifaires,
+    dg_thlo_rapports: setThloRapports,
+    dg_thlo_config: setThloConfig,
+    dg_soins: setSoins,
+    dg_plans_soins: setPlansSoins,
   });
   // Garde en mémoire la dernière valeur confirmée comme envoyée au cloud pour chaque clé,
   // afin de ne renvoyer que ce qui a réellement changé (et d'éviter les boucles avec les
@@ -574,14 +591,14 @@ export default function App() {
         tabs: [
           "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
           "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
-          "assurances", "rh", "indicateurs", "qualite", "documents", "settings",
+          "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings",
         ],
       };
     }
 
     const tabs = ["taches"]; // tout le monde voit les tâches
     if (p.includes("medecin") || p.includes("pediatre") || p.includes("praticien")) {
-      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs");
+      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs", "thlo");
       return { reconnu: true, tabs };
     }
     if (p.includes("sage-femme") || p.includes("maternit")) {
@@ -591,7 +608,7 @@ export default function App() {
       return { reconnu: true, tabs };
     }
     if (p.includes("infirm") || p.includes("aide-soignant") || p.includes("triage")) {
-      tabs.push("infirmier", "urgences", "hospit", "vaccination", "rdv");
+      tabs.push("infirmier", "urgences", "hospit", "vaccination", "rdv", "thlo");
       return { reconnu: true, tabs };
     }
     if (p.includes("labo")) {
@@ -624,7 +641,7 @@ export default function App() {
       return [
         "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
         "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
-        "assurances", "rh", "indicateurs", "qualite", "documents", "settings",
+        "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings",
       ];
     }
     return detectPosteAccess(currentUser.poste).tabs;
@@ -641,6 +658,8 @@ export default function App() {
 
   // Active Panel Route
   const [activeTab, setActiveTab] = useState<string>("dashboard");
+  // Alerte de soin → ouvrir la Salle des soins sur le plan concerné.
+  const [demandeSoin, setDemandeSoin] = useState<{ planId: string; lignes: string[]; n: number } | null>(null);
 
   // Keep activeTab within allowed tabs
   useEffect(() => {
@@ -1017,6 +1036,10 @@ export default function App() {
     setLaboExamens(safeGet<ExamenLabo[]>("dg_labo_examens", []));
     setDocuments(safeGet<DocumentArchive[]>("dg_documents", []));
     setActesTarifaires(safeGet<ActeTarifaire[]>("dg_actes_tarifaires", []));
+    setThloRapports(safeGet<RapportTHLO[]>("dg_thlo_rapports", []));
+    setThloConfig({ ...CONFIG_THLO_DEFAUT, ...safeGet<Partial<ConfigTHLO>>("dg_thlo_config", {}) });
+    setSoins(safeGet<SoinRealise[]>("dg_soins", []));
+    setPlansSoins(safeGet<PlanSoins[]>("dg_plans_soins", []));
     setIsLoaded(true);
   }, []);
 
@@ -1154,14 +1177,18 @@ export default function App() {
       dg_vaccinations: vaccinations,
       dg_labo_examens: laboExamens,
       dg_documents: documents,
-      dg_actes_tarifaires: actesTarifaires
+      dg_actes_tarifaires: actesTarifaires,
+      dg_thlo_rapports: thloRapports,
+      dg_thlo_config: thloConfig,
+      dg_soins: soins,
+      dg_plans_soins: plansSoins
     };
   }, [
     staff, medicaments, mouvements, tasks, consultations, pediatrie,
     materniteCpns, materniteAccouchements, rdv, hospitalisations, ficheReferences,
     hospEvolutions, factures, depenses, incidents, actions, audits,
     conges, absences, rhFiches, prisesEnCharge, urgences, vaccinations,
-    laboExamens, documents, actesTarifaires
+    laboExamens, documents, actesTarifaires, thloRapports, thloConfig, soins, plansSoins
   ]);
 
   // Periodic auto-save effect
@@ -1292,6 +1319,15 @@ export default function App() {
     safeSet("dg_maternite_accouchements", newAccs);
   };
 
+  const handleUpdateThloRapports = (r: RapportTHLO[]) => {
+    setThloRapports(r);
+    safeSet("dg_thlo_rapports", r);
+  };
+  const handleUpdateThloConfig = (c: ConfigTHLO) => {
+    setThloConfig(c);
+    safeSet("dg_thlo_config", c);
+  };
+
   const handleUpdateRdv = (newRdv: RendezVous[]) => {
     setRdv(newRdv);
     safeSet("dg_rdv", newRdv);
@@ -1387,6 +1423,16 @@ export default function App() {
     safeSet("dg_documents", newDocs);
   };
 
+  const handleUpdatePlansSoins = (p: PlanSoins[]) => {
+    setPlansSoins(p);
+    safeSet("dg_plans_soins", p);
+  };
+
+  const handleUpdateSoins = (newSoins: SoinRealise[]) => {
+    setSoins(newSoins);
+    safeSet("dg_soins", newSoins);
+  };
+
   const handleUpdateActesTarifaires = (newActes: ActeTarifaire[]) => {
     setActesTarifaires(newActes);
     safeSet("dg_actes_tarifaires", newActes);
@@ -1406,7 +1452,7 @@ export default function App() {
         title: "🏥 Soins & Clinique",
         items: [
           { id: "accueil_caisse", label: "Accueil & Caisse", icon: Wallet2 },
-          { id: "infirmier", label: "Salle des Infirmiers", icon: Activity, alertCount: consultations.filter((c) => c.statut === "Attente prise en charge infirmier").length },
+          { id: "infirmier", label: "Salle des Infirmiers", icon: Activity, alertCount: consultations.filter((c) => c.statut === "Attente prise en charge infirmier").length + prisesAFaireAujourdhui(plansSoins, soins) },
           { id: "medecine", label: "Consultation Générale", icon: Stethoscope },
           { id: "urgences", label: "Triage & Urgences", icon: ShieldAlert, alertCount: urgences.filter((u) => u.statut !== "Sorti(e) ou Libéré(e)").length },
           { id: "hospit", label: "Hospitalisations", icon: HeartPulse, alertCount: hospitalisations.filter((h) => h.statut === "En cours").length },
@@ -1438,6 +1484,12 @@ export default function App() {
       {
         title: "📊 Qualité & Configuration",
         items: [
+          { id: "thlo", label: "THLO — Surveillance hebdo", icon: Activity, alertCount: (() => {
+            // Rapport de la semaine passée pas encore transmis alors que la date limite est dépassée.
+            const s = semainePrecedente();
+            const r = thloRapports.find((x) => x.id === s.id);
+            return (!r || r.statut !== "Transmis") && new Date().toISOString().slice(0, 10) > dateLimite(s, thloConfig) ? 1 : 0;
+          })() },
           { id: "indicateurs", label: "Indicateurs Épidémio", icon: TrendingUp },
           { id: "qualite", label: "Démarche Qualité", icon: ShieldCheck },
           { id: "documents", label: "Coffre-fort Documents", icon: FileText },
@@ -1454,6 +1506,8 @@ export default function App() {
       .filter((cat) => cat.items.length > 0);
   }, [
     allowedTabs,
+    plansSoins,
+    soins,
     urgences,
     hospitalisations,
     laboExamens,
@@ -2144,6 +2198,20 @@ export default function App() {
             />
           )}
 
+          {activeTab === "thlo" && (
+            <TabTHLO
+              consultations={consultations}
+              pediatrie={pediatrie}
+              hospitalisations={hospitalisations}
+              rapports={thloRapports}
+              onUpdateRapports={handleUpdateThloRapports}
+              config={thloConfig}
+              onUpdateConfig={handleUpdateThloConfig}
+              theme={theme}
+              agentNom={currentUser?.nom}
+            />
+          )}
+
           {activeTab === "indicateurs" && (
             <TabIndicateurs
               consultations={consultations}
@@ -2200,6 +2268,16 @@ export default function App() {
               onUpdateMedicaments={handleUpdateMedicaments}
               mouvements={mouvements}
               onUpdateMouvements={handleUpdateMouvements}
+              rdvs={rdv}
+              onUpdateRdvs={handleUpdateRdv}
+              factures={factures}
+              soins={soins}
+              onUpdateSoins={handleUpdateSoins}
+              plansSoins={plansSoins}
+              onUpdatePlansSoins={handleUpdatePlansSoins}
+              agentNom={currentUser?.nom || ""}
+              demandeSoin={demandeSoin}
+              onDemandeSoinTraitee={() => setDemandeSoin(null)}
             />
           )}
 
@@ -2705,6 +2783,19 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Alertes de la Salle des soins : 30 min avant chaque prise, sur tous les onglets */}
+      {isLoaded && currentUser && allowedTabs.includes("infirmier") && (
+        <AlertesSoins
+          plans={plansSoins}
+          soins={soins}
+          isDark={theme === "dark"}
+          onFaire={(planId, lignes) => {
+            setActiveTab("infirmier");
+            setDemandeSoin({ planId, lignes, n: Date.now() });
+          }}
+        />
+      )}
     </div>
     </SelfHealingErrorBoundary>
   );
