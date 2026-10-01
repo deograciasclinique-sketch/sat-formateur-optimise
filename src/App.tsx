@@ -979,6 +979,17 @@ export default function App() {
         showToast(`${info.icone} ${info.titre}`, `${c.patient} vient d'être envoyé(e).`, "info");
         sendBrowserNotification(`${info.icone} ${info.titre}`, `${c.patient} vient d'être envoyé(e).`, `patient-${c.id}`);
       });
+
+      // Actes payés à la caisse : le patient arrive en salle infirmier pour ses soins.
+      const avant = new Map(prevConsultations.map((c) => [c.id, c.statut]));
+      if (allowedTabs.includes("infirmier")) {
+        consultations.forEach((c) => {
+          if (c.statut !== "Attente exécution actes" || !avant.has(c.id) || avant.get(c.id) === c.statut) return;
+          const titre = c.decision === "Envoyer en salle infirmier" ? "💉 Patient envoyé en salle infirmier" : "💉 Soins à exécuter";
+          showToast(titre, `${c.patient} a payé ses soins et arrive en salle infirmier.`, "info");
+          sendBrowserNotification(titre, `${c.patient} a payé ses soins et arrive en salle infirmier.`, `soins-${c.id}`);
+        });
+      }
     }
 
     prevConsultationsRef.current = consultations;

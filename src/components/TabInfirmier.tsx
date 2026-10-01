@@ -12,8 +12,9 @@ import {
 } from "./InfirmierDossiers";
 import { ConduiteATenirListe, catASoinsInfirmiers, TYPES_INFIRMIER, conduiteEnLignes } from "./ConduiteATenir";
 import { generateUid } from "../data";
+import { ModalExeat, ModalOrienter, DonneesExeat, ChoixOrientation } from "./SortiePatient";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
-import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send, CalendarDays, FolderOpen, CalendarPlus } from "lucide-react";
+import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send, CalendarDays, FolderOpen, CalendarPlus, LogOut, ArrowRightLeft } from "lucide-react";
 
 interface TabInfirmierProps {
   consultations: Consultation[];
@@ -99,6 +100,9 @@ export default function TabInfirmier({
   // consultation à clôturer une fois le soin noté (depuis « Soins à exécuter »).
   const [formSoin, setFormSoin] = useState<null | { pre: PreRemplissageSoin | null; terminerConsultationId?: string }>(null);
   const [dossierKey, setDossierKey] = useState<string | null>(null);
+  // Fin de prise en charge d'un dossier « Soins à exécuter » : exéat ou orientation.
+  const [exeatId, setExeatId] = useState<string | null>(null);
+  const [orienterId, setOrienterId] = useState<string | null>(null);
   const [rdvConstantesId, setRdvConstantesId] = useState<string | null>(null);
   const [nouveauRdv, setNouveauRdv] = useState<null | { patient?: string; contact?: string; rdvPrecedentId?: string }>(null);
   // Alerte « Faire le soin » : ouvre directement les soins du plan concerné.
@@ -272,6 +276,62 @@ export default function TabInfirmier({
     );
   };
 
+  // Soins déjà notés dans la Salle des soins pour un dossier.
+  const soinsDuDossier = (c: Consultation) => soins.filter((s) => s.consultationId === c.id).length;
+  // Patient envoyé par le médecin : on note les soins sans clore le dossier,
+  // l'infirmier prononce ensuite l'exéat ou oriente le patient.
+  const envoyeParMedecin = (c: Consultation) => c.decision === "Envoyer en salle infirmier";
+
+  const validerExeat = (c: Consultation, d: DonneesExeat) => {
+    onUpdateConsultations(consultations.map((cons) => (cons.id === c.id
+      ? { ...cons, statut: "Terminée", exeat: { date: d.date, heure: d.heure, agentNom: d.agentNom, ...(d.observations ? { observations: d.observations } : {}) } }
+      : cons)));
+    setExeatId(null);
+    if (d.programmerRdv) setNouveauRdv({ patient: c.patient, contact: c.contact });
+  };
+
+  const validerOrientation = (c: Consultation, choix: ChoixOrientation, service: string, motif: string) => {
+    const nowTime = new Date().toTimeString().slice(0, 5);
+    const note = motif ? `\nOrienté par la salle infirmier : ${motif}` : "";
+    let maj: Consultation = { ...c, observations: ((c.observations || "") + note).trim() || undefined };
+    if (choix === "medecin") {
+      maj = { ...maj, statut: "Attente consultation médecin" };
+    } else if (choix === "autre") {
+      maj = { ...maj, statut: "Transféré vers un autre service", referenceService: service };
+    } else if (choix === "Admission aux urgences") {
+      if (onUpdateUrgences) {
+        const u: PatientUrgence = {
+          id: generateUid(), patient: c.patient, contact: c.contact, severite: "Urgent (Jaune)",
+          plainte: c.plainte + (motif ? ` — ${motif}` : ""),
+          constantes: `T°: ${c.vitals?.temperature}°C | TA: ${c.vitals?.tensionArterielle} | Pouls: ${c.vitals?.pouls} | Glycémie: ${c.vitals?.glycemie}`,
+          medecinId: c.medecinId || "", dateArrivee: new Date().toISOString().slice(0, 10), heureArrivee: nowTime,
+          statut: "En attente de médecin", createdAt: new Date().toISOString(),
+        };
+        onUpdateUrgences([u, ...urgences]);
+        maj.linkedUrgenceId = u.id;
+      }
+      maj = { ...maj, statut: "Terminée" };
+    } else {
+      if (onUpdateHospitalisations) {
+        const h: Hospitalisation = {
+          id: generateUid(), patient: c.patient, contact: c.contact,
+          dateAdmission: new Date().toISOString().slice(0, 10), heureAdmission: nowTime,
+          service: choix === "Mise en observation" ? "Observation" : "Hospitalisation", chambre: "",
+          medecin: staff.find((x) => x.id === c.medecinId)?.nom || "",
+          motif: c.plainte,
+          notesInitiales: `Diagnostic : ${c.diagnosticFinal || c.diagnostic}${motif ? "\nOrienté par la salle infirmier : " + motif : ""}`,
+          typeAdmission: choix === "Mise en observation" ? "Mise en Observation (72h)" : "Hospitalisation",
+          statut: "En cours", dateSortie: "", statutSortie: "", diagnosticSortie: "", createdAt: new Date().toISOString(),
+        };
+        onUpdateHospitalisations([h, ...hospitalisations]);
+        maj.linkedHospitalisationId = h.id;
+      }
+      maj = { ...maj, statut: "Terminée" };
+    }
+    onUpdateConsultations(consultations.map((cons) => (cons.id === c.id ? maj : cons)));
+    setOrienterId(null);
+  };
+
   // « Noter les soins » : ouvre le registre de la Salle des soins pré-rempli
   // avec la prescription (injectables / soins de la conduite à tenir, ordonnance).
   const ouvrirSoinDepuisConsultation = (c: Consultation) => {
@@ -295,7 +355,7 @@ export default function TabInfirmier({
         })),
         rappel,
       },
-      terminerConsultationId: c.id,
+      terminerConsultationId: envoyeParMedecin(c) ? undefined : c.id,
     });
   };
 
@@ -669,6 +729,21 @@ export default function TabInfirmier({
           onSave={(k, envoi) => handleSaveConstantesRdv(rdvConstantes, k, envoi)}
         />
       )}
+      {exeatId && consultations.find((c) => c.id === exeatId) && (() => {
+        const c = consultations.find((x) => x.id === exeatId)!;
+        return (
+          <ModalExeat consultation={c} nbSoins={soinsDuDossier(c)} agentNom={agentNom} isDark={isDark}
+            onAnnuler={() => setExeatId(null)} onValider={(d) => validerExeat(c, d)} />
+        );
+      })()}
+      {orienterId && consultations.find((c) => c.id === orienterId) && (() => {
+        const c = consultations.find((x) => x.id === orienterId)!;
+        return (
+          <ModalOrienter consultation={c} isDark={isDark}
+            onAnnuler={() => setOrienterId(null)} onValider={(ch, sv, m) => validerOrientation(c, ch, sv, m)} />
+        );
+      })()}
+
       {nouveauRdv && (
         <NouveauRdvForm
           patient={nouveauRdv.patient}
@@ -1155,7 +1230,18 @@ export default function TabInfirmier({
                 }`}
               >
                 <div>
-                  <div className="font-medium">{c.patient}</div>
+                  <div className="font-medium flex flex-wrap items-center gap-1.5">
+                    {c.patient}
+                    {envoyeParMedecin(c) && (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300">💉 Envoyé par le médecin</span>
+                    )}
+                    {soinsDuDossier(c) > 0 && (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">✓ {soinsDuDossier(c)} soin(s) noté(s)</span>
+                    )}
+                  </div>
+                  {(c.diagnosticFinal || c.diagnostic) && (
+                    <div className="text-xs mt-0.5"><span className={isDark ? "text-gray-400" : "text-gray-500"}>Diagnostic : </span>{c.diagnosticFinal || c.diagnostic}</div>
+                  )}
                   <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
                     {(c.ordonnance || []).length > 0
                       ? `${c.ordonnance.length} ligne(s) d'ordonnance à exécuter`
@@ -1174,14 +1260,30 @@ export default function TabInfirmier({
                     onClick={() => ouvrirSoinDepuisConsultation(c)}
                     className="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm font-medium flex items-center gap-1.5 hover:bg-emerald-700"
                   >
-                    <CheckCircle2 className="w-4 h-4" /> Noter les soins et terminer
+                    <CheckCircle2 className="w-4 h-4" /> {envoyeParMedecin(c) ? (soinsDuDossier(c) ? "Noter un autre soin" : "Noter les soins") : "Noter les soins et terminer"}
                   </button>
-                  <button
-                    onClick={() => { if (window.confirm(`Terminer le dossier de ${c.patient} sans noter le soin dans la Salle des soins ?`)) handleMarquerSoinsExecutes(c); }}
-                    className={`text-xs underline ${isDark ? "text-gray-400" : "text-gray-500"}`}
-                  >
-                    Terminer sans noter
-                  </button>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => setExeatId(c.id)}
+                      className="px-2.5 py-1.5 rounded border border-emerald-600 text-emerald-700 dark:text-emerald-400 text-sm font-medium flex items-center gap-1"
+                    >
+                      <LogOut className="w-4 h-4" /> Exéat
+                    </button>
+                    <button
+                      onClick={() => setOrienterId(c.id)}
+                      className={`px-2.5 py-1.5 rounded border text-sm font-medium flex items-center gap-1 ${isDark ? "border-gray-600" : "border-gray-300"}`}
+                    >
+                      <ArrowRightLeft className="w-4 h-4" /> Orienter
+                    </button>
+                  </div>
+                  {!envoyeParMedecin(c) && (
+                    <button
+                      onClick={() => { if (window.confirm(`Terminer le dossier de ${c.patient} sans noter le soin dans la Salle des soins ?`)) handleMarquerSoinsExecutes(c); }}
+                      className={`text-xs underline ${isDark ? "text-gray-400" : "text-gray-500"}`}
+                    >
+                      Terminer sans noter
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

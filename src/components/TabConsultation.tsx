@@ -822,6 +822,10 @@ export default function TabConsultation({
       return;
     }
 
+    if (consDecision === "Envoyer en salle infirmier" && presLines.length === 0 && !catASoinsInfirmiers(consCAT)) {
+      if (!window.confirm("Aucun soin n'est prescrit (ni ordonnance, ni injectable / soin infirmier dans la conduite à tenir).\nEnvoyer quand même le patient en salle infirmier ?")) return;
+    }
+
     if (tempLabResults.length > 0 && !consDiagnosticFinal.trim()) {
       alert("Des résultats de laboratoire sont liés à cette consultation : veuillez renseigner le diagnostic de certitude / final avant d'enregistrer.");
       return;
@@ -884,7 +888,11 @@ export default function TabConsultation({
       // plutôt que de rester "Terminée" par défaut comme une saisie directe.
       // Des soins infirmiers prévus dans la conduite à tenir passent aussi par
       // le paiement des actes puis la salle infirmier.
-      statut: pendingSource ? (presLines.length > 0 || catASoinsInfirmiers(consCAT) ? "Attente paiement actes" : "Terminée") : undefined,
+      // « Envoyer en salle infirmier » : le patient passe toujours d'abord à la
+      // caisse (paiement des soins), puis arrive dans « Soins à exécuter ».
+      statut: consDecision === "Envoyer en salle infirmier"
+        ? "Attente paiement actes"
+        : pendingSource ? (presLines.length > 0 || catASoinsInfirmiers(consCAT) ? "Attente paiement actes" : "Terminée") : undefined,
     };
 
     const medecinNomForDecision = staff.find((s) => s.id === consMedecin)?.nom || currentUser?.nom || "";
@@ -989,6 +997,8 @@ export default function TabConsultation({
       decisionSuffix = "\nUn dossier a été créé automatiquement dans le module Urgences.";
     } else if (newCons.decision === "Référer vers un autre service" && newCons.referenceService) {
       decisionSuffix = `\nPatient référé vers : ${newCons.referenceService}.`;
+    } else if (newCons.decision === "Envoyer en salle infirmier") {
+      decisionSuffix = "\nLe patient passe à la caisse pour payer les soins, puis il apparaîtra en Salle des Infirmiers (« Soins à exécuter »).";
     }
 
     const shortfallSuffix = stockShortfallWarnings.length > 0
@@ -2528,6 +2538,7 @@ export default function TabConsultation({
                 className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
               >
                 <option value="Retour à domicile">🏠 Retour à domicile</option>
+                <option value="Envoyer en salle infirmier">💉 Envoyer en salle infirmier (soins)</option>
                 <option value="Mise en observation">🛏️ Mise en observation</option>
                 <option value="Hospitalisation">🏥 Hospitalisation</option>
                 <option value="Référer vers un autre service">↗️ Référer vers un autre service</option>
@@ -2550,6 +2561,11 @@ export default function TabConsultation({
               {consDecision === "Admission aux urgences" && (
                 <p className="text-2xs text-info-700 bg-info-50 border border-info-100 rounded-lg px-2.5 py-1.5 mt-2">
                   Un dossier sera automatiquement créé dans le module Urgences avec les données de ce patient.
+                </p>
+              )}
+              {consDecision === "Envoyer en salle infirmier" && (
+                <p className="text-2xs text-info-700 bg-info-50 border border-info-100 rounded-lg px-2.5 py-1.5 mt-2">
+                  Le patient passe d'abord à la caisse pour payer les soins. Il arrive ensuite en Salle des Infirmiers avec votre prescription et la conduite à tenir : l'infirmier note et exécute les soins (Salle des soins), puis prononce l'exéat ou l'oriente ailleurs.
                 </p>
               )}
             </div>
@@ -2881,6 +2897,11 @@ export default function TabConsultation({
                         {c.decision && c.decision !== "Retour à domicile" && (
                           <span className="inline-block mt-1 text-2xs font-bold px-2 py-0.5 rounded-lg bg-warning-50 text-warning-700 border border-warning-200">
                             {c.decision}
+                          </span>
+                        )}
+                        {c.exeat && (
+                          <span className="inline-block mt-1 ml-1 text-2xs font-bold px-2 py-0.5 rounded-lg bg-success-50 text-success-700 border border-success-200">
+                            Exéat le {new Date(c.exeat.date + "T00:00:00").toLocaleDateString("fr-FR")} à {c.exeat.heure}
                           </span>
                         )}
                       </div>
