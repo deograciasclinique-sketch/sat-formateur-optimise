@@ -26,10 +26,19 @@ const EN_TETE = {
 
 const personneVide = (): PersonneDeclaration => ({ nom: "", prenoms: "", nationalite: "Burkinabè" });
 
-/** N° = date de naissance JJMMAAAA (ex. 07032026) ; -2, -3… si plusieurs naissances le même jour. */
-export function prochainNumeroDeclaration(accouchements: Accouchement[], dateIso: string, exclureId?: string): string {
+/** Initiales de la maman : 1re lettre du nom + 1re lettre du prénom (ex. BAH Djènèba → "BD"). */
+export function initialesMere(nom?: string, prenoms?: string): string {
+  const ini = (x?: string) => (x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z]/g, "").charAt(0).toUpperCase();
+  return ini(nom) + ini(prenoms);
+}
+
+/**
+ * N° = initiales de la maman + date de naissance JJMMAAAA (ex. BD07032026) ;
+ * -2, -3… si le même numéro existe déjà.
+ */
+export function prochainNumeroDeclaration(accouchements: Accouchement[], dateIso: string, exclureId?: string, initiales = ""): string {
   const [y, m, d] = (dateIso || getTodayStr()).split("-");
-  const base = `${d}${m}${y}`;
+  const base = `${initiales}${d}${m}${y}`;
   const pris = new Set(accouchements.filter((a) => a.id !== exclureId).map((a) => a.declarationNaissance?.numero).filter(Boolean));
   if (!pris.has(base)) return base;
   let i = 2;
@@ -147,7 +156,7 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
     const agent = staff.find((s) => s.id === a.sageFemmeId) || (currentUser && /sage/i.test(currentUser.poste || "") ? currentUser : undefined);
     const m = decouperNom(a.patient);
     const base: DeclarationNaissance = {
-      numero: prochainNumeroDeclaration(accouchements, a.date, a.id),
+      numero: prochainNumeroDeclaration(accouchements, a.date, a.id, initialesMere(m.nom, m.prenoms)),
       declarantAgentId: agent?.id || "",
       declarantAgentNom: agent?.nom || "",
       declarantAgentCivilite: "Mme",
@@ -170,16 +179,17 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
   });
   const [plus, setPlus] = useState(false);
 
-  // N° automatique (non modifiable) : date de naissance JJMMAAAA, suffixe -2, -3…
-  // si plusieurs naissances le même jour. Recalculé à l'enregistrement à partir
-  // de la liste à jour, pour éviter deux fois le même numéro.
+  // N° automatique (non modifiable) : initiales de la maman + date de naissance
+  // JJMMAAAA (ex. BD07032026), suffixe -2, -3… si le numéro existe déjà.
+  // Recalculé à partir de la liste à jour, pour éviter deux fois le même numéro.
   const [j, mo, an] = [a.date.slice(8, 10), a.date.slice(5, 7), a.date.slice(0, 4)];
-  const baseNumero = `${j}${mo}${an}`;
+  const initiales = initialesMere(d.mere.nom, d.mere.prenoms);
+  const baseNumero = `${initiales}${j}${mo}${an}`;
   const numeroExistantValide =
     !!existante?.numero &&
     (existante.numero === baseNumero || existante.numero.startsWith(`${baseNumero}-`)) &&
     !accouchements.some((x) => x.id !== a.id && x.declarationNaissance?.numero === existante.numero);
-  const numeroAuto = numeroExistantValide ? existante!.numero : prochainNumeroDeclaration(accouchements, a.date, a.id);
+  const numeroAuto = numeroExistantValide ? existante!.numero : prochainNumeroDeclaration(accouchements, a.date, a.id, initiales);
 
   const set = (patch: Partial<DeclarationNaissance>) => setD((x) => ({ ...x, ...patch }));
   const setP = (qui: "mere" | "pere", patch: Partial<PersonneDeclaration>) => setD((x) => ({ ...x, [qui]: { ...x[qui], ...patch } }));
