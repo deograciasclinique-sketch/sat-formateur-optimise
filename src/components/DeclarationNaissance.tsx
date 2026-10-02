@@ -11,9 +11,12 @@
  */
 
 import React, { useMemo, useState } from "react";
-import { X, Printer, Save, FileText, ChevronDown, ChevronUp } from "lucide-react";
+import { X, Printer, Save, FileText, ChevronDown, ChevronUp, Send } from "lucide-react";
+import { jsPDF } from "jspdf";
 import { Accouchement, ConsultationPrenatale, DeclarationNaissance, PersonneDeclaration, Staff } from "../types";
 import { getTodayStr } from "../data";
+import { formatWhatsAppNumber } from "../lib/whatsapp";
+import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 
 // En-tête du modèle officiel du cabinet.
 const EN_TETE = {
@@ -81,6 +84,85 @@ const decouperNom = (complet: string): { nom: string; prenoms: string } => {
   const t = (complet || "").replace(/^(madame|mme|mlle|mademoiselle)\.?\s+/i, "").trim().split(/\s+/);
   return { nom: t[0] || "", prenoms: t.slice(1).join(" ") };
 };
+
+/** Textes de la déclaration, communs à l'impression, au PDF et au message WhatsApp. */
+function contenu(a: Accouchement, d: DeclarationNaissance, staff: Staff[]) {
+  const agent = staff.find((s) => s.id === (d.declarantAgentId || a.sageFemmeId));
+  const nomAgent = d.declarantAgentNom || agent?.nom || "……………………";
+  const fonction = (d.declarantAgentFonction || agent?.poste || "sage-femme").toLowerCase();
+  const fille = a.sexeEnfant === "Féminin";
+  const etat = d.vivant ? (fille ? "Née vivante" : "Né vivant") : fille ? "Mort-née" : "Mort-né";
+  const mere = `${(d.mere.nom || "").toUpperCase()} ${d.mere.prenoms || ""}`.trim();
+  const neeLe = [d.mere.dateNaissance ? dateFr(d.mere.dateNaissance) : "", d.mere.lieuNaissance ? `à ${d.mere.lieuNaissance.toUpperCase()}` : ""].filter(Boolean).join(" ");
+  const civ = d.declarantAgentCivilite || "Mme";
+  const soussigne = `Je soussigné${civ === "M." ? "" : "e"} ${civ}`;
+  const accouche = `${dateFr(a.date)} à ${heureEnToutesLettres(a.heure)}`;
+  const sexe = fille ? "FÉMININ" : "MASCULIN";
+  return { nomAgent, fonction, fille, etat, mere, neeLe, soussigne, accouche, sexe, lieu: d.lieuSignature || EN_TETE.ville };
+}
+
+/** Déclaration au format PDF (même mise en page que l'impression). */
+export function genererPdfDeclaration(a: Accouchement, d: DeclarationNaissance, staff: Staff[]): Blob {
+  const c = contenu(a, d, staff);
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const X = 20, L = 210 - 20;
+  doc.setFont("helvetica", "bold").setFontSize(10.5);
+  EN_TETE.gauche.forEach((l, i) => doc.text(l, X, 22 + i * 6));
+  doc.text(EN_TETE.pays, 165, 22, { align: "center" });
+  doc.text(EN_TETE.devise, 165, 28, { align: "center" });
+  doc.text(`${c.lieu}, le ${dateFr(d.dateEtablissement)}`, 165, 40, { align: "center" });
+  doc.setFontSize(12);
+  const titre = `DECLARATION DE NAISSANCE N° ${d.numero}`;
+  doc.text(titre, 105, 66, { align: "center" });
+  const tw = doc.getTextWidth(titre);
+  doc.setLineWidth(0.3).line(105 - tw / 2, 67, 105 + tw / 2, 67);
+
+  // Une ligne faite de morceaux en styles différents.
+  doc.setFontSize(11.5);
+  let y = 82;
+  const ligne = (morceaux: [string, "normal" | "bold" | "bolditalic"][]) => {
+    let x = X;
+    morceaux.forEach(([t, style]) => {
+      doc.setFont("helvetica", style);
+      const lignes = doc.splitTextToSize(t, L - x) as string[];
+      doc.text(lignes[0], x, y);
+      x += doc.getTextWidth(lignes[0]);
+      lignes.slice(1).forEach((r) => { y += 7; x = X; doc.text(r, x, y); x += doc.getTextWidth(r); });
+    });
+    y += 7.5;
+  };
+  ligne([[`${c.soussigne} `, "normal"], [c.nomAgent, "bold"], [` ${c.fonction}`, "normal"]]);
+  ligne([["En service à la maternité du ", "normal"], [EN_TETE.etablissement, "bolditalic"], [", déclare avoir donné des soins à", "normal"]]);
+  ligne([["Madame : ", "normal"], [c.mere, "bold"]]);
+  ligne([[`Née le : ${c.neeLe}`, "normal"]]);
+  ligne([["Qui a accouché le ", "normal"], [c.accouche, "bolditalic"]]);
+  ligne([["D'un enfant de sexe ", "normal"], [c.sexe, "bolditalic"]]);
+  ligne([[c.etat, "bolditalic"]]);
+  return doc.output("blob");
+}
+
+/** Message WhatsApp accompagnant la déclaration. */
+export function messageWhatsAppDeclaration(a: Accouchement, d: DeclarationNaissance, staff: Staff[], pour: "famille" | "etat"): string {
+  const c = contenu(a, d, staff);
+  return [
+    pour === "famille" ? "Bonjour," : "Bonjour, à l'attention du service de l'état civil,",
+    "",
+    `*DÉCLARATION DE NAISSANCE N° ${d.numero}*`,
+    `${EN_TETE.etablissement} — ${EN_TETE.gauche[4]}`,
+    "",
+    `${c.soussigne} ${c.nomAgent}, ${c.fonction}, en service à la maternité du ${EN_TETE.etablissement}, déclare avoir donné des soins à :`,
+    `Madame : *${c.mere}*`,
+    `Née le : ${c.neeLe}`,
+    `Qui a accouché le *${c.accouche}*`,
+    `D'un enfant de sexe *${c.sexe}*`,
+    `*${c.etat}*`,
+    "",
+    `${c.lieu}, le ${dateFr(d.dateEtablissement)}`,
+    pour === "famille"
+      ? "Présentez l'original signé et cacheté au centre d'état civil pour établir l'acte de naissance de l'enfant."
+      : "Le document signé et cacheté est joint (PDF).",
+  ].join("\n");
+}
 
 export function imprimerDeclaration(a: Accouchement, d: DeclarationNaissance, staff: Staff[]) {
   const w = window.open("", "_blank");
@@ -178,6 +260,10 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
     return existante ? { ...base, ...existante, mere: { ...base.mere, ...existante.mere }, pere: { ...base.pere, ...existante.pere } } : base;
   });
   const [plus, setPlus] = useState(false);
+  // Envoi WhatsApp : numéro de l'état civil mémorisé pour tout le service (synchro cloud).
+  const [numeroEtatCivil, setNumeroEtatCivil] = useCloudSyncedState<string>("dg_etat_civil_whatsapp", "");
+  const [envoi, setEnvoi] = useState<null | "famille" | "etat">(null);
+  const [numeroEnvoi, setNumeroEnvoi] = useState("");
 
   // N° automatique (non modifiable) : initiales de la maman + date de naissance
   // JJMMAAAA (ex. BD07032026), suffixe -2, -3… si le numéro existe déjà.
@@ -214,6 +300,58 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
     if (imprimer) imprimerDeclaration(a, ok, staff);
     onClose();
   };
+
+  const ouvrirEnvoi = (pour: "famille" | "etat") => {
+    setEnvoi(pour);
+    setNumeroEnvoi(pour === "etat" ? numeroEtatCivil : d.declarantContact || d.pere.contact || d.mere.contact || cpnMere?.contact || "");
+  };
+
+  const envoyerWhatsApp = async (modeNumero: boolean) => {
+    if (!envoi) return;
+    const ok = valider();
+    if (!ok) return;
+    const num = formatWhatsAppNumber(numeroEnvoi);
+    if (modeNumero && !num) {
+      alert("Numéro WhatsApp invalide. Saisissez par exemple 70 12 34 56 ou +225 07 12 34 56 78.");
+      return;
+    }
+    if (envoi === "etat" && num && numeroEnvoi !== numeroEtatCivil) setNumeroEtatCivil(numeroEnvoi);
+    // Suivi : la déclaration est remise à la famille / transmise à l'état civil.
+    const today = getTodayStr();
+    const suivi: DeclarationNaissance =
+      envoi === "etat"
+        ? { ...ok, statut: "Transmise à l'état civil", dateTransmission: ok.dateTransmission || today, dateRemise: ok.dateRemise || today }
+        : { ...ok, statut: ok.statut === "Établie" ? "Remise aux parents" : ok.statut, dateRemise: ok.dateRemise || today };
+    suivi.observations = [ok.observations, `Envoyée par WhatsApp ${envoi === "etat" ? "à l'état civil" : "à la famille"} le ${dateFr(today)}${num ? ` (${numeroEnvoi})` : ""}`].filter(Boolean).join(" · ");
+    onSave(JSON.parse(JSON.stringify(suivi)));
+    setD(suivi);
+
+    const texte = messageWhatsAppDeclaration(a, ok, staff, envoi);
+    const nomFichier = `Declaration_naissance_${ok.numero}.pdf`;
+    const pdf = new File([genererPdfDeclaration(a, ok, staff)], nomFichier, { type: "application/pdf" });
+
+    // Téléphone : partage direct du PDF vers WhatsApp (on choisit le contact dans WhatsApp).
+    if (!modeNumero && (navigator as any).canShare?.({ files: [pdf] })) {
+      try {
+        await navigator.share({ files: [pdf], text: texte, title: `Déclaration de naissance N° ${ok.numero}` });
+        setEnvoi(null);
+        return;
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
+      }
+    }
+    // Ordinateur : le PDF est téléchargé, puis la discussion WhatsApp s'ouvre avec le message.
+    const url = URL.createObjectURL(pdf);
+    const lien = document.createElement("a");
+    lien.href = url; lien.download = nomFichier;
+    document.body.appendChild(lien); lien.click(); lien.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    window.open(`https://wa.me/${num || ""}?text=${encodeURIComponent(texte)}`, "_blank", "noopener");
+    alert(`Le PDF « ${nomFichier} » a été téléchargé.\nDans WhatsApp, joignez-le au message (trombone 📎 → Document).`);
+    setEnvoi(null);
+  };
+
+  const peutPartager = typeof navigator !== "undefined" && !!(navigator as any).canShare;
 
   const input = "w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none";
   const lbl = "text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1";
@@ -383,7 +521,33 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
           </div>
         </div>
 
+        {envoi && (
+          <div className="px-4 pt-3 border-t border-stone-100 space-y-2 bg-emerald-50/60">
+            <div className="text-xs font-bold text-emerald-800">
+              Envoyer la déclaration par WhatsApp {envoi === "etat" ? "à l'état civil" : "à la famille"}
+            </div>
+            <div className="flex flex-wrap items-end gap-2 pb-3">
+              <div className="flex-1 min-w-[180px]">
+                <label className={lbl}>{envoi === "etat" ? "WhatsApp de l'état civil (mémorisé)" : "WhatsApp de la famille"}</label>
+                <input className={input} inputMode="tel" placeholder="Ex: 70 12 34 56" value={numeroEnvoi} onChange={(e) => setNumeroEnvoi(e.target.value)} />
+              </div>
+              {peutPartager && (
+                <button type="button" onClick={() => envoyerWhatsApp(false)} className="px-3 py-2 text-xs font-bold rounded-lg bg-[#25D366] text-white flex items-center gap-1.5">
+                  <Send className="w-4 h-4" /> Partager le PDF
+                </button>
+              )}
+              <button type="button" onClick={() => envoyerWhatsApp(true)} className={`px-3 py-2 text-xs font-bold rounded-lg flex items-center gap-1.5 ${peutPartager ? "border border-[#25D366] text-emerald-800" : "bg-[#25D366] text-white"}`}>
+                <Send className="w-4 h-4" /> {peutPartager ? "Envoyer à ce numéro" : "Ouvrir WhatsApp"}
+              </button>
+              <button type="button" onClick={() => setEnvoi(null)} className="px-2 py-2 text-xs text-stone-500">Annuler</button>
+            </div>
+            {peutPartager && <p className="text-2xs text-stone-500 pb-2 -mt-2">« Partager le PDF » envoie le document directement : choisissez WhatsApp puis le contact.</p>}
+          </div>
+        )}
+
         <div className="p-4 border-t border-stone-100 flex flex-wrap justify-end gap-2">
+          <button type="button" onClick={() => ouvrirEnvoi("famille")} className="px-3 py-2 text-xs font-bold rounded-lg border border-[#25D366] text-emerald-800 flex items-center gap-1.5"><Send className="w-4 h-4" /> WhatsApp famille</button>
+          <button type="button" onClick={() => ouvrirEnvoi("etat")} className="px-3 py-2 text-xs font-bold rounded-lg border border-[#25D366] text-emerald-800 flex items-center gap-1.5 mr-auto"><Send className="w-4 h-4" /> WhatsApp état civil</button>
           <button type="button" onClick={onClose} className="px-3 py-2 text-xs font-bold rounded-lg border border-stone-300 text-stone-700">Fermer</button>
           <button type="button" onClick={() => enregistrer(false)} className="px-3 py-2 text-xs font-bold rounded-lg border border-pink-600 text-pink-700 flex items-center gap-1.5"><Save className="w-4 h-4" /> Enregistrer</button>
           <button type="button" onClick={() => enregistrer(true)} className="px-3 py-2 text-xs font-bold rounded-lg bg-pink-600 hover:bg-pink-700 text-white flex items-center gap-1.5"><Printer className="w-4 h-4" /> Enregistrer et imprimer</button>
