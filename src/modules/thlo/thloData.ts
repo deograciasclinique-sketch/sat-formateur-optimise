@@ -273,8 +273,12 @@ export function compterSemaine(
     const aDengue = demandeTdrDengue(e.analyses || e.examen) || !!e.tdrDengue;
     if (!aPalu && !aDengue) return;
     if (aPalu) {
-      const date = e.tdrPalu ? (e.dateResultat || e.dateDemande) : e.dateDemande;
-      if (dansSemaine(date)) palu.push({ type: "palu", patient: e.patient, date, resultat: e.tdrPalu || "En attente", examenId: e.id });
+      // Anciens résultats saisis en texte libre (avant les boutons Positif / Négatif).
+      const t = (e.resultat || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const texteRes: "Positif" | "Négatif" | undefined = !t.trim() ? undefined : /negati|\bneg\b|absence/.test(t) ? "Négatif" : /positi|\bpos\b|falciparum|trophozo|\+/.test(t) ? "Positif" : undefined;
+      const res = e.tdrPalu || (!aDengue ? texteRes : undefined);
+      const date = res ? (e.dateResultat || e.dateDemande) : e.dateDemande;
+      if (dansSemaine(date)) palu.push({ type: "palu", patient: e.patient, date, resultat: res || "En attente", examenId: e.id });
     }
     if (aDengue) {
       const fait = dengueComplet(e.tdrDengue);

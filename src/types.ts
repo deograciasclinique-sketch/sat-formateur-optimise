@@ -953,3 +953,113 @@ export interface PlanSoins {
   creePar: string;
   createdAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Salle d'accouchement — Guide de soins du travail (LCG) OMS 2020
+// ---------------------------------------------------------------------------
+
+/** Une ligne de surveillance du Guide de soins du travail (LCG). */
+export interface ObservationLCG {
+  id: string;
+  /** Date + heure de l'observation (ISO). */
+  dateHeure: string;
+  // --- Soins de soutien ---
+  accompagnant?: "O" | "N";
+  soulagementDouleur?: "O" | "N";
+  hydratationOrale?: "O" | "N";
+  /** SP = décubitus dorsal (supine), MO = mobile / autre position. */
+  positionMere?: "SP" | "MO";
+  // --- Bébé ---
+  bcf?: number;
+  /** N = aucune, P = précoces, T = tardives, V = variables. */
+  decelerations?: "N" | "P" | "T" | "V";
+  /** I = intactes, C = clair, M+/M++/M+++ = méconial, S = sanglant. */
+  liquideAmniotique?: "I" | "C" | "M+" | "M++" | "M+++" | "S";
+  /** OA = occipito-antérieure, OP = occipito-postérieure, OT = occipito-transverse. */
+  positionFoetale?: "OA" | "OP" | "OT";
+  bosse?: "0" | "+" | "++" | "+++";
+  modelage?: "0" | "+" | "++" | "+++";
+  // --- Mère ---
+  pouls?: number;
+  taSys?: number;
+  taDia?: number;
+  temperature?: number;
+  urineProteines?: "0" | "+" | "++" | "+++";
+  urineAcetone?: "0" | "+" | "++" | "+++";
+  // --- Évolution du travail ---
+  contractionsPar10min?: number;
+  dureeContractions?: number;
+  /** Dilatation du col (cm). */
+  col?: number;
+  /** Descente de la tête en cinquièmes palpables au-dessus du pubis (5 → 0). */
+  descente?: number;
+  // --- Médicaments ---
+  ocytocine?: string;
+  medicaments?: string;
+  liquidesIV?: string;
+  // --- Prise de décision partagée ---
+  evaluation?: string;
+  plan?: string;
+  agentNom?: string;
+  createdAt: string;
+}
+
+/** Surveillance du post-partum immédiat (toutes les 15 min pendant 2 h). */
+export interface SurveillancePostPartum {
+  id: string;
+  dateHeure: string;
+  pouls?: number;
+  taSys?: number;
+  taDia?: number;
+  temperature?: number;
+  globeSecurite?: boolean;
+  saignement?: "Normal" | "Abondant" | "Hémorragie";
+  notes?: string;
+  agentNom?: string;
+}
+
+export interface IssueAccouchement {
+  dateHeure: string;
+  mode: "Voie basse naturelle" | "Voie basse instrumentale" | "Césarienne";
+  sexeEnfant: "Masculin" | "Féminin";
+  poidsEnfant: number;
+  apgar1?: number;
+  apgar5?: number;
+  reanimation?: boolean;
+  /** Gestion active de la troisième période du travail. */
+  gatpa?: boolean;
+  delivranceComplete?: boolean;
+  perteSanguineMl?: number;
+  perinee?: "Intact" | "Déchirure 1er degré" | "Déchirure 2e degré" | "Déchirure 3e/4e degré" | "Épisiotomie";
+  etatMere?: string;
+  etatEnfant?: string;
+  notes?: string;
+}
+
+export interface Partogramme {
+  id: string;
+  patient: string;
+  contact?: string;
+  age?: number;
+  gestite?: number;
+  parite?: number;
+  ddr?: string;
+  saAdmission?: number;
+  /** Date + heure d'admission en salle d'accouchement (ISO). */
+  admission: string;
+  /** Début du travail (ISO). */
+  debutTravail?: string;
+  /** Rupture des membranes (ISO). */
+  ruptureMembranes?: string;
+  facteursRisque?: string;
+  statut: "En cours" | "Accouchée" | "Transférée / Référée" | "Césarienne";
+  observations: ObservationLCG[];
+  issue?: IssueAccouchement;
+  postPartum?: SurveillancePostPartum[];
+  motifTransfert?: string;
+  /** Lien vers l'entrée du registre d'accouchement créée automatiquement. */
+  accouchementId?: string;
+  sageFemmeId?: string;
+  createdAt: string;
+  updatedAt?: string;
+}

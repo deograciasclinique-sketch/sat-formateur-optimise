@@ -74,6 +74,8 @@ interface Props {
   /** Admission demandée depuis un autre écran (ex. patiente envoyée par le secrétariat). */
   admissionPrefill?: { patient: string; contact?: string; age?: number } | null;
   onAdmissionPrefillConsumed?: () => void;
+  /** Ouvre la déclaration de naissance de l'accouchement (registre de la maternité). */
+  onEtablirDeclaration?: (accouchementId: string) => void;
 }
 
 // --- Petits composants de formulaire -------------------------------------------------
@@ -217,6 +219,7 @@ export default function SalleAccouchement({
   currentUser,
   admissionPrefill,
   onAdmissionPrefillConsumed,
+  onEtablirDeclaration,
 }: Props) {
   const [maintenant, setMaintenant] = useState(new Date());
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -490,7 +493,11 @@ export default function SalleAccouchement({
       accouchementId: acc.id,
     }));
     setVueDetail("postpartum");
-    alert("Accouchement enregistré et inscrit au registre de la maternité. Démarrez la surveillance du post-partum (toutes les 15 min pendant 2 h).");
+    if (onEtablirDeclaration && confirm("Accouchement enregistré et inscrit au registre de la maternité. Démarrez la surveillance du post-partum (toutes les 15 min pendant 2 h).\n\nÉtablir maintenant la déclaration de naissance ?")) {
+      onEtablirDeclaration(acc.id);
+    } else if (!onEtablirDeclaration) {
+      alert("Accouchement enregistré et inscrit au registre de la maternité. Démarrez la surveillance du post-partum (toutes les 15 min pendant 2 h).");
+    }
   };
 
   const handleTransfert = () => {
@@ -929,6 +936,17 @@ export default function SalleAccouchement({
                 ))}
                 {selected.issue.notes && <div className="col-span-full text-stone-600 italic">{selected.issue.notes}</div>}
                 <div className="col-span-full text-2xs text-success-700 font-semibold">✓ Inscrit au registre d'accouchement de la maternité.</div>
+                {onEtablirDeclaration && selected.accouchementId && (() => {
+                  const acc = accouchements.find((a) => a.id === selected.accouchementId);
+                  if (!acc) return null;
+                  return (
+                    <div className="col-span-full">
+                      <button type="button" onClick={() => onEtablirDeclaration(acc.id)} className="px-3 py-2 rounded-lg text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white">
+                        {acc.declarationNaissance ? `Déclaration de naissance ${acc.declarationNaissance.numero} — voir / imprimer` : "Établir la déclaration de naissance"}
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             ) : selected.statut === "En cours" ? (
               <div className="space-y-3">

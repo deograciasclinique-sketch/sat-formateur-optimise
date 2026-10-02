@@ -4,7 +4,9 @@
  */
 
 import React, { useState } from "react";
-import { ConsultationPrenatale, Accouchement, Staff, ExamenLabo, EchographieCPN, Consultation } from "../types";
+import { ConsultationPrenatale, Accouchement, Staff, ExamenLabo, EchographieCPN, Consultation, Partogramme } from "../types";
+import SalleAccouchement from "./SalleAccouchement";
+import { alertesEnCours, taElevee } from "../lib/lcg";
 import { generateUid, getTodayStr } from "../data";
 import DeclarationNaissanceModal, { imprimerDeclaration } from "./DeclarationNaissance";
 import { Plus, Trash2, Calendar, Clipboard, Heart, HelpCircle, CheckCircle, FlaskConical, Upload, Image, Download, Eye, X, AlertTriangle, FolderOpen, UserPlus } from "lucide-react";
@@ -23,6 +25,9 @@ interface TabMaterniteProps {
   // maternité, en attente d'être prises en charge par la sage-femme.
   consultations?: Consultation[];
   onUpdateConsultations?: (consults: Consultation[]) => void;
+  // Salle d'accouchement : partogrammes (Guide de soins du travail OMS 2020)
+  partogrammes?: Partogramme[];
+  onUpdatePartogrammes?: (p: Partogramme[]) => void;
 }
 
 export default function TabMaternite({
@@ -36,7 +41,12 @@ export default function TabMaternite({
   currentUser,
   consultations = [],
   onUpdateConsultations,
+  partogrammes = [],
+  onUpdatePartogrammes,
 }: TabMaterniteProps) {
+  const [vue, setVue] = useState<"cpn" | "salle">("cpn");
+  const [admissionPrefill, setAdmissionPrefill] = useState<{ patient: string; contact?: string; age?: number } | null>(null);
+
   // --- Identification & terme ---
   const [cpnPatient, setCpnPatient] = useState("");
   const [cpnContact, setCpnContact] = useState("");
@@ -168,6 +178,32 @@ export default function TabMaternite({
       alert(`Examen prescrit (${cpnPrescriptionAnalyse}) et envoyé directement au laboratoire !`);
       setCpnPrescriptionAnalyse("");
     }
+  };
+
+  // Alertes automatiques de la CPN en cours de saisie
+  const calculerAlertesCpn = (): string[] => {
+    const a: string[] = [];
+    if (taElevee(cpnTa)) a.push(`TA ${cpnTa} : hypertension (≥ 140/90) — rechercher une pré-éclampsie (protéinurie, céphalées, troubles visuels).`);
+    if (cpnAlbuminurie === "Positive") a.push("Albuminurie positive.");
+    const bcf = parseFloat(cpnBcfFrequence);
+    if (!isNaN(bcf) && (bcf < 110 || bcf >= 160)) a.push(`BCF ${bcf}/min anormaux (normal 110–159).`);
+    if (cpnBcf === "Absents") a.push("BCF absents.");
+    const hb = parseFloat(cpnHemoglobine);
+    if (!isNaN(hb) && hb < 11) a.push(`Hémoglobine ${hb} g/dL : anémie${hb < 7 ? " sévère" : ""}.`);
+    const hu = parseFloat(cpnHauteurUterine);
+    if (!isNaN(hu) && cpnDdr) {
+      const sa = getAmenorrhoeaWeeks(cpnDdr);
+      if (sa >= 20 && sa <= 41) {
+        const attendue = sa - 4;
+        if (Math.abs(hu - attendue) > 3)
+          a.push(`HU ${hu} cm ${hu > attendue ? "supérieure" : "inférieure"} au terme (≈ ${attendue} cm attendus à ${sa} SA) — vérifier le terme, rechercher ${hu > attendue ? "grossesse multiple / hydramnios / macrosomie" : "retard de croissance / oligoamnios"}.`);
+      }
+      if (sa >= 36 && cpnPresentation && cpnPresentation !== "Céphalique" && cpnPresentation !== "Indéterminée")
+        a.push(`Présentation ${cpnPresentation.toLowerCase()} à ${sa} SA — prévoir le lieu d'accouchement.`);
+    }
+    if (cpnSerologieVIH === "Positif") a.push("VIH positif — PTME.");
+    if (cpnSerologieSyphilis === "Positif") a.push("Syphilis positive — traiter la femme et le partenaire.");
+    return a;
   };
 
   const auMoinsUnSigneDanger = dangerSaignement || dangerCephalees || dangerVisionFloue || dangerDouleurEpigastrique || dangerFievre || dangerDiminutionMAF;
@@ -345,7 +381,7 @@ export default function TabMaternite({
   const cpnsThisMonth = cpns.filter((c) => c.dateVisite.slice(0, 7) === curMonth).length;
   const birthsThisMonth = accouchements.filter((a) => a.date.slice(0, 7) === curMonth).length;
   const cesariennesCount = accouchements.filter((a) => a.mode === "Césarienne").length;
-  const deliveryAnemiaRisk = cpns.filter((c) => c.albuminurie === "Positive" || (c.ta && parseFloat(c.ta.split("/")[0]) >= 140)).length;
+  const deliveryAnemiaRisk = cpns.filter((c) => c.albuminurie === "Positive" || taElevee(c.ta)).length;
   const dangerCasesCount = cpns.filter(
     (c) => c.dangerSaignement || c.dangerCephalees || c.dangerVisionFloue || c.dangerDouleurEpigastrique || c.dangerFievre || c.dangerDiminutionMAF
   ).length;
@@ -395,19 +431,69 @@ export default function TabMaternite({
                     {c.contact || "Sans contact"} · {c.age} ans
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => handlePrendreEnCharge(c)}
-                  className="px-4 py-2 text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-all cursor-pointer"
-                >
-                  Prendre en charge (préremplir la CPN)
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { handlePrendreEnCharge(c); setVue("cpn"); }}
+                    className="px-4 py-2 text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-all cursor-pointer"
+                  >
+                    Prendre en charge (préremplir la CPN)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { handlePrendreEnCharge(c); setCpnPatient(""); setCpnContact(""); setAdmissionPrefill({ patient: c.patient, contact: c.contact, age: c.age }); setVue("salle"); }}
+                    className="px-4 py-2 text-xs font-bold bg-white border border-pink-300 text-pink-700 hover:bg-pink-50 rounded-lg transition-all cursor-pointer"
+                  >
+                    En travail → Salle d'accouchement
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         </div>
       )}
 
+      {/* Sous-onglets de la maternité */}
+      <div className="flex flex-wrap gap-2">
+        {([
+          ["cpn", "Suivi prénatal (CPN) & registres"],
+          ["salle", "Salle d'accouchement — Partogramme LCG"],
+        ] as const).map(([id, label]) => {
+          const nbAlertes = id === "salle" ? partogrammes.filter((p) => alertesEnCours(p).length > 0).length : 0;
+          const nbEnCours = id === "salle" ? partogrammes.filter((p) => p.statut === "En cours").length : 0;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setVue(id)}
+              className={`px-4 py-2 rounded-xl text-sm font-bold border transition-all flex items-center gap-2 ${
+                vue === id ? "bg-pink-600 border-pink-600 text-white" : "bg-white border-stone-200 text-stone-700 hover:bg-stone-50"
+              }`}
+            >
+              {label}
+              {nbEnCours > 0 && <span className={`text-2xs px-1.5 py-0.5 rounded ${vue === id ? "bg-white/25" : "bg-pink-100 text-pink-800"}`}>{nbEnCours} en travail</span>}
+              {nbAlertes > 0 && <span className="text-2xs px-1.5 py-0.5 rounded bg-danger-600 text-white">⚠ {nbAlertes}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {vue === "salle" && (
+        <SalleAccouchement
+          partogrammes={partogrammes}
+          onUpdatePartogrammes={(p) => onUpdatePartogrammes?.(p)}
+          cpns={cpns}
+          accouchements={accouchements}
+          onUpdateAccouchements={onUpdateAccouchements}
+          staff={staff}
+          currentUser={currentUser}
+          admissionPrefill={admissionPrefill}
+          onAdmissionPrefillConsumed={() => setAdmissionPrefill(null)}
+          onEtablirDeclaration={(id) => setDeclarationAccId(id)}
+        />
+      )}
+
+      {vue === "cpn" && (<>
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-xs border-t-4 border-t-primary-600">
@@ -740,6 +826,17 @@ export default function TabMaternite({
               )}
             </div>
 
+            {(() => { const alertesCpn = calculerAlertesCpn(); return alertesCpn.length > 0 && (
+              <div className="p-3 rounded-xl border bg-warning-50 border-warning-300 space-y-1">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-warning-800 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" /> Alertes automatiques ({alertesCpn.length})
+                </h4>
+                <ul className="text-xs text-warning-900 list-disc pl-5 space-y-0.5">
+                  {alertesCpn.map((t, i) => <li key={i}>{t}</li>)}
+                </ul>
+              </div>
+            ); })()}
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Prochain RDV CPN</label>
@@ -1035,6 +1132,8 @@ export default function TabMaternite({
         )}
       </div>
 
+      </>)}
+
       {declarationAcc && (
         <DeclarationNaissanceModal
           accouchement={declarationAcc}
@@ -1075,6 +1174,30 @@ export default function TabMaternite({
                     </div>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-stone-500">Salle d'accouchement</h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const derniere = dossierPatienteVisites[dossierPatienteVisites.length - 1];
+                      setAdmissionPrefill({ patient: selectedPatientDossier, contact: derniere?.contact });
+                      setSelectedPatientDossier(null);
+                      setVue("salle");
+                    }}
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg bg-pink-600 hover:bg-pink-700 text-white"
+                  >
+                    Admettre en salle d'accouchement
+                  </button>
+                </div>
+                {partogrammes.filter((p) => p.patient.toLowerCase().trim() === selectedPatientDossier.toLowerCase().trim()).map((p) => (
+                  <div key={p.id} className="border border-pink-200 bg-pink-50/50 rounded-xl p-2 text-xs mb-1">
+                    <b>{p.statut}</b> — admise le {new Date(p.admission).toLocaleString("fr-FR")} · {p.observations.length} observation(s)
+                    {p.issue ? ` · ${p.issue.mode}, ${p.issue.poidsEnfant} g` : ""}
+                  </div>
+                ))}
               </div>
 
               <div>

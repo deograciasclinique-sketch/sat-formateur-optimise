@@ -37,6 +37,7 @@ import {
   ConsultationPrenatale,
   DocumentArchive,
   SoinRealise,
+  Partogramme,
   PlanSoins,
 } from "./types";
 import {
@@ -140,7 +141,7 @@ const getTabLabel = (id: string): string => {
     urgences: "Triage & Urgences",
     hospit: "Hospitalisations",
     pediatrie: "Surveillance Pédiatrique",
-    maternite: "Suivi Maternité & CPN",
+    maternite: "Maternité, CPN & Salle d'accouchement",
     vaccination: "Vaccination & PEV",
     labo: "Laboratoire d'analyses",
     pharma: "Pharmacie & Stocks",
@@ -150,7 +151,7 @@ const getTabLabel = (id: string): string => {
     factures: "Factures & Journal",
     assurances: "Assurances & Tiers-Payant",
     rh: "Ressources Humaines",
-    thlo: "THLO — Surveillance hebdo",
+    thlo: "TLOH — Surveillance hebdo",
     indicateurs: "Indicateurs Épidémio",
     qualite: "Démarche Qualité",
     documents: "Coffre-fort Documents",
@@ -365,6 +366,8 @@ export default function App() {
   // Salle des soins : registre des soins réalisés (Salle des Infirmiers)
   const [soins, setSoins] = useState<SoinRealise[]>([]);
   const [plansSoins, setPlansSoins] = useState<PlanSoins[]>([]);
+  // Salle d'accouchement : partogrammes (Guide de soins du travail OMS 2020)
+  const [partogrammes, setPartogrammes] = useState<Partogramme[]>([]);
   const [thloConfig, setThloConfig] = useState<ConfigTHLO>(CONFIG_THLO_DEFAUT);
 
   // --- Synchronisation temps réel multi-appareils (Firestore) ---
@@ -403,6 +406,7 @@ export default function App() {
     dg_thlo_config: setThloConfig,
     dg_soins: setSoins,
     dg_plans_soins: setPlansSoins,
+    dg_partogrammes: setPartogrammes,
   });
   // Garde en mémoire la dernière valeur confirmée comme envoyée au cloud pour chaque clé,
   // afin de ne renvoyer que ce qui a réellement changé (et d'éviter les boucles avec les
@@ -1066,6 +1070,7 @@ export default function App() {
     setThloConfig(normaliserConfig(safeGet<Partial<ConfigTHLO>>("dg_thlo_config", {})));
     setSoins(safeGet<SoinRealise[]>("dg_soins", []));
     setPlansSoins(safeGet<PlanSoins[]>("dg_plans_soins", []));
+    setPartogrammes(safeGet<Partogramme[]>("dg_partogrammes", []));
     setIsLoaded(true);
   }, []);
 
@@ -1207,14 +1212,15 @@ export default function App() {
       dg_thlo_rapports: thloRapports,
       dg_thlo_config: thloConfig,
       dg_soins: soins,
-      dg_plans_soins: plansSoins
+      dg_plans_soins: plansSoins,
+      dg_partogrammes: partogrammes
     };
   }, [
     staff, medicaments, mouvements, tasks, consultations, pediatrie,
     materniteCpns, materniteAccouchements, rdv, hospitalisations, ficheReferences,
     hospEvolutions, factures, depenses, incidents, actions, audits,
     conges, absences, rhFiches, prisesEnCharge, urgences, vaccinations,
-    laboExamens, documents, actesTarifaires, thloRapports, thloConfig, soins, plansSoins
+    laboExamens, documents, actesTarifaires, thloRapports, thloConfig, soins, plansSoins, partogrammes
   ]);
 
   // Periodic auto-save effect
@@ -1454,6 +1460,11 @@ export default function App() {
     safeSet("dg_plans_soins", p);
   };
 
+  const handleUpdatePartogrammes = (p: Partogramme[]) => {
+    setPartogrammes(p);
+    safeSet("dg_partogrammes", p);
+  };
+
   const handleUpdateSoins = (newSoins: SoinRealise[]) => {
     setSoins(newSoins);
     safeSet("dg_soins", newSoins);
@@ -1483,7 +1494,7 @@ export default function App() {
           { id: "urgences", label: "Triage & Urgences", icon: ShieldAlert, alertCount: urgences.filter((u) => u.statut !== "Sorti(e) ou Libéré(e)").length },
           { id: "hospit", label: "Hospitalisations", icon: HeartPulse, alertCount: hospitalisations.filter((h) => h.statut === "En cours").length },
           { id: "pediatrie", label: "Surveillance Pédiatrique", icon: Activity },
-          { id: "maternite", label: "Suivi Maternité & CPN", icon: Sparkles },
+          { id: "maternite", label: "Maternité, CPN & Accouchement", icon: Sparkles, alertCount: partogrammes.filter((p) => p.statut === "En cours").length },
           { id: "vaccination", label: "Vaccination & PEV", icon: ShieldCheck },
           { id: "planif_familiale", label: "Planification Familiale", icon: Heart }
         ]
@@ -1528,6 +1539,7 @@ export default function App() {
   }, [
     allowedTabs,
     plansSoins,
+    partogrammes,
     soins,
     urgences,
     hospitalisations,
@@ -2403,6 +2415,8 @@ export default function App() {
               currentUser={currentUser}
               consultations={consultations}
               onUpdateConsultations={handleUpdateConsultations}
+              partogrammes={partogrammes}
+              onUpdatePartogrammes={handleUpdatePartogrammes}
             />
           )}
 
