@@ -23,7 +23,7 @@ const EN_TETE = {
   gauche: ["MINISTERE DE LA SANTE", "DIRECTION REGIONALE DE LA SANTE", "DISTRICT SANITAIRE DE DO", "« DEO - GRACIAS »", "Secteur 10 Yeguere Rue de l'habitat porte n°363 /76404327"],
   pays: "BURKINA FASO",
   devise: "Unité-Progrès-Justice",
-  etablissement: "CABINET DE SOINS DEO GRACIAS",
+  etablissement: "CSI DEO GRACIAS",
   ville: "Bobo",
 };
 
@@ -422,11 +422,29 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
               <div><label className={lbl}>à *</label><input className={input} placeholder="Ex: Koumassi/CIV" value={d.mere.lieuNaissance || ""} onChange={(e) => setP("mere", { lieuNaissance: e.target.value })} /></div>
             </div>
 
-            <div className="text-xs text-stone-700 bg-pink-50 rounded-lg p-2 space-y-0.5">
-              <div>Qui a accouché le <b>{dateFr(a.date)} à {heureEnToutesLettres(a.heure)}</b></div>
-              <div>D'un enfant de sexe <b>{fille ? "FEMININ" : "MASCULIN"}</b> <span className="text-stone-500">(repris de l'enregistrement de la naissance)</span></div>
-              <div>{fille ? "Née " : "Né "}<b>{fille ? "vivante" : "vivant"}</b></div>
-            </div>
+            {/* Aperçu de la déclaration telle qu'elle sera imprimée / envoyée */}
+            {(() => {
+              const c = contenu(a, { ...d, numero: numeroAuto }, staff);
+              return (
+                <div className="rounded-lg border border-stone-300 bg-white p-4 text-[13px] text-black leading-relaxed shadow-inner">
+                  <div className="text-2xs font-bold uppercase text-pink-700 mb-2">Aperçu de la déclaration</div>
+                  <div className="flex justify-between gap-4 text-xs">
+                    <div>{EN_TETE.gauche.map((l) => <div key={l}>{l}</div>)}</div>
+                    <div className="text-center">
+                      <div>{EN_TETE.pays}</div>
+                      <div>{EN_TETE.devise}</div>
+                      <div className="mt-6">{c.lieu}, le {dateFr(d.dateEtablissement)}</div>
+                    </div>
+                  </div>
+                  <div className="text-center font-bold underline my-4">DECLARATION DE NAISSANCE N° {numeroAuto}</div>
+                  {c.lignes.map((l, i) => (
+                    <div key={i} className="whitespace-pre-wrap">
+                      {l.map(([t, st], j) => (st === "bi" ? <b key={j}><i>{t}</i></b> : <span key={j}>{t}</span>))}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
 
           {/* --- Le reste : enregistré avec la naissance, non imprimé --- */}
