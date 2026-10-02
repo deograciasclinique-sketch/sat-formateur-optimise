@@ -350,6 +350,48 @@ export interface Accouchement {
   sageFemmeId?: string;
   agent?: string;
   createdAt: string;
+  // Déclaration de naissance établie par la salle d'accouchement, remise
+  // aux parents pour l'état civil (voir src/components/DeclarationNaissance.tsx).
+  declarationNaissance?: DeclarationNaissance;
+}
+
+export interface PersonneDeclaration {
+  nom: string;
+  prenoms: string;
+  dateNaissance?: string;
+  age?: string;
+  profession?: string;
+  domicile?: string;
+  nationalite?: string;
+  pieceIdentite?: string; // type et numéro de la pièce (CNIB, passeport…)
+  contact?: string;
+}
+
+export interface DeclarationNaissance {
+  numero: string;            // "DN-2026-0001"
+  // Enfant
+  nomEnfant: string;
+  prenomsEnfant: string;
+  taille?: number;           // cm
+  perimetreCranien?: number; // cm
+  naissance: "Unique" | "Gémellaire" | "Multiple";
+  rang?: string;             // "1er jumeau", ...
+  vivant: boolean;           // false = mort-né
+  // Parents
+  mere: PersonneDeclaration;
+  pere: PersonneDeclaration;
+  pereNonDeclare?: boolean;
+  // Déclarant
+  declarantNom: string;
+  declarantLien: string;
+  declarantContact?: string;
+  // Suivi
+  statut: "Établie" | "Remise aux parents" | "Transmise à l'état civil";
+  dateEtablissement: string;
+  dateRemise?: string;
+  dateTransmission?: string;
+  etabliePar?: string;
+  observations?: string;
 }
 
 export interface Assureur {

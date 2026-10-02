@@ -6,6 +6,7 @@
 import React, { useState } from "react";
 import { ConsultationPrenatale, Accouchement, Staff, ExamenLabo, EchographieCPN, Consultation } from "../types";
 import { generateUid, getTodayStr } from "../data";
+import DeclarationNaissanceModal, { imprimerDeclaration } from "./DeclarationNaissance";
 import { Plus, Trash2, Calendar, Clipboard, Heart, HelpCircle, CheckCircle, FlaskConical, Upload, Image, Download, Eye, X, AlertTriangle, FolderOpen, UserPlus } from "lucide-react";
 
 interface TabMaterniteProps {
@@ -107,6 +108,9 @@ export default function TabMaternite({
   const [accEtatEnfant, setAccEtatEnfant] = useState("Vivant et bien portant");
   const [accComplications, setAccComplications] = useState("");
   const [accSageFemme, setAccSageFemme] = useState("");
+  // Accouchement dont on établit / consulte la déclaration de naissance.
+  const [declarationAccId, setDeclarationAccId] = useState<string | null>(null);
+  const declarationAcc = accouchements.find((a) => a.id === declarationAccId) || null;
 
   const handleEchoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -289,7 +293,10 @@ export default function TabMaternite({
     setAccPatient("");
     setAccPoidsEnfant("");
     setAccComplications("");
-    alert("Nouvel accouchement consigné au registre de la maternité.");
+    // Enchaîne directement sur la déclaration de naissance de l'enfant.
+    if (confirm("Naissance enregistrée au registre de la maternité.\n\nÉtablir maintenant la déclaration de naissance ?")) {
+      setDeclarationAccId(newAcc.id);
+    }
   };
 
   const handleDeleteCpn = (id: string) => {
@@ -969,6 +976,7 @@ export default function TabMaternite({
                   <th className="p-3">État de l'enfant</th>
                   <th className="p-3">Sage-femme / Assistant</th>
                   <th className="p-3">Complications signalées</th>
+                  <th className="p-3 text-center">Déclaration de naissance</th>
                   <th className="p-3 text-center">Effacer</th>
                 </tr>
               </thead>
@@ -996,6 +1004,23 @@ export default function TabMaternite({
                       <td className={`p-3 text-stone-600 font-medium italic ${a.complications ? "text-danger-600 font-bold" : "text-stone-500 dark:text-stone-400"}`}>
                         {a.complications || "Aucune"}
                       </td>
+                      <td className="p-3 text-center whitespace-nowrap">
+                        {a.declarationNaissance ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <span className={`px-2 py-0.5 rounded-lg text-xs font-bold ${a.declarationNaissance.statut === "Transmise à l'état civil" ? "bg-success-100 text-success-800" : a.declarationNaissance.statut === "Remise aux parents" ? "bg-blue-100 text-blue-800" : "bg-amber-100 text-amber-800"}`}>
+                              {a.declarationNaissance.numero} · {a.declarationNaissance.statut}
+                            </span>
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => setDeclarationAccId(a.id)} className="text-xs font-semibold text-pink-700 hover:underline">Voir / modifier</button>
+                              <button type="button" onClick={() => imprimerDeclaration(a, a.declarationNaissance!, staff)} className="text-xs font-semibold text-stone-600 hover:underline">Imprimer</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => setDeclarationAccId(a.id)} className="px-2 py-1 rounded-lg text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white">
+                            Établir
+                          </button>
+                        )}
+                      </td>
                       <td className="p-3 text-center">
                         <button type="button" onClick={() => handleDeleteAcc(a.id)} className="text-stone-300 hover:text-danger-600 transition-all p-1">
                           <Trash2 className="w-4 h-4" />
@@ -1009,6 +1034,18 @@ export default function TabMaternite({
           </div>
         )}
       </div>
+
+      {declarationAcc && (
+        <DeclarationNaissanceModal
+          accouchement={declarationAcc}
+          accouchements={accouchements}
+          cpns={cpns}
+          staff={staff}
+          currentUser={currentUser}
+          onClose={() => setDeclarationAccId(null)}
+          onSave={(d) => onUpdateAccouchements(accouchements.map((x) => (x.id === declarationAcc.id ? { ...x, declarationNaissance: d } : x)))}
+        />
+      )}
 
       {/* Dossier Grossesse (par patiente) */}
       {selectedPatientDossier && (
