@@ -1,54 +1,77 @@
 /**
  * Déclaration de naissance — salle d'accouchement.
  *
- * Établie à partir d'un accouchement du registre : les informations de la
- * naissance (date, heure, sexe, poids, accoucheuse) sont reprises
- * automatiquement ; la sage-femme complète l'identité de l'enfant, des
- * parents et du déclarant, puis imprime la déclaration (exemplaire des
- * parents + souche du service) à remettre pour l'état civil.
+ * Le document imprimé reprend exactement le modèle du cabinet (en-tête
+ * Ministère / District sanitaire de Dô, N° = date de naissance, texte
+ * « Je soussigné… déclare avoir donné des soins à… »).
+ *
+ * Les autres informations de la naissance (identité de l'enfant, père,
+ * déclarant, mensurations…) sont enregistrées avec la naissance dans le
+ * registre, mais ne sont pas imprimées sur la déclaration.
  */
 
 import React, { useMemo, useState } from "react";
-import { X, Printer, Save, FileText } from "lucide-react";
+import { X, Printer, Save, FileText, ChevronDown, ChevronUp } from "lucide-react";
 import { Accouchement, ConsultationPrenatale, DeclarationNaissance, PersonneDeclaration, Staff } from "../types";
 import { getTodayStr } from "../data";
 
+// En-tête du modèle officiel du cabinet.
+const EN_TETE = {
+  gauche: ["MINISTERE DE LA SANTE", "DIRECTION REGIONALE DE LA SANTE", "DISTRICT SANITAIRE DE DO", "« DEO - GRACIAS »", "Secteur 10 Yeguere Rue de l'habitat porte n°363 / 76404327"],
+  pays: "BURKINA FASO",
+  devise: "Unité-Progrès-Justice",
+  etablissement: "CABINET DE SOINS DEO GRACIAS",
+  ville: "Bobo",
+};
+
 const personneVide = (): PersonneDeclaration => ({ nom: "", prenoms: "", nationalite: "Burkinabè" });
 
-/** Numéro suivant pour l'année : DN-2026-0001, DN-2026-0002… */
-export function prochainNumeroDeclaration(accouchements: Accouchement[], annee: string): string {
-  const max = accouchements.reduce((m, a) => {
-    const n = a.declarationNaissance?.numero;
-    const r = n && n.startsWith(`DN-${annee}-`) ? parseInt(n.split("-")[2], 10) || 0 : 0;
-    return Math.max(m, r);
-  }, 0);
-  return `DN-${annee}-${String(max + 1).padStart(4, "0")}`;
+/** N° = date de naissance JJMMAAAA (ex. 07032026) ; -2, -3… si plusieurs naissances le même jour. */
+export function prochainNumeroDeclaration(accouchements: Accouchement[], dateIso: string, exclureId?: string): string {
+  const [y, m, d] = (dateIso || getTodayStr()).split("-");
+  const base = `${d}${m}${y}`;
+  const pris = new Set(accouchements.filter((a) => a.id !== exclureId).map((a) => a.declarationNaissance?.numero).filter(Boolean));
+  if (!pris.has(base)) return base;
+  let i = 2;
+  while (pris.has(`${base}-${i}`)) i++;
+  return `${base}-${i}`;
 }
 
-/** Sépare "Ouédraogo Awa Marie" en nom / prénoms (premier mot = nom). */
-const decouperNom = (complet: string): { nom: string; prenoms: string } => {
-  const t = (complet || "").replace(/^(madame|mme|mlle|mademoiselle)\.?\s+/i, "").trim().split(/\s+/);
-  return { nom: t[0] || "", prenoms: t.slice(1).join(" ") };
-};
+const UNITES = ["zéro", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "onze", "douze", "treize", "quatorze", "quinze", "seize", "dix-sept", "dix-huit", "dix-neuf"];
+const DIZAINES: Record<number, string> = { 2: "vingt", 3: "trente", 4: "quarante", 5: "cinquante" };
+/** Nombre en lettres (0 à 59). */
+export function enLettres(n: number, feminin = false): string {
+  if (n === 1) return feminin ? "une" : "un";
+  if (n < 20) return UNITES[n];
+  const dz = Math.floor(n / 10), u = n % 10;
+  if (u === 0) return DIZAINES[dz];
+  if (u === 1) return `${DIZAINES[dz]}-et-${feminin ? "une" : "un"}`;
+  return `${DIZAINES[dz]}-${UNITES[u]}`;
+}
+
+/** "07:35" → "07h (sept) heures 35 (trente-cinq) minutes" */
+export function heureEnToutesLettres(hhmm?: string): string {
+  const m = /^(\d{1,2}):(\d{2})/.exec(hhmm || "");
+  if (!m) return hhmm || "";
+  const h = parseInt(m[1], 10), mn = parseInt(m[2], 10);
+  const hh = String(h).padStart(2, "0"), mm = String(mn).padStart(2, "0");
+  return `${hh}h (${enLettres(h, true)}) heure${h > 1 ? "s" : ""}${mn ? ` ${mm} (${enLettres(mn, true)}) minute${mn > 1 ? "s" : ""}` : ""}`;
+}
 
 const esc = (s?: string | number) =>
   String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-const dateLongue = (iso?: string) =>
-  iso ? new Date(iso + "T00:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : "";
+const dateFr = (iso?: string) => {
+  if (!iso) return "";
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  return `${d}/${m}/${y}`;
+};
 
-function profilClinique() {
-  try {
-    const p = JSON.parse(localStorage.getItem("dg_clinic_profile") || "null");
-    if (p && p.name) return p;
-  } catch { /* stockage indisponible */ }
-  return {
-    name: "Cabinet Privé de Soins DEO-GRACIAS",
-    slogan: "Nous vous soignons, Dieu vous guérit",
-    address: "Yéguéré, 363 Rue de l'Habitat",
-    phone: "44 92 01 62 / 76 40 43 27",
-  };
-}
+/** Sépare "Bah Djènèba" en nom / prénoms (premier mot = nom). */
+const decouperNom = (complet: string): { nom: string; prenoms: string } => {
+  const t = (complet || "").replace(/^(madame|mme|mlle|mademoiselle)\.?\s+/i, "").trim().split(/\s+/);
+  return { nom: t[0] || "", prenoms: t.slice(1).join(" ") };
+};
 
 export function imprimerDeclaration(a: Accouchement, d: DeclarationNaissance, staff: Staff[]) {
   const w = window.open("", "_blank");
@@ -56,86 +79,46 @@ export function imprimerDeclaration(a: Accouchement, d: DeclarationNaissance, st
     alert("La fenêtre d'impression est bloquée. Veuillez autoriser les pop-ups pour cette application.");
     return;
   }
-  const p = profilClinique();
-  const accoucheuse = staff.find((s) => s.id === a.sageFemmeId);
-  const ligne = (label: string, val?: string | number) =>
-    `<tr><td class="l">${esc(label)}</td><td class="v">${val !== undefined && val !== "" ? esc(val) : "&nbsp;"}</td></tr>`;
-  const personne = (titre: string, x: PersonneDeclaration) => `
-    <h3>${titre}</h3>
-    <table>
-      ${ligne("Nom", x.nom)}${ligne("Prénom(s)", x.prenoms)}
-      ${ligne("Date de naissance / âge", [x.dateNaissance ? new Date(x.dateNaissance + "T00:00:00").toLocaleDateString("fr-FR") : "", x.age ? `${x.age} ans` : ""].filter(Boolean).join(" — "))}
-      ${ligne("Profession", x.profession)}${ligne("Domicile", x.domicile)}${ligne("Nationalité", x.nationalite)}
-      ${ligne("Pièce d'identité", x.pieceIdentite)}${ligne("Contact", x.contact)}
-    </table>`;
-  const volet = (exemplaire: string) => `
-    <div class="page">
-      <div class="entete">
-        ${p.logoUrl ? `<img src="${esc(p.logoUrl)}" class="logo" />` : ""}
-        <div class="id">
-          <div class="pays">BURKINA FASO</div>
-          <div class="fs">${esc(p.name)}</div>
-          ${p.slogan ? `<div class="slogan">${esc(p.slogan)}</div>` : ""}
-          <div class="adr">${esc(p.address || "")}${p.phone ? ` — Tél. ${esc(p.phone)}` : ""}</div>
-        </div>
-        <div class="num">N° ${esc(d.numero)}<br/><span>${esc(exemplaire)}</span></div>
-      </div>
-      <h1>DÉCLARATION DE NAISSANCE</h1>
-      <p class="intro">Je soussigné(e), <b>${esc(accoucheuse?.nom || d.etabliePar || "……………………")}</b>${accoucheuse?.poste ? `, ${esc(accoucheuse.poste)}` : ""}, certifie que
-        ${a.sexeEnfant === "Féminin"
-          ? (d.vivant ? "l'enfant désignée ci-dessous est née vivante" : "l'enfant désignée ci-dessous est <b>née sans vie (mort-née)</b>")
-          : (d.vivant ? "l'enfant désigné ci-dessous est né vivant" : "l'enfant désigné ci-dessous est <b>né sans vie (mort-né)</b>")} au sein de notre établissement.</p>
-      <h3>L'enfant</h3>
-      <table>
-        ${ligne("Nom", d.nomEnfant)}${ligne("Prénom(s)", d.prenomsEnfant)}
-        ${ligne("Sexe", a.sexeEnfant)}
-        ${ligne("Date de naissance", dateLongue(a.date))}${ligne("Heure de naissance", a.heure)}
-        ${ligne("Lieu de naissance", `${p.name}${p.address ? `, ${p.address}` : ""}`)}
-        ${ligne("Naissance", d.naissance + (d.rang ? ` (${d.rang})` : ""))}
-        ${ligne("Mode d'accouchement", a.mode)}
-        ${ligne("Poids / taille / PC", [a.poidsEnfant ? `${a.poidsEnfant} g` : "", d.taille ? `${d.taille} cm` : "", d.perimetreCranien ? `PC ${d.perimetreCranien} cm` : ""].filter(Boolean).join(" — "))}
-      </table>
-      ${personne("La mère", d.mere)}
-      ${d.pereNonDeclare ? `<h3>Le père</h3><p class="na">Non déclaré</p>` : personne("Le père", d.pere)}
-      <h3>Le déclarant</h3>
-      <table>${ligne("Nom et prénom(s)", d.declarantNom)}${ligne("Lien avec l'enfant", d.declarantLien)}${ligne("Contact", d.declarantContact)}</table>
-      ${d.observations ? `<p class="obs"><b>Observations :</b> ${esc(d.observations)}</p>` : ""}
-      <p class="rappel">La présente déclaration est à présenter au centre d'état civil pour l'établissement de l'acte de naissance de l'enfant.</p>
-      <div class="sign">
-        <div>Fait le ${esc(new Date(d.dateEtablissement + "T00:00:00").toLocaleDateString("fr-FR"))}<br/><br/>Le déclarant</div>
-        <div>L'accoucheur / l'accoucheuse<br/><span>(cachet et signature)</span></div>
-      </div>
-    </div>`;
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Déclaration de naissance ${esc(d.numero)}</title>
+  const agent = staff.find((s) => s.id === (d.declarantAgentId || a.sageFemmeId));
+  const nomAgent = d.declarantAgentNom || agent?.nom || "……………………";
+  const fonction = (d.declarantAgentFonction || agent?.poste || "sage-femme").toLowerCase();
+  const fille = a.sexeEnfant === "Féminin";
+  const etat = d.vivant ? (fille ? "Née vivante" : "Né vivant") : fille ? "Mort-née" : "Mort-né";
+  const mere = `${(d.mere.nom || "").toUpperCase()} ${d.mere.prenoms || ""}`.trim();
+  const neeLe = [d.mere.dateNaissance ? dateFr(d.mere.dateNaissance) : "", d.mere.lieuNaissance ? `à ${d.mere.lieuNaissance.toUpperCase()}` : ""].filter(Boolean).join(" ");
+
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Déclaration de naissance N° ${esc(d.numero)}</title>
     <style>
-      body{font-family:Georgia,'Times New Roman',serif;color:#111;margin:0}
-      .page{padding:14mm 16mm;page-break-after:always}
-      .page:last-child{page-break-after:auto}
-      .entete{display:flex;gap:12px;align-items:flex-start;border-bottom:2px solid #111;padding-bottom:8px}
-      .logo{width:64px;height:64px;object-fit:contain}
-      .id{flex:1}
-      .pays{font-weight:bold;letter-spacing:2px;font-size:12px}
-      .fs{font-size:17px;font-weight:bold}
-      .slogan{font-style:italic;font-size:11px}
-      .adr{font-size:11px}
-      .num{text-align:right;font-weight:bold;font-size:13px;white-space:nowrap}
-      .num span{font-weight:normal;font-style:italic;font-size:11px}
-      h1{text-align:center;font-size:20px;letter-spacing:3px;margin:14px 0 8px}
-      h3{font-size:13px;text-transform:uppercase;margin:10px 0 3px;border-bottom:1px solid #999}
-      table{width:100%;border-collapse:collapse;font-size:12.5px}
-      td{padding:2px 4px;vertical-align:top}
-      td.l{width:34%;color:#444}
-      td.v{font-weight:bold;border-bottom:1px dotted #999}
-      .intro{font-size:12.5px;line-height:1.5}
-      .na{font-size:12.5px;font-style:italic}
-      .obs,.rappel{font-size:11.5px}
-      .rappel{font-style:italic;margin-top:10px}
-      .sign{display:flex;justify-content:space-between;margin-top:18px;font-size:12.5px}
-      .sign>div{width:45%;text-align:center;min-height:70px}
-      .sign span{font-size:11px;font-style:italic}
+      @page{size:A4;margin:18mm 18mm}
+      @media screen{body{padding:18mm;max-width:210mm}}
+      body{font-family:Calibri,Carlito,Arial,sans-serif;color:#000;font-size:15px;margin:0}
+      .entete{display:flex;justify-content:space-between;align-items:flex-start}
+      .g div{font-weight:bold;line-height:1.55}
+      .g div:last-child{font-weight:bold}
+      .d{text-align:center;font-weight:bold;line-height:1.55}
+      .d .lieu{margin-top:30px}
+      h1{text-align:center;font-size:16px;text-decoration:underline;margin:34px 0 22px;font-weight:bold}
+      p{margin:0;line-height:1.75}
+      .bas{display:flex;justify-content:flex-end;margin-top:36px}
+      .bas div{width:45%;text-align:center;min-height:120px}
     </style></head><body>
-    ${volet("Exemplaire des parents")}
-    ${volet("Souche — à conserver au service")}
+    <div class="entete">
+      <div class="g">${EN_TETE.gauche.map((l) => `<div>${esc(l)}</div>`).join("")}</div>
+      <div class="d">
+        <div>${esc(EN_TETE.pays)}</div>
+        <div>${esc(EN_TETE.devise)}</div>
+        <div class="lieu">${esc(d.lieuSignature || EN_TETE.ville)}, le ${esc(dateFr(d.dateEtablissement))}</div>
+      </div>
+    </div>
+    <h1>DECLARATION DE NAISSANCE N° ${esc(d.numero)}</h1>
+    <p>Je soussigné${d.declarantAgentCivilite === "M." ? "" : "e"} ${esc(d.declarantAgentCivilite || "Mme")} <b>${esc(nomAgent)}</b> ${esc(fonction)}</p>
+    <p>En service à la maternité du <b><i>${esc(EN_TETE.etablissement)}</i></b>, déclare avoir donné des soins à</p>
+    <p>Madame : <b>${esc(mere)}</b></p>
+    <p>Née le : ${esc(neeLe)}</p>
+    <p>Qui a accouché le <b><i>${esc(dateFr(a.date))} à ${esc(heureEnToutesLettres(a.heure))}</i></b></p>
+    <p>D'un enfant de sexe <b><i>${fille ? "FÉMININ" : "MASCULIN"}</i></b></p>
+    <p><b><i>${etat}</i></b></p>
+    <div class="bas"><div></div></div>
     <script>window.onload=function(){setTimeout(function(){window.print()},300)}</script>
     </body></html>`);
   w.document.close();
@@ -158,11 +141,18 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
     return cpns.filter((c) => n(c.patient) === n(a.patient)).sort((x, y) => y.dateVisite.localeCompare(x.dateVisite))[0];
   }, [cpns, a.patient]);
 
+  const agentsPossibles = staff.filter((s) => /sage|m[ée]decin|infirm|accouch/i.test(s.poste || ""));
+
   const [d, setD] = useState<DeclarationNaissance>(() => {
-    if (existante) return existante;
+    const agent = staff.find((s) => s.id === a.sageFemmeId) || (currentUser && /sage/i.test(currentUser.poste || "") ? currentUser : undefined);
     const m = decouperNom(a.patient);
-    return {
-      numero: prochainNumeroDeclaration(accouchements, (a.date || getTodayStr()).slice(0, 4)),
+    const base: DeclarationNaissance = {
+      numero: prochainNumeroDeclaration(accouchements, a.date, a.id),
+      declarantAgentId: agent?.id || "",
+      declarantAgentNom: agent?.nom || "",
+      declarantAgentCivilite: "Mme",
+      declarantAgentFonction: agent?.poste ? agent.poste.toLowerCase() : "sage-femme",
+      lieuSignature: EN_TETE.ville,
       nomEnfant: "",
       prenomsEnfant: "",
       naissance: "Unique",
@@ -172,27 +162,33 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
       declarantNom: "",
       declarantLien: "Père",
       statut: "Établie",
-      dateEtablissement: getTodayStr(),
+      dateEtablissement: a.date || getTodayStr(),
       etabliePar: currentUser?.nom || "",
     };
+    // Déclarations établies avec l'ancien modèle : on complète les nouveaux champs.
+    return existante ? { ...base, ...existante, mere: { ...base.mere, ...existante.mere }, pere: { ...base.pere, ...existante.pere } } : base;
   });
+  const [plus, setPlus] = useState(false);
 
   const set = (patch: Partial<DeclarationNaissance>) => setD((x) => ({ ...x, ...patch }));
   const setP = (qui: "mere" | "pere", patch: Partial<PersonneDeclaration>) => setD((x) => ({ ...x, [qui]: { ...x[qui], ...patch } }));
 
   const valider = (): DeclarationNaissance | null => {
     const manque: string[] = [];
-    if (!d.nomEnfant.trim()) manque.push("nom de l'enfant");
-    if (d.vivant && !d.prenomsEnfant.trim()) manque.push("prénom(s) de l'enfant");
+    if (!d.numero.trim()) manque.push("N° de la déclaration");
+    if (!(d.declarantAgentNom || "").trim()) manque.push("nom de la sage-femme / de l'accoucheur");
     if (!d.mere.nom.trim()) manque.push("nom de la mère");
-    if (!d.pereNonDeclare && !d.pere.nom.trim()) manque.push("nom du père (ou cochez « père non déclaré »)");
-    if (!d.declarantNom.trim()) manque.push("nom du déclarant");
+    if (!d.mere.dateNaissance) manque.push("date de naissance de la mère");
+    if (!(d.mere.lieuNaissance || "").trim()) manque.push("lieu de naissance de la mère");
     if (manque.length) {
       alert("Veuillez compléter : " + manque.join(", ") + ".");
       return null;
     }
-    const propre: DeclarationNaissance = JSON.parse(JSON.stringify(d)); // retire les undefined (synchro cloud)
-    return propre;
+    if (accouchements.some((x) => x.id !== a.id && x.declarationNaissance?.numero === d.numero.trim())) {
+      alert(`Le N° ${d.numero} est déjà utilisé par une autre déclaration.`);
+      return null;
+    }
+    return JSON.parse(JSON.stringify({ ...d, numero: d.numero.trim() })); // retire les undefined (synchro cloud)
   };
 
   const enregistrer = (imprimer: boolean) => {
@@ -205,7 +201,6 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
 
   const input = "w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none";
   const lbl = "text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1";
-  const accoucheuse = staff.find((s) => s.id === a.sageFemmeId);
 
   const blocPersonne = (qui: "mere" | "pere", titre: string) => {
     const x = d[qui];
@@ -213,10 +208,14 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
       <div className="space-y-2">
         <h4 className="text-sm font-bold text-pink-700">{titre}</h4>
         <div className="grid grid-cols-2 gap-2">
-          <div><label className={lbl}>Nom *</label><input className={input} value={x.nom} onChange={(e) => setP(qui, { nom: e.target.value })} /></div>
-          <div><label className={lbl}>Prénom(s)</label><input className={input} value={x.prenoms} onChange={(e) => setP(qui, { prenoms: e.target.value })} /></div>
-          <div><label className={lbl}>Date de naissance</label><input type="date" className={input} value={x.dateNaissance || ""} onChange={(e) => setP(qui, { dateNaissance: e.target.value })} /></div>
-          <div><label className={lbl}>ou âge (ans)</label><input type="number" min={10} className={input} value={x.age || ""} onChange={(e) => setP(qui, { age: e.target.value })} /></div>
+          {qui === "pere" && (
+            <>
+              <div><label className={lbl}>Nom</label><input className={input} value={x.nom} onChange={(e) => setP(qui, { nom: e.target.value })} /></div>
+              <div><label className={lbl}>Prénom(s)</label><input className={input} value={x.prenoms} onChange={(e) => setP(qui, { prenoms: e.target.value })} /></div>
+              <div><label className={lbl}>Date de naissance</label><input type="date" className={input} value={x.dateNaissance || ""} onChange={(e) => setP(qui, { dateNaissance: e.target.value })} /></div>
+              <div><label className={lbl}>Lieu de naissance</label><input className={input} value={x.lieuNaissance || ""} onChange={(e) => setP(qui, { lieuNaissance: e.target.value })} /></div>
+            </>
+          )}
           <div><label className={lbl}>Profession</label><input className={input} value={x.profession || ""} onChange={(e) => setP(qui, { profession: e.target.value })} /></div>
           <div><label className={lbl}>Nationalité</label><input className={input} value={x.nationalite || ""} onChange={(e) => setP(qui, { nationalite: e.target.value })} /></div>
           <div className="col-span-2"><label className={lbl}>Domicile (secteur / village, commune)</label><input className={input} value={x.domicile || ""} onChange={(e) => setP(qui, { domicile: e.target.value })} /></div>
@@ -227,80 +226,120 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
     );
   };
 
+  const fille = a.sexeEnfant === "Féminin";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 overflow-y-auto">
       <div className="w-full max-w-3xl rounded-2xl shadow-xl border border-stone-200 bg-white overflow-hidden max-h-[92vh] flex flex-col">
         <div className="p-4 border-b border-stone-100 flex justify-between items-center">
           <h3 className="font-serif font-bold text-base flex items-center gap-2">
             <FileText className="w-5 h-5 text-pink-600" />
-            Déclaration de naissance — N° {d.numero}
+            Déclaration de naissance — {a.patient}
           </h3>
           <button type="button" onClick={onClose} className="text-stone-400 hover:text-stone-700"><X className="w-5 h-5" /></button>
         </div>
 
         <div className="p-4 space-y-4 overflow-y-auto">
-          <div className="rounded-xl bg-pink-50 border border-pink-200 p-3 text-xs text-stone-700 grid grid-cols-2 sm:grid-cols-3 gap-1">
-            <div><b>Mère :</b> {a.patient}</div>
-            <div><b>Né(e) le :</b> {new Date(a.date + "T00:00:00").toLocaleDateString("fr-FR")} à {a.heure}</div>
-            <div><b>Sexe :</b> {a.sexeEnfant}</div>
-            <div><b>Poids :</b> {a.poidsEnfant} g</div>
-            <div><b>Mode :</b> {a.mode}</div>
-            <div><b>Accoucheuse :</b> {accoucheuse?.nom || "—"}</div>
-          </div>
-
-          <div className="space-y-2">
-            <h4 className="text-sm font-bold text-pink-700">L'enfant</h4>
+          {/* --- Ce qui figure sur la déclaration imprimée --- */}
+          <div className="rounded-xl border-2 border-pink-200 p-3 space-y-3">
+            <div className="text-xs font-bold uppercase text-pink-800">Imprimé sur la déclaration</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <div><label className={lbl}>Nom *</label><input className={input} value={d.nomEnfant} onChange={(e) => set({ nomEnfant: e.target.value })} /></div>
-              <div className="sm:col-span-2"><label className={lbl}>Prénom(s) {d.vivant ? "*" : ""}</label><input className={input} value={d.prenomsEnfant} onChange={(e) => set({ prenomsEnfant: e.target.value })} /></div>
-              <div><label className={lbl}>Taille (cm)</label><input type="number" className={input} value={d.taille ?? ""} onChange={(e) => set({ taille: e.target.value ? parseFloat(e.target.value) : undefined })} /></div>
-              <div><label className={lbl}>Périmètre crânien (cm)</label><input type="number" className={input} value={d.perimetreCranien ?? ""} onChange={(e) => set({ perimetreCranien: e.target.value ? parseFloat(e.target.value) : undefined })} /></div>
+              <div><label className={lbl}>N° de la déclaration *</label><input className={input} value={d.numero} onChange={(e) => set({ numero: e.target.value })} /></div>
+              <div><label className={lbl}>Fait à</label><input className={input} value={d.lieuSignature || ""} onChange={(e) => set({ lieuSignature: e.target.value })} /></div>
+              <div><label className={lbl}>Le</label><input type="date" className={input} value={d.dateEtablissement} onChange={(e) => set({ dateEtablissement: e.target.value })} /></div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div>
-                <label className={lbl}>Naissance</label>
-                <select className={input} value={d.naissance} onChange={(e) => set({ naissance: e.target.value as DeclarationNaissance["naissance"] })}>
-                  <option value="Unique">Unique</option>
-                  <option value="Gémellaire">Gémellaire (jumeaux)</option>
-                  <option value="Multiple">Multiple (triplés ou plus)</option>
+                <label className={lbl}>Civilité</label>
+                <select className={input} value={d.declarantAgentCivilite || "Mme"} onChange={(e) => set({ declarantAgentCivilite: e.target.value as DeclarationNaissance["declarantAgentCivilite"] })}>
+                  <option>Mme</option><option>Mlle</option><option>M.</option>
                 </select>
               </div>
-              {d.naissance !== "Unique" && (
-                <div><label className={lbl}>Rang</label><input className={input} placeholder="Ex: 1er jumeau" value={d.rang || ""} onChange={(e) => set({ rang: e.target.value })} /></div>
-              )}
-              <div className="flex items-end">
-                <label className="flex items-center gap-2 text-xs font-semibold text-stone-700 pb-2">
-                  <input type="checkbox" checked={!d.vivant} onChange={(e) => set({ vivant: !e.target.checked })} /> Enfant mort-né
+              <div className="sm:col-span-2">
+                <label className={lbl}>Je soussigné(e) — sage-femme / accoucheur *</label>
+                <select className={input} value={d.declarantAgentId || ""} onChange={(e) => {
+                  const s = staff.find((x) => x.id === e.target.value);
+                  set({ declarantAgentId: e.target.value, declarantAgentNom: s?.nom || d.declarantAgentNom, declarantAgentFonction: s?.poste ? s.poste.toLowerCase() : d.declarantAgentFonction });
+                }}>
+                  <option value="">— Choisir —</option>
+                  {agentsPossibles.map((s) => <option key={s.id} value={s.id}>{s.nom} ({s.poste})</option>)}
+                </select>
+                <input className={`${input} mt-1`} placeholder="ou saisir le nom (ex. ZOURE Abibata)" value={d.declarantAgentNom || ""} onChange={(e) => set({ declarantAgentNom: e.target.value })} />
+              </div>
+              <div><label className={lbl}>Fonction</label><input className={input} value={d.declarantAgentFonction || ""} onChange={(e) => set({ declarantAgentFonction: e.target.value })} /></div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div><label className={lbl}>Madame — nom *</label><input className={input} value={d.mere.nom} onChange={(e) => setP("mere", { nom: e.target.value })} /></div>
+              <div><label className={lbl}>Prénom(s)</label><input className={input} value={d.mere.prenoms} onChange={(e) => setP("mere", { prenoms: e.target.value })} /></div>
+              <div><label className={lbl}>Née le *</label><input type="date" className={input} value={d.mere.dateNaissance || ""} onChange={(e) => setP("mere", { dateNaissance: e.target.value })} /></div>
+              <div><label className={lbl}>à *</label><input className={input} placeholder="Ex: Koumassi/CIV" value={d.mere.lieuNaissance || ""} onChange={(e) => setP("mere", { lieuNaissance: e.target.value })} /></div>
+            </div>
+
+            <div className="text-xs text-stone-700 bg-pink-50 rounded-lg p-2 space-y-0.5">
+              <div>Qui a accouché le <b>{dateFr(a.date)} à {heureEnToutesLettres(a.heure)}</b></div>
+              <div>D'un enfant de sexe <b>{fille ? "FÉMININ" : "MASCULIN"}</b> <span className="text-stone-500">(repris de l'enregistrement de la naissance)</span></div>
+            </div>
+            <label className="flex items-center gap-2 text-xs font-semibold text-stone-700">
+              <input type="checkbox" checked={!d.vivant} onChange={(e) => set({ vivant: !e.target.checked })} />
+              Enfant {fille ? "mort-née" : "mort-né"} (sinon : « {fille ? "Née vivante" : "Né vivant"} »)
+            </label>
+          </div>
+
+          {/* --- Le reste : enregistré avec la naissance, non imprimé --- */}
+          <div className="rounded-xl border border-stone-200">
+            <button type="button" onClick={() => setPlus(!plus)} className="w-full p-3 flex items-center justify-between text-left">
+              <span className="text-xs font-bold uppercase text-stone-600">Autres informations de la naissance (registre — non imprimées)</span>
+              {plus ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+            {plus && (
+              <div className="p-3 pt-0 space-y-4">
+                <div className="space-y-2">
+                  <h4 className="text-sm font-bold text-pink-700">L'enfant</h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <div><label className={lbl}>Nom</label><input className={input} value={d.nomEnfant} onChange={(e) => set({ nomEnfant: e.target.value })} /></div>
+                    <div className="sm:col-span-2"><label className={lbl}>Prénom(s)</label><input className={input} value={d.prenomsEnfant} onChange={(e) => set({ prenomsEnfant: e.target.value })} /></div>
+                    <div><label className={lbl}>Taille (cm)</label><input type="number" className={input} value={d.taille ?? ""} onChange={(e) => set({ taille: e.target.value ? parseFloat(e.target.value) : undefined })} /></div>
+                    <div><label className={lbl}>Périmètre crânien (cm)</label><input type="number" className={input} value={d.perimetreCranien ?? ""} onChange={(e) => set({ perimetreCranien: e.target.value ? parseFloat(e.target.value) : undefined })} /></div>
+                    <div>
+                      <label className={lbl}>Naissance</label>
+                      <select className={input} value={d.naissance} onChange={(e) => set({ naissance: e.target.value as DeclarationNaissance["naissance"] })}>
+                        <option value="Unique">Unique</option>
+                        <option value="Gémellaire">Gémellaire (jumeaux)</option>
+                        <option value="Multiple">Multiple (triplés ou plus)</option>
+                      </select>
+                    </div>
+                    {d.naissance !== "Unique" && (
+                      <div><label className={lbl}>Rang</label><input className={input} placeholder="Ex: 1er jumeau" value={d.rang || ""} onChange={(e) => set({ rang: e.target.value })} /></div>
+                    )}
+                  </div>
+                </div>
+
+                {blocPersonne("mere", "La mère (compléments)")}
+
+                <label className="flex items-center gap-2 text-xs font-semibold text-stone-700">
+                  <input type="checkbox" checked={!!d.pereNonDeclare} onChange={(e) => set({ pereNonDeclare: e.target.checked })} /> Père non déclaré
                 </label>
+                {!d.pereNonDeclare && blocPersonne("pere", "Le père")}
+
+                <div className="space-y-2">
+                  <h4 className="text-sm font-bold text-pink-700">Le déclarant à l'état civil</h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <div className="col-span-2 sm:col-span-1"><label className={lbl}>Nom et prénom(s)</label><input className={input} value={d.declarantNom} onChange={(e) => set({ declarantNom: e.target.value })} /></div>
+                    <div>
+                      <label className={lbl}>Lien avec l'enfant</label>
+                      <select className={input} value={d.declarantLien} onChange={(e) => set({ declarantLien: e.target.value })}>
+                        {["Père", "Mère", "Grand-parent", "Oncle / tante", "Autre parent", "Autre"].map((l) => <option key={l}>{l}</option>)}
+                      </select>
+                    </div>
+                    <div><label className={lbl}>Contact</label><input className={input} value={d.declarantContact || ""} onChange={(e) => set({ declarantContact: e.target.value })} /></div>
+                  </div>
+                </div>
+
+                <div><label className={lbl}>Observations</label><input className={input} value={d.observations || ""} onChange={(e) => set({ observations: e.target.value })} /></div>
               </div>
-            </div>
-          </div>
-
-          {blocPersonne("mere", "La mère")}
-
-          <label className="flex items-center gap-2 text-xs font-semibold text-stone-700">
-            <input type="checkbox" checked={!!d.pereNonDeclare} onChange={(e) => set({ pereNonDeclare: e.target.checked })} /> Père non déclaré
-          </label>
-          {!d.pereNonDeclare && blocPersonne("pere", "Le père")}
-
-          <div className="space-y-2">
-            <h4 className="text-sm font-bold text-pink-700">Le déclarant</h4>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <div className="sm:col-span-1 col-span-2"><label className={lbl}>Nom et prénom(s) *</label><input className={input} value={d.declarantNom} onChange={(e) => set({ declarantNom: e.target.value })} /></div>
-              <div>
-                <label className={lbl}>Lien avec l'enfant</label>
-                <select className={input} value={d.declarantLien} onChange={(e) => set({ declarantLien: e.target.value })}>
-                  {["Père", "Mère", "Grand-parent", "Oncle / tante", "Autre parent", "Autre"].map((l) => <option key={l}>{l}</option>)}
-                </select>
-              </div>
-              <div><label className={lbl}>Contact</label><input className={input} value={d.declarantContact || ""} onChange={(e) => set({ declarantContact: e.target.value })} /></div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {!d.pereNonDeclare && d.pere.nom && (
-                <button type="button" className="text-xs font-semibold text-pink-700 underline" onClick={() => set({ declarantNom: `${d.pere.nom} ${d.pere.prenoms}`.trim(), declarantLien: "Père", declarantContact: d.pere.contact || d.declarantContact })}>Le père est le déclarant</button>
-              )}
-              {d.mere.nom && (
-                <button type="button" className="text-xs font-semibold text-pink-700 underline" onClick={() => set({ declarantNom: `${d.mere.nom} ${d.mere.prenoms}`.trim(), declarantLien: "Mère", declarantContact: d.mere.contact || d.declarantContact })}>La mère est la déclarante</button>
-              )}
-            </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -319,11 +358,9 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
                 <option>Transmise à l'état civil</option>
               </select>
             </div>
-            <div><label className={lbl}>Date d'établissement</label><input type="date" className={input} value={d.dateEtablissement} onChange={(e) => set({ dateEtablissement: e.target.value })} /></div>
             {d.statut !== "Établie" && (
               <div><label className={lbl}>Remise aux parents le</label><input type="date" className={input} value={d.dateRemise || ""} onChange={(e) => set({ dateRemise: e.target.value })} /></div>
             )}
-            <div className="col-span-2 sm:col-span-3"><label className={lbl}>Observations</label><input className={input} value={d.observations || ""} onChange={(e) => set({ observations: e.target.value })} /></div>
           </div>
         </div>
 

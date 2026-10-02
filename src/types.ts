@@ -359,6 +359,7 @@ export interface PersonneDeclaration {
   nom: string;
   prenoms: string;
   dateNaissance?: string;
+  lieuNaissance?: string;    // ex. "Koumassi/CIV"
   age?: string;
   profession?: string;
   domicile?: string;
@@ -368,7 +369,13 @@ export interface PersonneDeclaration {
 }
 
 export interface DeclarationNaissance {
-  numero: string;            // "DN-2026-0001"
+  numero: string;            // "07032026" (date de naissance, suffixe -2, -3… si plusieurs le même jour)
+  // Agent qui signe la déclaration (sage-femme / accoucheur).
+  declarantAgentId?: string;
+  declarantAgentNom?: string;
+  declarantAgentCivilite?: "Mme" | "M." | "Mlle";
+  declarantAgentFonction?: string;
+  lieuSignature?: string;    // "Bobo"
   // Enfant
   nomEnfant: string;
   prenomsEnfant: string;
