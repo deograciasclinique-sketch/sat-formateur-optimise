@@ -37,7 +37,6 @@ import {
   ConsultationPrenatale,
   DocumentArchive,
   SoinRealise,
-  Partogramme,
   PlanSoins,
 } from "./types";
 import {
@@ -61,7 +60,7 @@ import { sendBrowserNotification } from "./lib/browserNotifications";
 import TabQualite from "./components/TabQualite";
 import TabIndicateurs from "./components/TabIndicateurs";
 import TabTHLO from "./components/TabTHLO";
-import { RapportTHLO, ConfigTHLO, CONFIG_THLO_DEFAUT, semainePrecedente, dateLimite } from "./modules/thlo/thloData";
+import { RapportTHLO, ConfigTHLO, CONFIG_THLO_DEFAUT, semainePrecedente, dateLimite, normaliserConfig, momentTransmission } from "./modules/thlo/thloData";
 import TabTaches from "./components/TabTaches";
 import TabPharmacie from "./components/TabPharmacie";
 import TabFacturation from "./components/TabFacturation";
@@ -141,7 +140,7 @@ const getTabLabel = (id: string): string => {
     urgences: "Triage & Urgences",
     hospit: "Hospitalisations",
     pediatrie: "Surveillance Pédiatrique",
-    maternite: "Maternité, CPN & Salle d'accouchement",
+    maternite: "Suivi Maternité & CPN",
     vaccination: "Vaccination & PEV",
     labo: "Laboratoire d'analyses",
     pharma: "Pharmacie & Stocks",
@@ -151,7 +150,7 @@ const getTabLabel = (id: string): string => {
     factures: "Factures & Journal",
     assurances: "Assurances & Tiers-Payant",
     rh: "Ressources Humaines",
-    thlo: "TLOH — Surveillance hebdo",
+    thlo: "THLO — Surveillance hebdo",
     indicateurs: "Indicateurs Épidémio",
     qualite: "Démarche Qualité",
     documents: "Coffre-fort Documents",
@@ -366,8 +365,6 @@ export default function App() {
   // Salle des soins : registre des soins réalisés (Salle des Infirmiers)
   const [soins, setSoins] = useState<SoinRealise[]>([]);
   const [plansSoins, setPlansSoins] = useState<PlanSoins[]>([]);
-  // Salle d'accouchement : partogrammes (Guide de soins du travail OMS 2020)
-  const [partogrammes, setPartogrammes] = useState<Partogramme[]>([]);
   const [thloConfig, setThloConfig] = useState<ConfigTHLO>(CONFIG_THLO_DEFAUT);
 
   // --- Synchronisation temps réel multi-appareils (Firestore) ---
@@ -406,7 +403,6 @@ export default function App() {
     dg_thlo_config: setThloConfig,
     dg_soins: setSoins,
     dg_plans_soins: setPlansSoins,
-    dg_partogrammes: setPartogrammes,
   });
   // Garde en mémoire la dernière valeur confirmée comme envoyée au cloud pour chaque clé,
   // afin de ne renvoyer que ce qui a réellement changé (et d'éviter les boucles avec les
@@ -985,6 +981,35 @@ export default function App() {
     prevConsultationsRef.current = consultations;
   }, [consultations, isLoaded]);
 
+  // TLOH : transmission au District chaque lundi à 8h00 (heure réglable).
+  // À partir de 30 min avant l'heure, un bandeau s'affiche sur tous les
+  // écrans tant que le rapport de la semaine écoulée n'est pas transmis.
+  const [horlogeTloh, setHorlogeTloh] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setHorlogeTloh(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
+  const tlohRappel = React.useMemo(() => {
+    const cfg = normaliserConfig(thloConfig);
+    const s = semainePrecedente();
+    const r = thloRapports.find((x) => x.id === s.id);
+    if (r?.statut === "Transmis") return null;
+    const moment = momentTransmission(s, cfg).getTime();
+    if (horlogeTloh < moment - 30 * 60000) return null;
+    const finJour = new Date(dateLimite(s, cfg) + "T23:59:59").getTime();
+    return { semaine: s, heure: cfg.heureTransmission || "08:00", aLHeure: horlogeTloh >= moment, enRetard: horlogeTloh > finJour };
+  }, [thloConfig, thloRapports, horlogeTloh]);
+  const tlohNotifie = React.useRef<string>("");
+  useEffect(() => {
+    if (!tlohRappel || !tlohRappel.aLHeure || !isLoaded) return;
+    const k = tlohRappel.semaine.id;
+    if (tlohNotifie.current === k) return;
+    tlohNotifie.current = k;
+    const n = String(tlohRappel.semaine.numero).padStart(2, "0");
+    showToast("📊 TLOH à transmettre", `Le TLOH N° ${n} (semaine écoulée) doit être transmis au District ce lundi à ${tlohRappel.heure}.`, "warning");
+    sendBrowserNotification("📊 TLOH à transmettre", `TLOH N° ${n} : transmission au District à ${tlohRappel.heure}.`, `tloh-${k}`);
+  }, [tlohRappel, isLoaded]);
+
   // Load and seed DB on initial mount
   useEffect(() => {
     seedLocalStorage();
@@ -1038,10 +1063,9 @@ export default function App() {
     setDocuments(safeGet<DocumentArchive[]>("dg_documents", []));
     setActesTarifaires(safeGet<ActeTarifaire[]>("dg_actes_tarifaires", []));
     setThloRapports(safeGet<RapportTHLO[]>("dg_thlo_rapports", []));
-    setThloConfig({ ...CONFIG_THLO_DEFAUT, ...safeGet<Partial<ConfigTHLO>>("dg_thlo_config", {}) });
+    setThloConfig(normaliserConfig(safeGet<Partial<ConfigTHLO>>("dg_thlo_config", {})));
     setSoins(safeGet<SoinRealise[]>("dg_soins", []));
     setPlansSoins(safeGet<PlanSoins[]>("dg_plans_soins", []));
-    setPartogrammes(safeGet<Partogramme[]>("dg_partogrammes", []));
     setIsLoaded(true);
   }, []);
 
@@ -1183,15 +1207,14 @@ export default function App() {
       dg_thlo_rapports: thloRapports,
       dg_thlo_config: thloConfig,
       dg_soins: soins,
-      dg_plans_soins: plansSoins,
-      dg_partogrammes: partogrammes
+      dg_plans_soins: plansSoins
     };
   }, [
     staff, medicaments, mouvements, tasks, consultations, pediatrie,
     materniteCpns, materniteAccouchements, rdv, hospitalisations, ficheReferences,
     hospEvolutions, factures, depenses, incidents, actions, audits,
     conges, absences, rhFiches, prisesEnCharge, urgences, vaccinations,
-    laboExamens, documents, actesTarifaires, thloRapports, thloConfig, soins, plansSoins, partogrammes
+    laboExamens, documents, actesTarifaires, thloRapports, thloConfig, soins, plansSoins
   ]);
 
   // Periodic auto-save effect
@@ -1431,11 +1454,6 @@ export default function App() {
     safeSet("dg_plans_soins", p);
   };
 
-  const handleUpdatePartogrammes = (p: Partogramme[]) => {
-    setPartogrammes(p);
-    safeSet("dg_partogrammes", p);
-  };
-
   const handleUpdateSoins = (newSoins: SoinRealise[]) => {
     setSoins(newSoins);
     safeSet("dg_soins", newSoins);
@@ -1465,7 +1483,7 @@ export default function App() {
           { id: "urgences", label: "Triage & Urgences", icon: ShieldAlert, alertCount: urgences.filter((u) => u.statut !== "Sorti(e) ou Libéré(e)").length },
           { id: "hospit", label: "Hospitalisations", icon: HeartPulse, alertCount: hospitalisations.filter((h) => h.statut === "En cours").length },
           { id: "pediatrie", label: "Surveillance Pédiatrique", icon: Activity },
-          { id: "maternite", label: "Maternité, CPN & Accouchement", icon: Sparkles, alertCount: partogrammes.filter((p) => p.statut === "En cours").length },
+          { id: "maternite", label: "Suivi Maternité & CPN", icon: Sparkles },
           { id: "vaccination", label: "Vaccination & PEV", icon: ShieldCheck },
           { id: "planif_familiale", label: "Planification Familiale", icon: Heart }
         ]
@@ -1492,12 +1510,7 @@ export default function App() {
       {
         title: "📊 Qualité & Configuration",
         items: [
-          { id: "thlo", label: "TLOH — Surveillance hebdo", icon: Activity, alertCount: (() => {
-            // Rapport de la semaine passée pas encore transmis alors que la date limite est dépassée.
-            const s = semainePrecedente();
-            const r = thloRapports.find((x) => x.id === s.id);
-            return (!r || r.statut !== "Transmis") && new Date().toISOString().slice(0, 10) > dateLimite(s, thloConfig) ? 1 : 0;
-          })() },
+          { id: "thlo", label: "TLOH — Surveillance hebdo", icon: Activity, alertCount: tlohRappel ? 1 : 0 },
           { id: "indicateurs", label: "Indicateurs Épidémio", icon: TrendingUp },
           { id: "qualite", label: "Démarche Qualité", icon: ShieldCheck },
           { id: "documents", label: "Coffre-fort Documents", icon: FileText },
@@ -1515,7 +1528,6 @@ export default function App() {
   }, [
     allowedTabs,
     plansSoins,
-    partogrammes,
     soins,
     urgences,
     hospitalisations,
@@ -2185,6 +2197,17 @@ export default function App() {
 
         {/* Panel render staging viewarea */}
         <main className="flex-1 overflow-y-auto p-6 max-w-7xl w-full mx-auto">
+          {tlohRappel && allowedTabs.includes("thlo") && activeTab !== "thlo" && (
+            <div className={`mb-4 px-4 py-3 rounded-xl text-sm font-semibold flex flex-wrap items-center justify-between gap-2 border-2 ${tlohRappel.enRetard ? "bg-red-50 border-red-400 text-red-800" : "bg-amber-50 border-amber-400 text-amber-900"}`}>
+              <span>
+                📊 TLOH N° {String(tlohRappel.semaine.numero).padStart(2, "0")} (semaine écoulée) à transmettre au District
+                {tlohRappel.enRetard ? " — EN RETARD" : tlohRappel.aLHeure ? ` — c'est l'heure (${tlohRappel.heure})` : ` à ${tlohRappel.heure}`}
+              </span>
+              <button onClick={() => setActiveTab("thlo")} className={`px-3 py-1.5 rounded-lg text-white text-xs font-bold ${tlohRappel.enRetard ? "bg-red-600" : "bg-amber-500"}`}>
+                Ouvrir le TLOH
+              </button>
+            </div>
+          )}
           {!posteReconnu && (
             <div className="mb-4 bg-red-50 border border-red-300 text-red-800 px-4 py-3 rounded-xl text-sm font-semibold flex items-start gap-2 shadow-xs">
               <span className="text-lg leading-none">⚠️</span>
@@ -2212,7 +2235,7 @@ export default function App() {
               consultations={consultations}
               pediatrie={pediatrie}
               hospitalisations={hospitalisations}
-              laboExamens={laboExamens}
+              examens={laboExamens}
               rapports={thloRapports}
               onUpdateRapports={handleUpdateThloRapports}
               config={thloConfig}
@@ -2380,8 +2403,6 @@ export default function App() {
               currentUser={currentUser}
               consultations={consultations}
               onUpdateConsultations={handleUpdateConsultations}
-              partogrammes={partogrammes}
-              onUpdatePartogrammes={handleUpdatePartogrammes}
             />
           )}
 

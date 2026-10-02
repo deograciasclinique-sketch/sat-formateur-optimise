@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { jsPDF } from "jspdf";
 import { logActivity } from "../lib/activityLogger";
+import { interpreterDengue, dengueComplet } from "../modules/thlo/tdr";
 import { Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
@@ -3323,6 +3324,54 @@ export default function TabConsultation({
                     </div>
                   )}
                 </div>
+
+                {/* TDR du laboratoire et classement PS / PG (compté dans le TLOH) */}
+                {(() => {
+                  const c = selectedConsultation;
+                  const n = (x: string) => (x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+                  const lies = new Set((c.labResults || []).map((e) => e.id));
+                  const fin = new Date(c.date + "T00:00:00"); fin.setDate(fin.getDate() + 14);
+                  const finIso = fin.toISOString().slice(0, 10);
+                  const tdrs = laboExamens.filter((e) => (e.tdrPalu || dengueComplet(e.tdrDengue)) && (lies.has(e.id) || (n(e.patient) === n(c.patient) && e.dateDemande >= c.date && e.dateDemande <= finIso)));
+                  const paluPos = tdrs.some((e) => e.tdrPalu === "Positif");
+                  if (tdrs.length === 0 && !c.classementPalu) return null;
+                  const classer = (v: "PS" | "PG") => {
+                    const updated: Consultation = { ...c, classementPalu: c.classementPalu === v ? undefined : v };
+                    onUpdateConsultations(consultations.map((x) => (x.id === c.id ? updated : x)));
+                    setSelectedConsultation(updated);
+                    logActivity("Classement paludisme (TLOH)", "autre", `Patient ${c.patient} classé ${updated.classementPalu || "non classé"}.`);
+                  };
+                  return (
+                    <div className={`rounded-xl border-2 p-3 space-y-2 ${paluPos && !c.classementPalu ? "border-amber-400 bg-amber-50" : "border-stone-200 bg-stone-50"}`}>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800">TDR du laboratoire (TLOH)</h3>
+                      {tdrs.map((e) => {
+                        const d = interpreterDengue(e.tdrDengue);
+                        return (
+                          <div key={e.id} className="text-xs flex flex-wrap gap-x-3">
+                            <span className="text-stone-500">{e.dateResultat || e.dateDemande}</span>
+                            {e.tdrPalu && <span>TDR Paludisme : <b className={e.tdrPalu === "Positif" ? "text-danger-600" : "text-success-700"}>{e.tdrPalu.toUpperCase()}</b></span>}
+                            {d && <span>TDR Dengue : <b className={d.probable ? "text-danger-600" : "text-stone-700"}>{d.libelle}</b>{d.probable ? " — cas probable" : ""}</span>}
+                          </div>
+                        );
+                      })}
+                      {(paluPos || c.classementPalu) && (
+                        <div>
+                          <div className="text-xs font-semibold text-stone-700 mb-1">
+                            Classement du paludisme selon les signes cliniques {!c.classementPalu && <span className="text-danger-600">* à faire par le médecin</span>}
+                          </div>
+                          <div className="flex gap-2">
+                            {(["PS", "PG"] as const).map((v) => (
+                              <button key={v} type="button" onClick={() => classer(v)}
+                                className={`flex-1 text-xs font-bold py-2 rounded-lg border ${c.classementPalu === v ? (v === "PG" ? "bg-danger-600 border-danger-600 text-white" : "bg-primary-600 border-primary-600 text-white") : "bg-white border-stone-300 text-stone-700 hover:bg-stone-100"}`}>
+                                {v === "PS" ? "PS — Paludisme simple" : "PG — Paludisme grave"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Prescription Section */}
                 <div>

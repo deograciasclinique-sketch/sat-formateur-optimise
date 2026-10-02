@@ -8,6 +8,7 @@
  */
 
 import { Consultation, ExamenLabo, FichePediatrique, Hospitalisation } from "../../types";
+import { demandeTdrDengue, demandeTdrPalu, denguePositif, dengueComplet } from "./tdr";
 
 export const TRANCHES_AGE = ["0-11 mois", "1-4 ans", "5-14 ans", "15 ans et +"] as const;
 export type Compte = [number, number, number, number];
@@ -39,7 +40,7 @@ export const MALADIES_THLO: MaladieTHLO[] = [
   { id: "covid", nom: "COVID-19", immediate: true, motsCles: ["covid", "sars-cov"] },
   { id: "diphterie", nom: "Diphtérie", immediate: true, motsCles: ["diphter"] },
   { id: "palu_grave", nom: "Paludisme grave", motsCles: ["paludisme grave", "palu grave", "paludisme severe", "neuropalu", "paludisme compliqu", "acces palustre grave", "palustre grave", "palustre severe"] },
-  { id: "palu_simple", nom: "Paludisme simple", motsCles: ["paludisme", "palu ", "palustre", "plasmodium", "tdr positif", "tdr palu positif", "ge positive", "goutte epaisse positive"], exclut: ["grave", "severe", "neuropalu", "compliqu"] },
+  { id: "palu_simple", nom: "Paludisme simple", motsCles: ["paludisme", "palu ", "palustre", "plasmodium"], exclut: ["grave", "severe", "neuropalu", "compliqu"] },
   { id: "diarrhee_sanglante", nom: "Diarrhée sanglante (shigellose)", motsCles: ["diarrhee sanglante", "shigell", "dysenter"] },
   { id: "typhoide", nom: "Fièvre typhoïde", motsCles: ["typho"] },
   { id: "tuberculose", nom: "Tuberculose", motsCles: ["tubercul"] },
@@ -156,12 +157,30 @@ export interface CasTHLO {
   refId: string;
 }
 
+/** Une ligne de TDR (laboratoire) prise en compte dans le TLOH. */
+export interface TdrTLOH {
+  type: "palu" | "dengue";
+  patient: string;
+  date: string;
+  resultat: "Positif" | "Négatif" | "En attente";
+  examenId: string;
+}
+
+export interface BlocTDR {
+  palu: TdrTLOH[];        // TDR palu réalisés ou en attente dans la semaine
+  dengue: TdrTLOH[];
+  paluNonClasses: TdrTLOH[]; // TDR palu + sans classement PS / PG par le médecin
+  dengueSuspects: string[];  // patients (TDR dengue fait ou diagnostic dengue)
+  dengueProbables: string[]; // patients avec NS1 + et/ou IgM +
+}
+
 export interface ResultatAuto {
   cas: Record<string, Compte>;
   deces: Record<string, Compte>;
   details: CasTHLO[];
   nbDossiersAnalyses: number;
   sansDiagnostic: number; // consultations de la semaine encore sans diagnostic
+  tdr: BlocTDR;
 }
 
 const normNom = (s: string) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -170,7 +189,8 @@ export function compterSemaine(
   semaine: SemaineEpi,
   consultations: Consultation[],
   pediatrie: FichePediatrique[],
-  hospitalisations: Hospitalisation[]
+  hospitalisations: Hospitalisation[],
+  examens: ExamenLabo[] = []
 ): ResultatAuto {
   const dansSemaine = (d?: string) => !!d && d >= semaine.debut && d <= semaine.fin;
   const details: CasTHLO[] = [];
@@ -189,13 +209,22 @@ export function compterSemaine(
     nb++;
     // Le diagnostic final (de sortie) prime sur le diagnostic de présomption.
     const texte = [c.diagnosticFinal || c.diagnostic, c.mdoDeclare].filter(Boolean).join(" · ");
-    if (!texte.trim()) sansDiag++;
-    maladiesDansTexte(texte).forEach((m) =>
+    if (!texte.trim() && !c.classementPalu) sansDiag++;
+    let maladies = maladiesDansTexte(texte);
+    // Le classement PS / PG choisi par le médecin prime sur le texte du diagnostic.
+    if (c.classementPalu) {
+      maladies = maladies.filter((m) => m.id !== "palu_simple" && m.id !== "palu_grave");
+      const m = MALADIES_THLO.find((x) => x.id === (c.classementPalu === "PG" ? "palu_grave" : "palu_simple"));
+      if (m) maladies.push(m);
+    }
+    maladies.forEach((m) =>
       ajouter({
         // Un âge à 0 correspond le plus souvent à un âge non saisi à
         // l'accueil : il est signalé pour vérification.
         maladieId: m.id, patient: c.patient, date: c.date, tranche: trancheAge(c.age > 0 ? c.age : undefined),
-        ageInconnu: !(c.age > 0), source: "Consultation", texte, refId: c.id,
+        ageInconnu: !(c.age > 0), source: "Consultation",
+        texte: c.classementPalu && (m.id === "palu_simple" || m.id === "palu_grave") ? `Classé ${c.classementPalu} par le médecin${texte ? ` · ${texte}` : ""}` : texte,
+        refId: c.id,
       })
     );
   });
@@ -235,7 +264,102 @@ export function compterSemaine(
     if (!dejaCompte.has(k)) { dejaCompte.add(k); cas[d.maladieId][d.tranche]++; }
   });
 
-  return { cas, deces, details, nbDossiersAnalyses: nb, sansDiagnostic: sansDiag };
+  // TDR du laboratoire : un TDR est compté dans la semaine de son résultat
+  // (ou de sa demande s'il est encore en attente).
+  const palu: TdrTLOH[] = [];
+  const dengue: TdrTLOH[] = [];
+  examens.forEach((e) => {
+    const aPalu = demandeTdrPalu(e.analyses || e.examen) || !!e.tdrPalu;
+    const aDengue = demandeTdrDengue(e.analyses || e.examen) || !!e.tdrDengue;
+    if (!aPalu && !aDengue) return;
+    if (aPalu) {
+      const date = e.tdrPalu ? (e.dateResultat || e.dateDemande) : e.dateDemande;
+      if (dansSemaine(date)) palu.push({ type: "palu", patient: e.patient, date, resultat: e.tdrPalu || "En attente", examenId: e.id });
+    }
+    if (aDengue) {
+      const fait = dengueComplet(e.tdrDengue);
+      const date = fait ? (e.dateResultat || e.dateDemande) : e.dateDemande;
+      if (dansSemaine(date))
+        dengue.push({ type: "dengue", patient: e.patient, date, resultat: fait ? (denguePositif(e.tdrDengue) ? "Positif" : "Négatif") : "En attente", examenId: e.id });
+    }
+  });
+
+  const classes = new Set(
+    details.filter((d) => !d.deces && (d.maladieId === "palu_simple" || d.maladieId === "palu_grave")).map((d) => normNom(d.patient))
+  );
+  // Un patient classé PS/PG dans une consultation récente (cette semaine ou
+  // la précédente) est considéré comme classé.
+  const debutLarge = new Date(semaine.debut + "T00:00:00"); debutLarge.setDate(debutLarge.getDate() - 7);
+  const dl = isoDate(debutLarge);
+  consultations.filter((c) => c.classementPalu && c.date >= dl && c.date <= semaine.fin).forEach((c) => classes.add(normNom(c.patient)));
+  const vus = new Set<string>();
+  const paluNonClasses = palu.filter((t) => {
+    const k = normNom(t.patient);
+    if (t.resultat !== "Positif" || classes.has(k) || vus.has(k)) return false;
+    vus.add(k);
+    return true;
+  });
+
+  const suspects = new Map<string, string>();
+  dengue.forEach((t) => suspects.set(normNom(t.patient), t.patient));
+  details.filter((d) => d.maladieId === "dengue" && !d.deces).forEach((d) => suspects.set(normNom(d.patient), d.patient));
+  const probables = new Map<string, string>();
+  dengue.filter((t) => t.resultat === "Positif").forEach((t) => probables.set(normNom(t.patient), t.patient));
+
+  return {
+    cas, deces, details, nbDossiersAnalyses: nb, sansDiagnostic: sansDiag,
+    tdr: { palu, dengue, paluNonClasses, dengueSuspects: [...suspects.values()], dengueProbables: [...probables.values()] },
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Fiche TLOH (format du District)                                    */
+/* ------------------------------------------------------------------ */
+
+export const CHAMPS_FICHE = [
+  { id: "tdr_realises", label: "TDR réalisés", groupe: "Paludisme" },
+  { id: "tdr_pos", label: "TDR +", groupe: "Paludisme" },
+  { id: "tdr_neg", label: "TDR −", groupe: "Paludisme" },
+  { id: "ps", label: "PS (paludisme simple)", groupe: "Paludisme" },
+  { id: "pg", label: "PG (paludisme grave)", groupe: "Paludisme" },
+  { id: "dengue_tdr_realises", label: "TDR Dengue réalisés", groupe: "Dengue" },
+  { id: "dengue_tdr_pos", label: "TDR Dengue +", groupe: "Dengue" },
+  { id: "dengue_tdr_neg", label: "TDR Dengue −", groupe: "Dengue" },
+  { id: "dengue_suspects", label: "Dengue — cas suspects", groupe: "Dengue" },
+  { id: "dengue_probables", label: "Dengue — cas probables", groupe: "Dengue" },
+  { id: "autres", label: "Autres maladies sous surveillance (cas)", groupe: "Autres" },
+] as const;
+export type ChampFiche = (typeof CHAMPS_FICHE)[number]["id"];
+export type Fiche = Record<ChampFiche, number>;
+
+/** Valeurs automatiques de la fiche TLOH. */
+export function ficheAuto(auto: ResultatAuto, v: { cas: Record<string, Compte> }): Fiche {
+  const n = (r: "Positif" | "Négatif", l: TdrTLOH[]) => l.filter((t) => t.resultat === r).length;
+  const autres = MALADIES_THLO.filter((m) => !["palu_simple", "palu_grave", "dengue"].includes(m.id))
+    .reduce((s, m) => s + somme(v.cas[m.id]), 0);
+  return {
+    tdr_realises: n("Positif", auto.tdr.palu) + n("Négatif", auto.tdr.palu),
+    tdr_pos: n("Positif", auto.tdr.palu),
+    tdr_neg: n("Négatif", auto.tdr.palu),
+    ps: somme(v.cas.palu_simple),
+    pg: somme(v.cas.palu_grave),
+    dengue_tdr_realises: n("Positif", auto.tdr.dengue) + n("Négatif", auto.tdr.dengue),
+    dengue_tdr_pos: n("Positif", auto.tdr.dengue),
+    dengue_tdr_neg: n("Négatif", auto.tdr.dengue),
+    dengue_suspects: auto.tdr.dengueSuspects.length,
+    dengue_probables: auto.tdr.dengueProbables.length,
+    autres,
+  };
+}
+
+/** Fiche finale : figée si le rapport est validé, sinon automatique + corrections. */
+export function ficheFinale(r: RapportTHLO | undefined, a: Fiche): Fiche {
+  if (r?.ficheFigee && r.statut !== "Brouillon") return { ...a, ...r.ficheFigee };
+  const out = { ...a };
+  Object.entries(r?.correctionsFiche || {}).forEach(([k, val]) => {
+    if (val !== null && val !== undefined && k in out) (out as any)[k] = val;
+  });
+  return out;
 }
 
 /* ------------------------------------------------------------------ */
@@ -255,6 +379,9 @@ export interface RapportTHLO {
   corrections: Record<string, { cas?: (number | null)[]; deces?: (number | null)[] }>;
   // Chiffres figés au moment de la validation (ce qui a été transmis).
   valeursFigees?: { cas: Record<string, Compte>; deces: Record<string, Compte> };
+  // Fiche TLOH (TDR, PS/PG, dengue, autres) : corrections et valeurs figées.
+  correctionsFiche?: Partial<Record<ChampFiche, number | null>>;
+  ficheFigee?: Partial<Fiche>;
   observations: string;
   redigePar: string;
   statut: StatutRapport;
@@ -262,15 +389,6 @@ export interface RapportTHLO {
   transmisLe?: string;
   transmisPar?: string;
   moyenTransmission?: string;
-  // --- Bloc « fiche TLOH » (paludisme, dengue, autres) ---
-  /** Numéro du TLOH (par défaut : numéro de la semaine épidémiologique). */
-  numeroTLOH?: string;
-  /** Corrections manuelles des indicateurs (null/absent = valeur automatique). */
-  indicateursCorrections?: Partial<Record<CleIndicateur, number | null>>;
-  /** Indicateurs figés à la validation. */
-  indicateursFiges?: Record<CleIndicateur, number>;
-  /** Rubrique « Autres » (texte libre ; vide = résumé automatique). */
-  autres?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -282,16 +400,38 @@ export interface ConfigTHLO {
   responsable: string;
   telephoneDistrict: string; // point focal surveillance du District
   jourLimite: number;        // 1 = lundi … 7 = dimanche (jour limite de transmission)
+  heureTransmission?: string; // "08:00" : heure de transmission le jour limite
 }
 
 export const CONFIG_THLO_DEFAUT: ConfigTHLO = {
-  formationSanitaire: "Cabinet Privé de Soins DEO-GRACIAS",
+  formationSanitaire: "CSI DEO GRACIAS",
   district: "",
   region: "",
   responsable: "",
   telephoneDistrict: "",
-  jourLimite: 2,
+  jourLimite: 1,
+  heureTransmission: "08:00",
 };
+
+/** Complète une configuration enregistrée avant l'ajout de l'heure de transmission. */
+export function normaliserConfig(c?: Partial<ConfigTHLO>): ConfigTHLO {
+  const out: ConfigTHLO = { ...CONFIG_THLO_DEFAUT, ...(c || {}) };
+  if (!c?.heureTransmission) {
+    // Règle du cabinet : le TLOH part chaque lundi à 8h00.
+    out.jourLimite = 1;
+    out.heureTransmission = "08:00";
+  }
+  if (!out.formationSanitaire || out.formationSanitaire === "Cabinet Privé de Soins DEO-GRACIAS") out.formationSanitaire = "CSI DEO GRACIAS";
+  return out;
+}
+
+/** Moment (date + heure) de transmission attendu pour une semaine. */
+export function momentTransmission(s: SemaineEpi, cfg: ConfigTHLO): Date {
+  const [h, m] = (cfg.heureTransmission || "08:00").split(":").map((x) => parseInt(x, 10) || 0);
+  const d = new Date(dateLimite(s, cfg) + "T00:00:00");
+  d.setHours(h, m, 0, 0);
+  return d;
+}
 
 /** Valeurs finales d'une ligne : figées si le rapport est validé, sinon auto + corrections. */
 export function valeursFinales(r: RapportTHLO | undefined, auto: ResultatAuto) {
@@ -319,20 +459,20 @@ export function dateLimite(s: SemaineEpi, cfg: ConfigTHLO): string {
 }
 
 export function texteTHLO(
-  s: SemaineEpi, cfg: ConfigTHLO, v: { cas: Record<string, Compte>; deces: Record<string, Compte> }, r?: RapportTHLO,
-  fiche?: { indicateurs: Record<CleIndicateur, number>; autres: string }
+  s: SemaineEpi, cfg: ConfigTHLO, v: { cas: Record<string, Compte>; deces: Record<string, Compte> }, r?: RapportTHLO, fiche?: Fiche
 ): string {
   const L: string[] = [];
-  if (fiche) {
-    L.push(...texteFicheTLOH(s, cfg, fiche.indicateurs, fiche.autres, r));
-    L.push(`Semaine épidémiologique ${libelleSemaine(s)}`);
-  } else {
-    L.push(`*TLOH — Rapport hebdomadaire SIMR*`);
-    L.push(`Semaine épidémiologique ${libelleSemaine(s)}`);
-    L.push(`Formation sanitaire : ${cfg.formationSanitaire || "—"}`);
-  }
+  L.push(`*${cfg.formationSanitaire || "CSI DEO GRACIAS"}*`);
+  L.push(`*TLOH N° ${pad(s.numero)}/${s.annee}* — Rapport hebdomadaire de surveillance`);
+  L.push(`Semaine ${libelleSemaine(s)}`);
   if (cfg.district) L.push(`District sanitaire : ${cfg.district}${cfg.region ? ` (${cfg.region})` : ""}`);
   L.push("");
+  if (fiche) {
+    L.push(`*Paludisme* : TDR réalisés ${fiche.tdr_realises} · TDR+ ${fiche.tdr_pos} · TDR− ${fiche.tdr_neg} · PS ${fiche.ps} · PG ${fiche.pg}`);
+    L.push(`*Dengue* : TDR réalisés ${fiche.dengue_tdr_realises} (+ ${fiche.dengue_tdr_pos} / − ${fiche.dengue_tdr_neg}) · cas suspects ${fiche.dengue_suspects} · cas probables ${fiche.dengue_probables}`);
+    L.push(`*Autres* : ${fiche.autres} cas`);
+    L.push("");
+  }
   const avecCas = MALADIES_THLO.filter((m) => somme(v.cas[m.id]) > 0 || somme(v.deces[m.id]) > 0);
   if (avecCas.length) {
     L.push("*Cas et décès* (0-11 mois / 1-4 ans / 5-14 ans / 15 ans et +)");
@@ -348,172 +488,4 @@ export function texteTHLO(
   if (r?.observations) L.push("", `*Observations* : ${r.observations}`);
   L.push("", `Rédigé par : ${r?.redigePar || cfg.responsable || "—"}`);
   return L.join("\n");
-}
-
-/* ------------------------------------------------------------------ */
-/*  Bloc de la fiche TLOH : TDR, paludisme, dengue, autres             */
-/* ------------------------------------------------------------------ */
-
-export type CleIndicateur =
-  | "tdrRealises" | "tdrPositifs" | "tdrNegatifs"
-  | "ps" | "pg"
-  | "dengueSuspect" | "dengueProbable";
-
-export const INDICATEURS_FICHE: { cle: CleIndicateur; label: string; court: string; aide: string }[] = [
-  { cle: "tdrRealises", label: "TDR réalisés", court: "TDR réalisés", aide: "TDR paludisme dont le résultat est rendu au laboratoire (ou noté dans le diagnostic)" },
-  { cle: "tdrPositifs", label: "TDR +", court: "TDR +", aide: "TDR paludisme positifs" },
-  { cle: "tdrNegatifs", label: "TDR −", court: "TDR -", aide: "TDR paludisme négatifs" },
-  { cle: "ps", label: "PS (paludisme simple)", court: "PS", aide: "Total de la ligne « Paludisme simple » du tableau" },
-  { cle: "pg", label: "PG (paludisme grave)", court: "PG", aide: "Total de la ligne « Paludisme grave » du tableau" },
-  { cle: "dengueSuspect", label: "Dengue — cas suspects", court: "Dengue cas suspect", aide: "Diagnostic de dengue sans TDR dengue positif ni mention « probable »" },
-  { cle: "dengueProbable", label: "Dengue — cas probables", court: "Dengue cas probable", aide: "Diagnostic « dengue probable » ou TDR dengue (NS1/IgM) positif" },
-];
-
-export interface DetailIndicateur {
-  cle: "tdr" | "dengue";
-  patient: string;
-  date: string;
-  source: string;
-  texte: string;
-  resultat: "positif" | "negatif" | "suspect" | "probable" | "indetermine";
-}
-
-export interface IndicateursAuto {
-  valeurs: Record<Exclude<CleIndicateur, "ps" | "pg">, number>;
-  details: DetailIndicateur[];
-}
-
-const n2 = (s?: string) =>
-  " " + (s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\+/g, " positif ").replace(/[^a-z0-9-]+/g, " ") + " ";
-
-const estTdrPalu = (t: string) =>
-  !/dengue/.test(t) && (/\btdr\b|test rapide|test de diagnostic rapide|\btdr-?palu/.test(t)) && !/\b(vih|hiv|syphil|hepat|hbs|grossesse|covid|typho|widal)\b/.test(t);
-const estTdrDengue = (t: string) => /dengue/.test(t) && /\b(tdr|test rapide|ns1|igm|igg)\b|dengue/.test(t);
-
-function lireResultat(t: string): "positif" | "negatif" | "indetermine" {
-  if (/negati|absence|non reactif|\bneg\b/.test(t)) return "negatif";
-  if (/positi|reactif|\bpos\b|falciparum|plasmodium|trophozo|\bpf\b/.test(t)) return "positif";
-  return "indetermine";
-}
-
-/** Indicateurs automatiques de la semaine (TDR paludisme, dengue). */
-export function indicateursSemaine(
-  semaine: SemaineEpi,
-  consultations: Consultation[],
-  pediatrie: FichePediatrique[],
-  laboExamens: ExamenLabo[]
-): IndicateursAuto {
-  const dansSemaine = (d?: string) => !!d && d.slice(0, 10) >= semaine.debut && d.slice(0, 10) <= semaine.fin;
-  const details: DetailIndicateur[] = [];
-  const tdrVus = new Set<string>(); // patient|date : un TDR par patient et par jour
-  const dengue = new Map<string, DetailIndicateur>(); // patient -> cas
-
-  // 1. TDR et tests dengue du laboratoire (examens avec un résultat rendu).
-  const examens = new Map<string, ExamenLabo>();
-  laboExamens.forEach((e) => examens.set(e.id, e));
-  consultations.forEach((c) => (c.labResults || []).forEach((e) => { if (!examens.has(e.id)) examens.set(e.id, { ...e, patient: e.patient || c.patient }); }));
-
-  examens.forEach((e) => {
-    const date = e.dateResultat || e.dateDemande;
-    if (!dansSemaine(date)) return;
-    const nomExamen = n2(`${e.examen || ""} ${e.analyses || ""}`);
-    const res = n2(`${e.resultat || ""} ${e.interpretation === "Normal" ? "negatif" : ""}`);
-    if (!e.resultat || !e.resultat.trim()) return; // pas encore de résultat
-    if (estTdrPalu(nomExamen)) {
-      const k = `${normNom(e.patient)}|${date.slice(0, 10)}`;
-      if (tdrVus.has(k)) return;
-      tdrVus.add(k);
-      details.push({ cle: "tdr", patient: e.patient, date: date.slice(0, 10), source: "Laboratoire", texte: `${e.examen || e.analyses} : ${e.resultat}`, resultat: lireResultat(res) });
-    } else if (estTdrDengue(nomExamen) && lireResultat(res) === "positif") {
-      dengue.set(normNom(e.patient), { cle: "dengue", patient: e.patient, date: date.slice(0, 10), source: "Laboratoire", texte: `${e.examen || e.analyses} : ${e.resultat}`, resultat: "probable" });
-    }
-  });
-
-  // 2. Diagnostics des consultations et fiches pédiatriques.
-  const dossiers: { patient: string; date: string; texte: string; source: string }[] = [
-    ...consultations.filter((c) => dansSemaine(c.date)).map((c) => ({ patient: c.patient, date: c.date, texte: [c.diagnostic, c.diagnosticFinal, c.mdoDeclare].filter(Boolean).join(" · "), source: "Consultation" })),
-    ...pediatrie.filter((p) => dansSemaine(p.date)).map((p) => ({ patient: p.patient, date: p.date, texte: p.diagnostic || "", source: "Pédiatrie" })),
-  ];
-  dossiers.forEach((d) => {
-    const t = n2(d.texte);
-    // TDR noté dans le diagnostic (« TDR+ », « TDR palu négatif »), si le labo ne l'a pas déjà compté.
-    const m = t.match(/\btdr(?: palu(?:disme)?)? (positif|negatif|neg|pos)\b/);
-    if (m) {
-      const k = `${normNom(d.patient)}|${d.date.slice(0, 10)}`;
-      if (!tdrVus.has(k)) {
-        tdrVus.add(k);
-        details.push({ cle: "tdr", patient: d.patient, date: d.date.slice(0, 10), source: d.source, texte: d.texte, resultat: m[1].startsWith("pos") ? "positif" : "negatif" });
-      }
-    }
-    // Dengue (mention non niée).
-    if (maladiesDansTexte(d.texte).some((x) => x.id === "dengue")) {
-      const cle = normNom(d.patient);
-      const probable = /probable|ns1 positif|igm positif|tdr dengue positif|confirm/.test(t);
-      const deja = dengue.get(cle);
-      if (!deja || (probable && deja.resultat === "suspect")) {
-        dengue.set(cle, { cle: "dengue", patient: d.patient, date: d.date.slice(0, 10), source: d.source, texte: d.texte, resultat: probable || deja?.resultat === "probable" ? "probable" : "suspect" });
-      }
-    }
-  });
-  dengue.forEach((v) => details.push(v));
-
-  const tdr = details.filter((d) => d.cle === "tdr");
-  const dg = details.filter((d) => d.cle === "dengue");
-  return {
-    valeurs: {
-      tdrRealises: tdr.length,
-      tdrPositifs: tdr.filter((d) => d.resultat === "positif").length,
-      tdrNegatifs: tdr.filter((d) => d.resultat === "negatif").length,
-      dengueSuspect: dg.filter((d) => d.resultat === "suspect").length,
-      dengueProbable: dg.filter((d) => d.resultat === "probable").length,
-    },
-    details,
-  };
-}
-
-/** Valeurs finales des indicateurs de la fiche (figées si validé). */
-export function indicateursFinaux(
-  r: RapportTHLO | undefined,
-  auto: IndicateursAuto,
-  valeursTableau: { cas: Record<string, Compte> }
-): Record<CleIndicateur, number> {
-  if (r?.indicateursFiges && r.statut !== "Brouillon") return { ...r.indicateursFiges };
-  const base: Record<CleIndicateur, number> = {
-    ...auto.valeurs,
-    ps: somme(valeursTableau.cas["palu_simple"] || zero()),
-    pg: somme(valeursTableau.cas["palu_grave"] || zero()),
-  };
-  const corr = r?.indicateursCorrections || {};
-  (Object.keys(base) as CleIndicateur[]).forEach((k) => {
-    if (k === "ps" || k === "pg") return; // suivent le tableau
-    const c = corr[k];
-    if (c !== null && c !== undefined) base[k] = c;
-  });
-  return base;
-}
-
-/** Résumé automatique de la rubrique « Autres » (maladies hors paludisme et dengue). */
-export function autresAuto(v: { cas: Record<string, Compte>; deces: Record<string, Compte> }): string {
-  return MALADIES_THLO.filter((m) => !["palu_simple", "palu_grave", "dengue"].includes(m.id) && (somme(v.cas[m.id]) > 0 || somme(v.deces[m.id]) > 0))
-    .map((m) => `${m.nom} : ${somme(v.cas[m.id])} cas${somme(v.deces[m.id]) ? `, ${somme(v.deces[m.id])} décès` : ""}`)
-    .join(" ; ");
-}
-
-export const numeroTLOH = (r: RapportTHLO | undefined, s: SemaineEpi) => (r?.numeroTLOH && r.numeroTLOH.trim()) || String(s.numero).padStart(2, "0");
-
-/** Bloc texte de la fiche TLOH (même ordre que la fiche papier). */
-export function texteFicheTLOH(
-  s: SemaineEpi, cfg: ConfigTHLO, ind: Record<CleIndicateur, number>, autres: string, r?: RapportTHLO
-): string[] {
-  return [
-    `*${cfg.formationSanitaire || "—"}*`,
-    `TLOH N° ${numeroTLOH(r, s)}`,
-    `TDR réalisés : ${ind.tdrRealises}`,
-    `TDR + : ${ind.tdrPositifs}`,
-    `TDR - : ${ind.tdrNegatifs}`,
-    `PS = ${ind.ps}`,
-    `PG = ${ind.pg}`,
-    `Dengue : cas suspects : ${ind.dengueSuspect} ; cas probables : ${ind.dengueProbable}`,
-    `Autres : ${autres || "RAS"}`,
-  ];
 }

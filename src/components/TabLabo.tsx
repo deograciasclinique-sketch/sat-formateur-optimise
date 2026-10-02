@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { ExamenLabo, Staff, Consultation, Medicament, MouvementStock } from "../types";
 import { generateUid, getTodayStr } from "../data";
+import { ResultatTDR, TdrDengue, demandeTdrPalu, demandeTdrDengue, dengueComplet, interpreterDengue, alerteDengue, texteResultatTdr } from "../modules/thlo/tdr";
 import { Plus, Trash2, Printer, MessageCircle, Search, FlaskConical, CheckCircle, FileText, X, Beaker, AlertTriangle, Eye, Upload, Download } from "lucide-react";
 
 interface TabLaboProps {
@@ -114,6 +115,9 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
   const [examTechnicien, setExamTechnicien] = useState("");
   const [examResultat, setExamResultat] = useState("");
   const [examInterpretation, setExamInterpretation] = useState("");
+  // TDR : résultats structurés (comptés automatiquement dans le TLOH).
+  const [tdrPalu, setTdrPalu] = useState<ResultatTDR | "">("");
+  const [tdrDengue, setTdrDengue] = useState<TdrDengue>({});
 
     const [searchQuery, setSearchQuery] = useState("");
   const [historySearchQuery, setHistorySearchQuery] = useState("");
@@ -454,18 +458,41 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
   };
 
   const handleCompleteResult = () => {
-    if (!selectedExamId || !examResultat.trim()) {
-      alert("Veuillez choisir un examen et renseigner les valeurs de résultats d'analyse.");
+    const sel = examens.find((e) => e.id === selectedExamId);
+    if (!sel) {
+      alert("Veuillez choisir un examen.");
       return;
     }
+    const aPalu = demandeTdrPalu(sel.analyses || sel.examen);
+    const aDengue = demandeTdrDengue(sel.analyses || sel.examen);
+    if (aPalu && !tdrPalu) {
+      alert("TDR Paludisme : indiquez obligatoirement le résultat POSITIF ou NÉGATIF.");
+      return;
+    }
+    if (aDengue && !dengueComplet(tdrDengue)) {
+      alert("TDR Dengue : indiquez obligatoirement le résultat POSITIF ou NÉGATIF pour chacune des 3 bandes (NS1, IgM et IgG).");
+      return;
+    }
+    const resumeTdr = texteResultatTdr(aPalu ? (tdrPalu as ResultatTDR) : undefined, aDengue ? tdrDengue : undefined);
+    // Le texte libre reste possible (autres analyses de la demande) ; le
+    // résumé des TDR est ajouté automatiquement en tête du résultat.
+    const libre = examResultat.split("\n").filter((l) => !/^(TDR Paludisme|TDR Dengue|→ )/.test(l.trim())).join("\n").trim();
+    const resultatFinal = [resumeTdr, libre].filter(Boolean).join("\n");
+    if (!resultatFinal) {
+      alert("Veuillez renseigner les valeurs de résultats d'analyse.");
+      return;
+    }
+    const interpDengue = aDengue ? interpreterDengue(tdrDengue) : null;
 
     const updated = examens.map((e) => {
       if (e.id === selectedExamId) {
         return {
           ...e,
           statut: "Prêt" as const,
-          resultat: examResultat.trim(),
-          interpretation: examInterpretation.trim(),
+          resultat: resultatFinal,
+          interpretation: examInterpretation.trim() || interpDengue?.libelle || (aPalu ? (tdrPalu === "Positif" ? "Anormal — TDR paludisme positif" : "Normal — TDR paludisme négatif") : ""),
+          tdrPalu: aPalu ? (tdrPalu as ResultatTDR) : e.tdrPalu,
+          tdrDengue: aDengue ? { ...tdrDengue } : e.tdrDengue,
           technicien: examTechnicien,
           dateResultat: getTodayStr()
         };
@@ -477,6 +504,8 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
     setSelectedExamId("");
     setExamResultat("");
     setExamInterpretation("");
+    setTdrPalu("");
+    setTdrDengue({});
     alert("Résultats de laboratoire consignés avec succès.");
   };
 
@@ -867,6 +896,7 @@ ${examen.analyses || "Aucune analyse spécifiée"}
               <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Analyses demandées *</label>
               <div className="border border-stone-200 rounded-lg p-3 bg-stone-50 max-h-64 overflow-y-auto space-y-3">
                 {[
+                  { category: "TDR (comptés dans le TLOH)", options: ["TDR Paludisme", "TDR Dengue (NS1 / IgM / IgG)"] },
                   { category: "Hématologie", options: ["NFS (Hémogramme complet)", "Goutte épaisse (GE / Recherche Palu)", "Groupe Sanguin - Rhésus", "Vitesse de Sédimentation (VS)"] },
                   { category: "Biochimie", options: ["Glycémie à jeun", "Urée / Créatinine (Bilan rénal)", "Bilan Lipidique (Cholestérol)", "Transaminases (Bilan hépatique)"] },
                   { category: "Parasitologie & Microbiologie", options: ["Test de Widal (Fièvre typhoïde)", "ECBU (Urine)", "EPS (Selles)", "Prélèvement génital (PV/PU)"] },
@@ -943,6 +973,8 @@ ${examen.analyses || "Aucune analyse spécifiée"}
                     setExamInterpretation("");
                     setExamTechnicien("");
                   }
+                  setTdrPalu(selected?.tdrPalu || "");
+                  setTdrDengue(selected?.tdrDengue || {});
                 }}
                 className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
               >
@@ -988,8 +1020,68 @@ ${examen.analyses || "Aucune analyse spécifiée"}
               </div>
             </div>
 
+            {(() => {
+              const sel = examens.find((x) => x.id === selectedExamId);
+              if (!sel) return null;
+              const aPalu = demandeTdrPalu(sel.analyses || sel.examen);
+              const aDengue = demandeTdrDengue(sel.analyses || sel.examen);
+              if (!aPalu && !aDengue) return null;
+              const bouton = (actif: boolean, val: ResultatTDR, onClick: () => void) => (
+                <button type="button" onClick={onClick}
+                  className={`flex-1 text-xs font-bold py-2 rounded-lg border transition-all ${actif ? (val === "Positif" ? "bg-danger-600 border-danger-600 text-white" : "bg-success-600 border-success-600 text-white") : "bg-white border-stone-300 text-stone-600 hover:bg-stone-50"}`}>
+                  {val === "Positif" ? "POSITIF (+)" : "NÉGATIF (−)"}
+                </button>
+              );
+              const interp = interpreterDengue(tdrDengue);
+              const alerte = alerteDengue(tdrDengue);
+              return (
+                <div className="space-y-3 border-2 border-primary-200 rounded-xl p-3 bg-primary-50/40">
+                  <div className="text-xs font-bold text-primary-800 uppercase">Résultat TDR — obligatoire, compté automatiquement dans le TLOH</div>
+                  {aPalu && (
+                    <div>
+                      <div className="text-xs font-semibold text-stone-700 mb-1">TDR Paludisme *</div>
+                      <div className="flex gap-2">
+                        {bouton(tdrPalu === "Positif", "Positif", () => setTdrPalu("Positif"))}
+                        {bouton(tdrPalu === "Négatif", "Négatif", () => setTdrPalu("Négatif"))}
+                      </div>
+                      {tdrPalu === "Positif" && <p className="text-[11px] text-stone-600 mt-1">Le médecin classera le cas en PS ou PG selon la clinique, dans la consultation du patient.</p>}
+                    </div>
+                  )}
+                  {aDengue && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold text-stone-700">TDR Dengue (test combiné) *</div>
+                      {(["ns1", "igm", "igg"] as const).map((k) => (
+                        <div key={k} className="flex items-center gap-2">
+                          <span className="w-12 text-xs font-bold text-stone-700">{k === "ns1" ? "NS1" : k === "igm" ? "IgM" : "IgG"}</span>
+                          {bouton(tdrDengue[k] === "Positif", "Positif", () => setTdrDengue({ ...tdrDengue, [k]: "Positif" }))}
+                          {bouton(tdrDengue[k] === "Négatif", "Négatif", () => setTdrDengue({ ...tdrDengue, [k]: "Négatif" }))}
+                        </div>
+                      ))}
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-semibold text-stone-700">Jour de fièvre (J1 = 1er jour)</label>
+                        <input type="number" min={1} max={30} inputMode="numeric" value={tdrDengue.jourFievre ?? ""}
+                          onChange={(e) => setTdrDengue({ ...tdrDengue, jourFievre: e.target.value ? Math.max(1, parseInt(e.target.value, 10) || 1) : undefined })}
+                          className="w-20 text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none" placeholder="Ex: 3" />
+                      </div>
+                      {interp && (
+                        <div className={`text-xs font-semibold rounded-lg px-3 py-2 ${interp.niveau === "positif" ? "bg-danger-100 text-danger-800" : interp.niveau === "negatif" ? "bg-success-100 text-success-800" : "bg-amber-100 text-amber-800"}`}>
+                          {interp.libelle}
+                          <div className="font-normal mt-0.5">TLOH : {interp.probable ? "cas PROBABLE de dengue" : "reste cas suspect si la clinique est évocatrice"}</div>
+                        </div>
+                      )}
+                      {alerte && (
+                        <div className="text-xs rounded-lg px-3 py-2 bg-amber-100 text-amber-900 flex gap-2">
+                          <AlertTriangle className="w-4 h-4 shrink-0" /> {alerte}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             <div>
-              <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Valeurs numériques / Observations de laboratoire *</label>
+              <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Valeurs numériques / Observations de laboratoire {(() => { const sel = examens.find((x) => x.id === selectedExamId); return sel && (demandeTdrPalu(sel.analyses || sel.examen) || demandeTdrDengue(sel.analyses || sel.examen)) ? "(facultatif pour un TDR)" : "*"; })()}</label>
               <textarea
                 placeholder="Ex: Goutte Épaisse : POSITIVE. Densité parasitaire : 4500 trophozoïtes/µL."
                 value={examResultat}

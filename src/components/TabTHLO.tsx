@@ -1,8 +1,9 @@
 /**
- * THLO — Rapport hebdomadaire de surveillance épidémiologique (SIMR).
+ * TLOH — Rapport hebdomadaire de surveillance épidémiologique (SIMR).
  *
  * Les chiffres se calculent tout seuls à partir des consultations, des fiches
- * pédiatriques et des hospitalisations de la semaine : il n'y a rien à
+ * pédiatriques, des hospitalisations et des TDR saisis au laboratoire
+ * (paludisme et dengue) de la semaine : il n'y a rien à
  * importer, le tableau se met à jour dès qu'un dossier change (y compris sur
  * les autres appareils, grâce à la synchronisation cloud).
  */
@@ -17,7 +18,7 @@ import { Consultation, ExamenLabo, FichePediatrique, Hospitalisation } from "../
 import {
   MALADIES_THLO, TRANCHES_AGE, Compte, RapportTHLO, ConfigTHLO, CONFIG_THLO_DEFAUT, SemaineEpi,
   compterSemaine, semaineDe, semainePrecedente, decalerSemaine, libelleSemaine, valeursFinales, texteTHLO, somme, zero, dateLimite, isoDate,
-  indicateursSemaine, indicateursFinaux, autresAuto, numeroTLOH, INDICATEURS_FICHE, CleIndicateur,
+  CHAMPS_FICHE, ChampFiche, ficheAuto, ficheFinale, normaliserConfig,
 } from "../modules/thlo/thloData";
 import { formatWhatsAppNumber } from "../lib/whatsapp";
 
@@ -25,8 +26,7 @@ interface Props {
   consultations: Consultation[];
   pediatrie: FichePediatrique[];
   hospitalisations: Hospitalisation[];
-  /** Examens du laboratoire (pour compter les TDR paludisme et les tests dengue). */
-  laboExamens?: ExamenLabo[];
+  examens?: ExamenLabo[];
   rapports: RapportTHLO[];
   onUpdateRapports: (r: RapportTHLO[]) => void;
   config?: ConfigTHLO;
@@ -38,10 +38,10 @@ interface Props {
 const dateFr = (iso?: string) => (iso ? new Date(iso.length === 10 ? iso + "T00:00:00" : iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" }) : "");
 
 export default function TabTHLO({
-  consultations, pediatrie, hospitalisations, laboExamens = [], rapports, onUpdateRapports, config, onUpdateConfig, theme = "light", agentNom,
+  consultations, pediatrie, hospitalisations, examens = [], rapports, onUpdateRapports, config, onUpdateConfig, theme = "light", agentNom,
 }: Props) {
   const isDark = theme === "dark";
-  const cfg: ConfigTHLO = { ...CONFIG_THLO_DEFAUT, ...(config || {}) };
+  const cfg: ConfigTHLO = normaliserConfig(config);
   const muted = isDark ? "text-gray-400" : "text-gray-500";
   const card = `rounded-lg border ${isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"}`;
   const today = isoDate(new Date());
@@ -64,12 +64,17 @@ export default function TabTHLO({
   const [cfgDraft, setCfgDraft] = useState<ConfigTHLO>(cfg);
 
   const auto = useMemo(
-    () => compterSemaine(semaine, consultations, pediatrie, hospitalisations),
-    [semaine, consultations, pediatrie, hospitalisations]
+    () => compterSemaine(semaine, consultations, pediatrie, hospitalisations, examens),
+    [semaine, consultations, pediatrie, hospitalisations, examens]
   );
   const rapport = rapports.find((r) => r.id === semaine.id);
   const verrouille = !!rapport && rapport.statut !== "Brouillon";
   const valeurs = valeursFinales(rapport, auto);
+  const ficheA = ficheAuto(auto, valeurs);
+  const fiche = ficheFinale(rapport, ficheA);
+  const [detailTdr, setDetailTdr] = useState<"palu" | "dengue" | null>(null);
+  const tdrEnAttente = auto.tdr.palu.filter((t) => t.resultat === "En attente").length + auto.tdr.dengue.filter((t) => t.resultat === "En attente").length;
+  const numeroTLOH = `${String(semaine.numero).padStart(2, "0")}/${semaine.annee}`;
   const totalCas = MALADIES_THLO.reduce((s, m) => s + somme(valeurs.cas[m.id]), 0);
   const totalDeces = MALADIES_THLO.reduce((s, m) => s + somme(valeurs.deces[m.id]), 0);
   const maladiesAvecCas = MALADIES_THLO.filter((m) => somme(valeurs.cas[m.id]) + somme(valeurs.deces[m.id]) > 0);
@@ -79,42 +84,14 @@ export default function TabTHLO({
   const semaineTerminee = semaine.fin < today;
   const agesAVerifier = auto.details.filter((d) => d.ageInconnu).length;
 
-  // --- Bloc de la fiche TLOH (TDR, PS, PG, dengue, autres) ---
-  const autoInd = useMemo(
-    () => indicateursSemaine(semaine, consultations, pediatrie, laboExamens),
-    [semaine, consultations, pediatrie, laboExamens]
-  );
-  const indicateurs = indicateursFinaux(rapport, autoInd, valeurs);
-  const autresAutomatique = autresAuto(valeurs);
-  const autresTexte = (rapport?.autres ?? "").trim() || autresAutomatique;
-  const [detailInd, setDetailInd] = useState<"tdr" | "dengue" | null>(null);
-  const [numDraft, setNumDraft] = useState("");
-  const [autresDraft, setAutresDraft] = useState("");
-
   const [obs, setObs] = useState("");
   const [redige, setRedige] = useState("");
   React.useEffect(() => {
     setObs(rapport?.observations || "");
     setRedige(rapport?.redigePar || agentNom || cfg.responsable || "");
     setDetailId(null);
-    setNumDraft(rapport?.numeroTLOH || "");
-    setAutresDraft(rapport?.autres || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [semaine.id, rapport?.id]);
-
-  const corrigerIndicateur = (cle: CleIndicateur, valeur: string) => {
-    if (verrouille || cle === "ps" || cle === "pg") return;
-    const r = baseRapport();
-    const v = Math.max(0, parseInt(valeur, 10) || 0);
-    const autoV = (autoInd.valeurs as Record<string, number>)[cle];
-    sauver({ ...r, observations: obs, redigePar: redige, indicateursCorrections: { ...(r.indicateursCorrections || {}), [cle]: v === autoV ? null : v } });
-  };
-  const enregistrerFiche = () => {
-    if (verrouille) return;
-    const r = baseRapport();
-    if ((r.numeroTLOH || "") === numDraft.trim() && (r.autres || "") === autresDraft.trim()) return;
-    sauver({ ...r, observations: obs, redigePar: redige, numeroTLOH: numDraft.trim() || undefined, autres: autresDraft.trim() || undefined });
-  };
 
   const baseRapport = (): RapportTHLO =>
     rapport || {
@@ -141,6 +118,16 @@ export default function TabTHLO({
     });
   };
 
+  const corrigerFiche = (champ: ChampFiche, valeur: string) => {
+    if (verrouille) return;
+    const r = baseRapport();
+    const v = Math.max(0, parseInt(valeur, 10) || 0);
+    sauver({
+      ...r, observations: obs, redigePar: redige,
+      correctionsFiche: { ...(r.correctionsFiche || {}), [champ]: v === ficheA[champ] ? null : v },
+    });
+  };
+
   const annulerCorrection = (maladieId: string) => {
     if (!rapport || verrouille) return;
     const c = { ...rapport.corrections };
@@ -154,19 +141,17 @@ export default function TabTHLO({
     if (!semaineTerminee && !window.confirm("La semaine n'est pas terminée. Valider quand même le rapport maintenant ?")) return;
     sauver({
       ...baseRapport(), observations: obs.trim(), redigePar: redige.trim(), statut: "Validé", valideLe: new Date().toISOString(),
-      valeursFigees: { cas: valeurs.cas, deces: valeurs.deces },
-      indicateursFiges: indicateurs,
-      numeroTLOH: numDraft.trim() || undefined, autres: autresDraft.trim() || undefined,
+      valeursFigees: { cas: valeurs.cas, deces: valeurs.deces }, ficheFigee: fiche,
     });
   };
 
   const rouvrir = () => {
     if (!rapport) return;
     if (!window.confirm("Rouvrir ce rapport ? Les chiffres seront de nouveau recalculés à partir des dossiers.")) return;
-    sauver({ ...rapport, statut: "Brouillon", valeursFigees: undefined, indicateursFiges: undefined, transmisLe: undefined, moyenTransmission: undefined });
+    sauver({ ...rapport, statut: "Brouillon", valeursFigees: undefined, ficheFigee: undefined, transmisLe: undefined, moyenTransmission: undefined });
   };
 
-  const texte = texteTHLO(semaine, cfg, valeurs, { ...baseRapport(), observations: obs, redigePar: redige, numeroTLOH: numDraft }, { indicateurs, autres: autresTexte });
+  const texte = texteTHLO(semaine, cfg, valeurs, { ...baseRapport(), observations: obs, redigePar: redige }, fiche);
   const numDistrict = formatWhatsAppNumber(cfg.telephoneDistrict);
 
   const marquerTransmis = (moyen: string) => {
@@ -174,7 +159,7 @@ export default function TabTHLO({
     sauver({
       ...r, observations: obs.trim(), redigePar: redige.trim(), statut: "Transmis",
       valeursFigees: r.valeursFigees || { cas: valeurs.cas, deces: valeurs.deces },
-      indicateursFiges: r.indicateursFiges || indicateurs,
+      ficheFigee: r.ficheFigee || fiche,
       valideLe: r.valideLe || new Date().toISOString(),
       transmisLe: new Date().toISOString(), transmisPar: redige.trim() || agentNom, moyenTransmission: moyen,
     });
@@ -187,23 +172,21 @@ export default function TabTHLO({
 
   const telechargerPDF = () => {
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-    doc.setFontSize(14);
-    doc.text(`${cfg.formationSanitaire} — TLOH N° ${numeroTLOH(rapport, semaine)}`, 14, 14);
+    doc.setFontSize(15);
+    doc.text(cfg.formationSanitaire || "CSI DEO GRACIAS", 14, 13);
+    doc.setFontSize(13);
+    doc.text(`TLOH N° ${numeroTLOH} — Rapport hebdomadaire de surveillance épidémiologique`, 14, 20);
     doc.setFontSize(10);
-    doc.text(`Semaine épidémiologique ${libelleSemaine(semaine)}`, 14, 21);
-    doc.text(`District : ${cfg.district || "—"}   Région : ${cfg.region || "—"}`, 14, 27);
+    doc.text(`Semaine ${libelleSemaine(semaine)}   District : ${cfg.district || "—"}   Région : ${cfg.region || "—"}`, 14, 26);
     autoTable(doc, {
-      startY: 31,
-      head: [["TDR réalisés", "TDR +", "TDR -", "PS", "PG", "Dengue cas suspects", "Dengue cas probables"]],
-      body: [[indicateurs.tdrRealises, indicateurs.tdrPositifs, indicateurs.tdrNegatifs, indicateurs.ps, indicateurs.pg, indicateurs.dengueSuspect, indicateurs.dengueProbable]],
-      styles: { fontSize: 10, halign: "center", fontStyle: "bold" },
-      headStyles: { fillColor: [13, 148, 136], fontStyle: "bold" },
+      startY: 30,
+      head: [["TDR réalisés", "TDR +", "TDR −", "PS", "PG", "TDR Dengue réalisés", "TDR Dengue +", "TDR Dengue −", "Dengue cas suspects", "Dengue cas probables", "Autres"]],
+      body: [[fiche.tdr_realises, fiche.tdr_pos, fiche.tdr_neg, fiche.ps, fiche.pg, fiche.dengue_tdr_realises, fiche.dengue_tdr_pos, fiche.dengue_tdr_neg, fiche.dengue_suspects, fiche.dengue_probables, fiche.autres]],
+      styles: { fontSize: 9, halign: "center" },
+      headStyles: { fillColor: [13, 148, 136] },
     });
-    const yAutres = (doc as any).lastAutoTable.finalY + 5;
-    doc.setFontSize(9);
-    doc.text(doc.splitTextToSize(`Autres : ${autresTexte || "RAS"}`, 265), 14, yAutres);
     autoTable(doc, {
-      startY: yAutres + 5,
+      startY: (doc as any).lastAutoTable.finalY + 5,
       head: [
         [{ content: "Maladie", rowSpan: 2 }, { content: "Cas", colSpan: 5 }, { content: "Décès", colSpan: 5 }],
         [...TRANCHES_AGE, "Total", ...TRANCHES_AGE, "Total"],
@@ -270,7 +253,7 @@ export default function TabTHLO({
         <div>
           <h2 className="text-xl font-bold flex items-center gap-2"><Activity className="w-5 h-5 text-emerald-600" /> TLOH — Surveillance épidémiologique hebdomadaire</h2>
           <p className={`text-sm ${muted}`}>
-            Les cas et décès se comptent tout seuls à partir des consultations, des fiches pédiatriques et des hospitalisations. Vérifiez, corrigez si besoin, validez puis transmettez au District.
+            Tout se compte seul à partir du laboratoire (TDR paludisme et dengue), des consultations, des urgences, de la pédiatrie et des hospitalisations. Semaine du lundi au dimanche, transmission au District le lundi à {cfg.heureTransmission || "08:00"}.
           </p>
         </div>
         <button onClick={() => { setCfgDraft(cfg); setShowConfig(!showConfig); }} className={`text-sm font-semibold rounded-lg px-3 py-1.5 border flex items-center gap-1 ${isDark ? "border-gray-600" : "border-gray-300"}`}>
@@ -295,10 +278,14 @@ export default function TabTHLO({
               </div>
             ))}
             <div>
-              <label className="text-sm font-medium">Transmission au plus tard le</label>
+              <label className="text-sm font-medium">Jour de transmission</label>
               <select className="w-full mt-1 px-3 py-2 rounded border bg-transparent" value={cfgDraft.jourLimite} onChange={(e) => setCfgDraft({ ...cfgDraft, jourLimite: Number(e.target.value) })}>
                 {["lundi", "mardi", "mercredi", "jeudi", "vendredi"].map((j, i) => <option key={j} value={i + 1}>{j} suivant la semaine</option>)}
               </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Heure de transmission</label>
+              <input type="time" className="w-full mt-1 px-3 py-2 rounded border bg-transparent" value={cfgDraft.heureTransmission || "08:00"} onChange={(e) => setCfgDraft({ ...cfgDraft, heureTransmission: e.target.value })} />
             </div>
           </div>
           <div className="flex justify-end gap-2">
@@ -316,7 +303,7 @@ export default function TabTHLO({
             <div className="font-bold">Semaine épidémiologique {libelleSemaine(semaine)}</div>
             <div className={`text-xs ${muted}`}>
               {semaine.id === semaineCourante.id ? "Semaine en cours (pas encore terminée) · " : ""}
-              À transmettre au plus tard le {dateFr(limite)}
+              TLOH N° {numeroTLOH} · à transmettre le {dateFr(limite)} à {cfg.heureTransmission || "08:00"}
             </div>
           </div>
           <button onClick={() => allerA(decalerSemaine(semaine, 1))} disabled={semaine.id === semaineCourante.id} aria-label="Semaine suivante" className={`p-2 rounded border disabled:opacity-30 ${isDark ? "border-gray-600" : "border-gray-300"}`}><ChevronRight className="w-4 h-4" /></button>
@@ -334,7 +321,7 @@ export default function TabTHLO({
         return (
           <div className="rounded-lg border-2 border-amber-400 bg-amber-500/10 p-3 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span>
-              <b>Rapport de la semaine passée (S{String(prec.numero).padStart(2, "0")}) à transmettre</b> au plus tard le {dateFr(dateLimite(prec, cfg))}
+              <b>Rapport de la semaine passée (S{String(prec.numero).padStart(2, "0")}) à transmettre</b> le {dateFr(dateLimite(prec, cfg))} à {cfg.heureTransmission || "08:00"}
               {today > dateLimite(prec, cfg) ? <b className="text-red-600"> — en retard</b> : ""}.
             </span>
             <button onClick={() => allerA(prec)} className="px-3 py-1.5 rounded bg-amber-500 text-white font-semibold">Ouvrir S{String(prec.numero).padStart(2, "0")}</button>
@@ -368,104 +355,71 @@ export default function TabTHLO({
         </div>
       )}
 
-      {/* Fiche TLOH : en-tête + paludisme / dengue / autres */}
+      {/* Fiche TLOH (format du District) */}
       <div className={`${card} p-4 space-y-3`}>
-        <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div>
-            <div className="text-lg font-bold uppercase tracking-wide">{cfg.formationSanitaire || "Formation sanitaire"}</div>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="font-bold">TLOH N°</span>
-              {verrouille ? (
-                <b>{numeroTLOH(rapport, semaine)}</b>
-              ) : (
-                <input
-                  value={numDraft} onChange={(e) => setNumDraft(e.target.value)} onBlur={enregistrerFiche}
-                  placeholder={String(semaine.numero).padStart(2, "0")}
-                  className={`w-24 px-2 py-1 rounded border bg-transparent font-bold ${isDark ? "border-gray-600" : "border-gray-300"}`}
-                />
+            <div className="text-lg font-bold">{cfg.formationSanitaire || "CSI DEO GRACIAS"}</div>
+            <div className="font-semibold">TLOH N° {numeroTLOH}</div>
+          </div>
+          <div className={`text-xs ${muted}`}>{verrouille ? "Chiffres figés (rapport validé)" : "Mis à jour en temps réel · une case corrigée devient orange"}</div>
+        </div>
+
+        {(["Paludisme", "Dengue", "Autres"] as const).map((g) => (
+          <div key={g}>
+            <div className="flex items-center justify-between">
+              <div className="text-xs uppercase font-semibold tracking-wide text-emerald-600">{g}</div>
+              {g !== "Autres" && (
+                <button onClick={() => setDetailTdr(detailTdr === (g === "Paludisme" ? "palu" : "dengue") ? null : g === "Paludisme" ? "palu" : "dengue")} className="text-xs font-semibold text-emerald-600">
+                  {detailTdr === (g === "Paludisme" ? "palu" : "dengue") ? "Masquer les TDR" : "Voir les TDR"}
+                </button>
               )}
-              <span className={`text-xs ${muted}`}>(par défaut : n° de la semaine)</span>
             </div>
-          </div>
-          <div className={`text-xs ${muted} max-w-md`}>
-            Calcul automatique : TDR à partir des résultats du laboratoire et des diagnostics (« TDR+ », « TDR négatif ») ; PS et PG = lignes paludisme du tableau ; dengue « probable » si le diagnostic le dit ou si un test dengue est positif.
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-          {INDICATEURS_FICHE.map((ind) => {
-            const v = indicateurs[ind.cle];
-            const corr = rapport?.indicateursCorrections?.[ind.cle];
-            const corrige = !verrouille && corr !== null && corr !== undefined && ind.cle !== "ps" && ind.cle !== "pg";
-            const lectureSeule = verrouille || ind.cle === "ps" || ind.cle === "pg";
-            return (
-              <div key={ind.cle} className={`rounded-lg border p-2 ${corrige ? "border-amber-500 bg-amber-500/10" : isDark ? "border-gray-700" : "border-gray-200"}`} title={ind.aide}>
-                <div className={`text-xs font-semibold ${muted}`}>{ind.label}</div>
-                {lectureSeule ? (
-                  <div className="text-2xl font-bold">{v}</div>
-                ) : (
-                  <input type="number" min={0} inputMode="numeric" value={v} onChange={(e) => corrigerIndicateur(ind.cle, e.target.value)}
-                    className="w-full text-2xl font-bold bg-transparent outline-none" />
-                )}
-                {corrige && (
-                  <button onClick={() => { const r = baseRapport(); sauver({ ...r, indicateursCorrections: { ...(r.indicateursCorrections || {}), [ind.cle]: null } }); }}
-                    className="text-[11px] text-amber-600 inline-flex items-center gap-0.5"><RotateCcw className="w-3 h-3" /> auto ({(autoInd.valeurs as Record<string, number>)[ind.cle]})</button>
-                )}
-                {(ind.cle === "ps" || ind.cle === "pg") && !verrouille && <div className={`text-[11px] ${muted}`}>suit le tableau</div>}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mt-1">
+              {CHAMPS_FICHE.filter((c) => c.groupe === g).map((c) => {
+                const v = fiche[c.id];
+                const corrige = !verrouille && rapport?.correctionsFiche?.[c.id] !== null && rapport?.correctionsFiche?.[c.id] !== undefined && v !== ficheA[c.id];
+                const rouge = (c.id === "tdr_pos" || c.id === "dengue_tdr_pos" || c.id === "dengue_probables" || c.id === "pg") && v > 0;
+                return (
+                  <div key={c.id} className={`rounded border p-2 ${corrige ? "border-amber-500 bg-amber-500/10" : isDark ? "border-gray-700" : "border-gray-200"}`}>
+                    <div className={`text-[11px] font-semibold ${muted}`}>{c.label}</div>
+                    {verrouille ? (
+                      <div className={`text-2xl font-bold ${rouge ? "text-red-600" : ""}`}>{v}</div>
+                    ) : (
+                      <input type="number" min={0} inputMode="numeric" value={v} onChange={(e) => corrigerFiche(c.id, e.target.value)}
+                        title={corrige ? `Corrigé à la main (valeur automatique : ${ficheA[c.id]})` : "Valeur calculée automatiquement"}
+                        className={`w-full text-2xl font-bold bg-transparent outline-none ${rouge ? "text-red-600" : ""}`} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {g !== "Autres" && detailTdr === (g === "Paludisme" ? "palu" : "dengue") && (
+              <div className={`mt-2 rounded p-2 text-xs space-y-1 ${isDark ? "bg-gray-900" : "bg-gray-50"}`}>
+                {(g === "Paludisme" ? auto.tdr.palu : auto.tdr.dengue).length === 0 && <div className={muted}>Aucun TDR cette semaine.</div>}
+                {(g === "Paludisme" ? auto.tdr.palu : auto.tdr.dengue).map((t) => (
+                  <div key={t.examenId} className="flex flex-wrap gap-x-3">
+                    <b>{t.patient}</b>
+                    <span>{dateFr(t.date)}</span>
+                    <span className={t.resultat === "Positif" ? "text-red-600 font-semibold" : t.resultat === "Négatif" ? "text-emerald-600 font-semibold" : "text-amber-600 font-semibold"}>{t.resultat}</span>
+                  </div>
+                ))}
               </div>
-            );
-          })}
-        </div>
+            )}
+          </div>
+        ))}
 
-        {(() => {
-          const alertes: string[] = [];
-          if (indicateurs.tdrPositifs + indicateurs.tdrNegatifs !== indicateurs.tdrRealises)
-            alertes.push(`TDR + (${indicateurs.tdrPositifs}) + TDR − (${indicateurs.tdrNegatifs}) ≠ TDR réalisés (${indicateurs.tdrRealises})${autoInd.details.some((d) => d.cle === "tdr" && d.resultat === "indetermine") ? " : certains résultats de TDR sont illisibles, vérifiez le détail" : ""}.`);
-          if (indicateurs.ps + indicateurs.pg > indicateurs.tdrPositifs && indicateurs.tdrRealises > 0)
-            alertes.push(`PS + PG (${indicateurs.ps + indicateurs.pg}) dépasse le nombre de TDR positifs (${indicateurs.tdrPositifs}) : des cas de paludisme ont-ils été confirmés autrement (goutte épaisse) ?`);
-          const dengueTableau = somme(valeurs.cas["dengue"] || zero());
-          if (indicateurs.dengueSuspect + indicateurs.dengueProbable !== dengueTableau)
-            alertes.push(`Dengue : suspects + probables (${indicateurs.dengueSuspect + indicateurs.dengueProbable}) ≠ cas de dengue du tableau (${dengueTableau}).`);
-          return alertes.length > 0 && !verrouille ? (
-            <div className="text-sm text-amber-600 space-y-0.5">{alertes.map((a, i) => <div key={i} className="flex gap-1.5"><AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {a}</div>)}</div>
-          ) : null;
-        })()}
-
-        <div className="flex flex-wrap gap-3 text-xs">
-          {(["tdr", "dengue"] as const).map((k) => {
-            const n = autoInd.details.filter((d) => d.cle === k).length;
-            return n > 0 ? (
-              <button key={k} onClick={() => setDetailInd(detailInd === k ? null : k)} className="font-semibold text-emerald-600">
-                {detailInd === k ? "Masquer" : `Voir les ${n} ${k === "tdr" ? "TDR" : "cas de dengue"} trouvés`}
-              </button>
-            ) : null;
-          })}
-        </div>
-        {detailInd && (
-          <div className={`rounded p-2 text-xs space-y-1 ${isDark ? "bg-gray-900" : "bg-gray-50"}`}>
-            {autoInd.details.filter((d) => d.cle === detailInd).map((d, i) => (
-              <div key={i} className="flex flex-wrap gap-x-3">
-                <b>{d.patient}</b><span>{dateFr(d.date)}</span><span>{d.source}</span>
-                <span className={`font-semibold ${d.resultat === "positif" || d.resultat === "probable" ? "text-red-600" : d.resultat === "indetermine" ? "text-amber-600" : ""}`}>{d.resultat === "indetermine" ? "résultat illisible" : d.resultat}</span>
-                <span className={muted}>« {d.texte} »</span>
-              </div>
-            ))}
+        {!verrouille && auto.tdr.paluNonClasses.length > 0 && (
+          <div className="rounded border border-amber-400 bg-amber-500/10 p-2 text-sm">
+            <b>{auto.tdr.paluNonClasses.length} TDR paludisme positif(s) pas encore classé(s) PS ou PG par le médecin :</b>{" "}
+            {auto.tdr.paluNonClasses.map((t) => t.patient).join(", ")}. Le médecin choisit PS ou PG dans la consultation du patient.
           </div>
         )}
-
-        <div>
-          <label className="text-sm font-medium">Autres</label>
-          {verrouille ? (
-            <div className="text-sm mt-1">{autresTexte || "RAS"}</div>
-          ) : (
-            <textarea
-              className="w-full mt-1 px-3 py-2 rounded border bg-transparent min-h-[50px]"
-              value={autresDraft} onChange={(e) => setAutresDraft(e.target.value)} onBlur={enregistrerFiche}
-              placeholder={autresAutomatique ? `Automatique : ${autresAutomatique}` : "RAS (aucune autre maladie sous surveillance cette semaine)"}
-            />
-          )}
-          {!verrouille && !autresDraft.trim() && <p className={`text-xs ${muted}`}>Laissé vide, le rapport reprend automatiquement les autres maladies du tableau ci-dessous.</p>}
-        </div>
+        {!verrouille && tdrEnAttente > 0 && (
+          <p className="text-sm text-amber-600 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4" /> {tdrEnAttente} TDR demandé(s) cette semaine encore sans résultat au laboratoire (non comptés).
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -492,7 +446,7 @@ export default function TabTHLO({
       {/* Tableau */}
       <div className={`${card} p-3`}>
         <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <div className="font-semibold">Cas et décès par tranche d'âge</div>
+          <div className="font-semibold">Détail SIMR — cas et décès par tranche d'âge</div>
           <label className="text-sm flex items-center gap-2">
             <input type="checkbox" checked={seulementAvecCas} onChange={(e) => setSeulementAvecCas(e.target.checked)} /> Seulement les maladies avec des cas
           </label>
