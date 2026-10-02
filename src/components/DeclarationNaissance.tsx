@@ -170,12 +170,22 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
   });
   const [plus, setPlus] = useState(false);
 
+  // N° automatique (non modifiable) : date de naissance JJMMAAAA, suffixe -2, -3…
+  // si plusieurs naissances le même jour. Recalculé à l'enregistrement à partir
+  // de la liste à jour, pour éviter deux fois le même numéro.
+  const [j, mo, an] = [a.date.slice(8, 10), a.date.slice(5, 7), a.date.slice(0, 4)];
+  const baseNumero = `${j}${mo}${an}`;
+  const numeroExistantValide =
+    !!existante?.numero &&
+    (existante.numero === baseNumero || existante.numero.startsWith(`${baseNumero}-`)) &&
+    !accouchements.some((x) => x.id !== a.id && x.declarationNaissance?.numero === existante.numero);
+  const numeroAuto = numeroExistantValide ? existante!.numero : prochainNumeroDeclaration(accouchements, a.date, a.id);
+
   const set = (patch: Partial<DeclarationNaissance>) => setD((x) => ({ ...x, ...patch }));
   const setP = (qui: "mere" | "pere", patch: Partial<PersonneDeclaration>) => setD((x) => ({ ...x, [qui]: { ...x[qui], ...patch } }));
 
   const valider = (): DeclarationNaissance | null => {
     const manque: string[] = [];
-    if (!d.numero.trim()) manque.push("N° de la déclaration");
     if (!(d.declarantAgentNom || "").trim()) manque.push("nom de la sage-femme / de l'accoucheur");
     if (!d.mere.nom.trim()) manque.push("nom de la mère");
     if (!d.mere.dateNaissance) manque.push("date de naissance de la mère");
@@ -184,11 +194,7 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
       alert("Veuillez compléter : " + manque.join(", ") + ".");
       return null;
     }
-    if (accouchements.some((x) => x.id !== a.id && x.declarationNaissance?.numero === d.numero.trim())) {
-      alert(`Le N° ${d.numero} est déjà utilisé par une autre déclaration.`);
-      return null;
-    }
-    return JSON.parse(JSON.stringify({ ...d, numero: d.numero.trim() })); // retire les undefined (synchro cloud)
+    return JSON.parse(JSON.stringify({ ...d, numero: numeroAuto })); // retire les undefined (synchro cloud)
   };
 
   const enregistrer = (imprimer: boolean) => {
@@ -244,7 +250,10 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
           <div className="rounded-xl border-2 border-pink-200 p-3 space-y-3">
             <div className="text-xs font-bold uppercase text-pink-800">Imprimé sur la déclaration</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              <div><label className={lbl}>N° de la déclaration *</label><input className={input} value={d.numero} onChange={(e) => set({ numero: e.target.value })} /></div>
+              <div>
+                <label className={lbl}>N° de la déclaration (automatique)</label>
+                <div className="text-sm font-bold font-mono text-pink-800 px-3 py-1.5 rounded-lg bg-pink-50 border border-pink-200">{numeroAuto}</div>
+              </div>
               <div><label className={lbl}>Fait à</label><input className={input} value={d.lieuSignature || ""} onChange={(e) => set({ lieuSignature: e.target.value })} /></div>
               <div><label className={lbl}>Le</label><input type="date" className={input} value={d.dateEtablissement} onChange={(e) => set({ dateEtablissement: e.target.value })} /></div>
             </div>
