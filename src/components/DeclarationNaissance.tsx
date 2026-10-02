@@ -108,7 +108,7 @@ function contenu(a: Accouchement, d: DeclarationNaissance, staff: Staff[]) {
     [[`Née le : ${neeLe}`, "n"]],
     [["Qui a accouchée le  ", "n"], [`${dateFr(a.date)} à ${heureEnToutesLettres(a.heure)}`, "bi"]],
     [["D'un enfant de sexe ", "n"], [fille ? "FEMININ" : "MASCULIN", "bi"]],
-    d.vivant ? [[fille ? "Née " : "Né ", "n"], [fille ? "vivante" : "vivant", "bi"]] : [[fille ? "Mort-née" : "Mort-né", "bi"]],
+    [[fille ? "Née " : "Né ", "n"], [fille ? "vivante" : "vivant", "bi"]],
   ];
   return { lignes, lieu: d.lieuSignature || EN_TETE.ville };
 }
@@ -235,7 +235,7 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
       nomEnfant: "",
       prenomsEnfant: "",
       naissance: "Unique",
-      vivant: !/mort|deced|décéd/i.test(a.etatEnfant || ""),
+      vivant: true,
       mere: { ...personneVide(), nom: m.nom, prenoms: m.prenoms, contact: cpnMere?.contact || "" },
       pere: personneVide(),
       declarantNom: "",
@@ -424,12 +424,9 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
 
             <div className="text-xs text-stone-700 bg-pink-50 rounded-lg p-2 space-y-0.5">
               <div>Qui a accouché le <b>{dateFr(a.date)} à {heureEnToutesLettres(a.heure)}</b></div>
-              <div>D'un enfant de sexe <b>{fille ? "FÉMININ" : "MASCULIN"}</b> <span className="text-stone-500">(repris de l'enregistrement de la naissance)</span></div>
+              <div>D'un enfant de sexe <b>{fille ? "FEMININ" : "MASCULIN"}</b> <span className="text-stone-500">(repris de l'enregistrement de la naissance)</span></div>
+              <div>{fille ? "Née " : "Né "}<b>{fille ? "vivante" : "vivant"}</b></div>
             </div>
-            <label className="flex items-center gap-2 text-xs font-semibold text-stone-700">
-              <input type="checkbox" checked={!d.vivant} onChange={(e) => set({ vivant: !e.target.checked })} />
-              Enfant {fille ? "mort-née" : "mort-né"} (sinon : « {fille ? "Née vivante" : "Né vivant"} »)
-            </label>
           </div>
 
           {/* --- Le reste : enregistré avec la naissance, non imprimé --- */}
