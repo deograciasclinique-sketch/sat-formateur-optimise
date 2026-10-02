@@ -20,7 +20,7 @@ import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 
 // En-tête du modèle officiel du cabinet.
 const EN_TETE = {
-  gauche: ["MINISTERE DE LA SANTE", "DIRECTION REGIONALE DE LA SANTE", "DISTRICT SANITAIRE DE DO", "« DEO - GRACIAS »", "Secteur 10 Yeguere Rue de l'habitat porte n°363 / 76404327"],
+  gauche: ["MINISTERE DE LA SANTE", "DIRECTION REGIONALE DE LA SANTE", "DISTRICT SANITAIRE DE DO", "« DEO - GRACIAS »", "Secteur 10 Yeguere Rue de l'habitat porte n°363 /76404327"],
   pays: "BURKINA FASO",
   devise: "Unité-Progrès-Justice",
   etablissement: "CABINET DE SOINS DEO GRACIAS",
@@ -67,7 +67,7 @@ export function heureEnToutesLettres(hhmm?: string): string {
   if (!m) return hhmm || "";
   const h = parseInt(m[1], 10), mn = parseInt(m[2], 10);
   const hh = String(h).padStart(2, "0"), mm = String(mn).padStart(2, "0");
-  return `${hh}h (${enLettres(h, true)}) heure${h > 1 ? "s" : ""}${mn ? ` ${mm} (${enLettres(mn, true)}) minute${mn > 1 ? "s" : ""}` : ""}`;
+  return `${hh}h (${enLettres(h, true)}) heure${h > 1 ? "s" : ""}${mn ? ` ${mm}(${enLettres(mn, true)}) minute${mn > 1 ? "s" : ""}` : ""}`;
 }
 
 const esc = (s?: string | number) =>
@@ -85,20 +85,32 @@ const decouperNom = (complet: string): { nom: string; prenoms: string } => {
   return { nom: t[0] || "", prenoms: t.slice(1).join(" ") };
 };
 
-/** Textes de la déclaration, communs à l'impression, au PDF et au message WhatsApp. */
+type Style = "n" | "bi"; // normal | gras italique
+type Ligne = [string, Style][];
+
+/**
+ * Lignes de la déclaration, mot pour mot comme le modèle du cabinet
+ * (seuls les noms, dates et heure changent). Communes à l'impression, au
+ * PDF et au message WhatsApp.
+ */
 function contenu(a: Accouchement, d: DeclarationNaissance, staff: Staff[]) {
   const agent = staff.find((s) => s.id === (d.declarantAgentId || a.sageFemmeId));
   const nomAgent = d.declarantAgentNom || agent?.nom || "……………………";
-  const fonction = (d.declarantAgentFonction || agent?.poste || "sage-femme").toLowerCase();
+  const fonction = (d.declarantAgentFonction || agent?.poste || "sage femme").toLowerCase();
   const fille = a.sexeEnfant === "Féminin";
-  const etat = d.vivant ? (fille ? "Née vivante" : "Né vivant") : fille ? "Mort-née" : "Mort-né";
   const mere = `${(d.mere.nom || "").toUpperCase()} ${d.mere.prenoms || ""}`.trim();
   const neeLe = [d.mere.dateNaissance ? dateFr(d.mere.dateNaissance) : "", d.mere.lieuNaissance ? `à ${d.mere.lieuNaissance.toUpperCase()}` : ""].filter(Boolean).join(" ");
   const civ = d.declarantAgentCivilite || "Mme";
-  const soussigne = `Je soussigné${civ === "M." ? "" : "e"} ${civ}`;
-  const accouche = `${dateFr(a.date)} à ${heureEnToutesLettres(a.heure)}`;
-  const sexe = fille ? "FÉMININ" : "MASCULIN";
-  return { nomAgent, fonction, fille, etat, mere, neeLe, soussigne, accouche, sexe, lieu: d.lieuSignature || EN_TETE.ville };
+  const lignes: Ligne[] = [
+    [[`Je soussigné ${civ} ${nomAgent}  ${fonction}`, "n"]],
+    [["En service à la maternité du ", "n"], [EN_TETE.etablissement, "bi"], [", déclare avoir donné des soins à", "n"]],
+    [[`Madame : ${mere}`, "n"]],
+    [[`Née le : ${neeLe}`, "n"]],
+    [["Qui a accouchée le  ", "n"], [`${dateFr(a.date)} à ${heureEnToutesLettres(a.heure)}`, "bi"]],
+    [["D'un enfant de sexe ", "n"], [fille ? "FEMININ" : "MASCULIN", "bi"]],
+    d.vivant ? [[fille ? "Née " : "Né ", "n"], [fille ? "vivante" : "vivant", "bi"]] : [[fille ? "Mort-née" : "Mort-né", "bi"]],
+  ];
+  return { lignes, lieu: d.lieuSignature || EN_TETE.ville };
 }
 
 /** Déclaration au format PDF (même mise en page que l'impression). */
@@ -106,38 +118,31 @@ export function genererPdfDeclaration(a: Accouchement, d: DeclarationNaissance, 
   const c = contenu(a, d, staff);
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const X = 20, L = 210 - 20;
-  doc.setFont("helvetica", "bold").setFontSize(10.5);
-  EN_TETE.gauche.forEach((l, i) => doc.text(l, X, 22 + i * 6));
-  doc.text(EN_TETE.pays, 165, 22, { align: "center" });
-  doc.text(EN_TETE.devise, 165, 28, { align: "center" });
-  doc.text(`${c.lieu}, le ${dateFr(d.dateEtablissement)}`, 165, 40, { align: "center" });
-  doc.setFontSize(12);
+  doc.setFont("helvetica", "normal").setFontSize(11);
+  EN_TETE.gauche.forEach((l, i) => doc.text(l, X, 22 + i * 7));
+  doc.text(EN_TETE.pays, 168, 22, { align: "center" });
+  doc.text(EN_TETE.devise, 168, 29, { align: "center" });
+  doc.text(`${c.lieu}, le ${dateFr(d.dateEtablissement)}`, 168, 50, { align: "center" });
+  doc.setFont("helvetica", "bold").setFontSize(12);
   const titre = `DECLARATION DE NAISSANCE N° ${d.numero}`;
-  doc.text(titre, 105, 66, { align: "center" });
+  doc.text(titre, 105, 68, { align: "center" });
   const tw = doc.getTextWidth(titre);
-  doc.setLineWidth(0.3).line(105 - tw / 2, 67, 105 + tw / 2, 67);
+  doc.setLineWidth(0.3).line(105 - tw / 2, 69, 105 + tw / 2, 69);
 
   // Une ligne faite de morceaux en styles différents.
-  doc.setFontSize(11.5);
-  let y = 82;
-  const ligne = (morceaux: [string, "normal" | "bold" | "bolditalic"][]) => {
+  doc.setFontSize(12);
+  let y = 84;
+  c.lignes.forEach((ligne) => {
     let x = X;
-    morceaux.forEach(([t, style]) => {
-      doc.setFont("helvetica", style);
-      const lignes = doc.splitTextToSize(t, L - x) as string[];
-      doc.text(lignes[0], x, y);
-      x += doc.getTextWidth(lignes[0]);
-      lignes.slice(1).forEach((r) => { y += 7; x = X; doc.text(r, x, y); x += doc.getTextWidth(r); });
+    ligne.forEach(([t, style]) => {
+      doc.setFont("helvetica", style === "bi" ? "bolditalic" : "normal");
+      const morceaux = doc.splitTextToSize(t, L - x) as string[];
+      doc.text(morceaux[0], x, y);
+      x += doc.getTextWidth(morceaux[0]);
+      morceaux.slice(1).forEach((r) => { y += 8; x = X; doc.text(r, x, y); x += doc.getTextWidth(r); });
     });
-    y += 7.5;
-  };
-  ligne([[`${c.soussigne} `, "normal"], [c.nomAgent, "bold"], [` ${c.fonction}`, "normal"]]);
-  ligne([["En service à la maternité du ", "normal"], [EN_TETE.etablissement, "bolditalic"], [", déclare avoir donné des soins à", "normal"]]);
-  ligne([["Madame : ", "normal"], [c.mere, "bold"]]);
-  ligne([[`Née le : ${c.neeLe}`, "normal"]]);
-  ligne([["Qui a accouché le ", "normal"], [c.accouche, "bolditalic"]]);
-  ligne([["D'un enfant de sexe ", "normal"], [c.sexe, "bolditalic"]]);
-  ligne([[c.etat, "bolditalic"]]);
+    y += 8;
+  });
   return doc.output("blob");
 }
 
@@ -147,20 +152,17 @@ export function messageWhatsAppDeclaration(a: Accouchement, d: DeclarationNaissa
   return [
     pour === "famille" ? "Bonjour," : "Bonjour, à l'attention du service de l'état civil,",
     "",
-    `*DÉCLARATION DE NAISSANCE N° ${d.numero}*`,
-    `${EN_TETE.etablissement} — ${EN_TETE.gauche[4]}`,
-    "",
-    `${c.soussigne} ${c.nomAgent}, ${c.fonction}, en service à la maternité du ${EN_TETE.etablissement}, déclare avoir donné des soins à :`,
-    `Madame : *${c.mere}*`,
-    `Née le : ${c.neeLe}`,
-    `Qui a accouché le *${c.accouche}*`,
-    `D'un enfant de sexe *${c.sexe}*`,
-    `*${c.etat}*`,
-    "",
+    ...EN_TETE.gauche,
+    `${EN_TETE.pays} — ${EN_TETE.devise}`,
     `${c.lieu}, le ${dateFr(d.dateEtablissement)}`,
+    "",
+    `*DECLARATION DE NAISSANCE N° ${d.numero}*`,
+    "",
+    ...c.lignes.map((l) => l.map(([t, st]) => (st === "bi" ? `*_${t.trim()}_*${t.endsWith(" ") ? " " : ""}` : t)).join("")),
+    "",
     pour === "famille"
       ? "Présentez l'original signé et cacheté au centre d'état civil pour établir l'acte de naissance de l'enfant."
-      : "Le document signé et cacheté est joint (PDF).",
+      : "Le document est joint (PDF).",
   ].join("\n");
 }
 
@@ -170,26 +172,18 @@ export function imprimerDeclaration(a: Accouchement, d: DeclarationNaissance, st
     alert("La fenêtre d'impression est bloquée. Veuillez autoriser les pop-ups pour cette application.");
     return;
   }
-  const agent = staff.find((s) => s.id === (d.declarantAgentId || a.sageFemmeId));
-  const nomAgent = d.declarantAgentNom || agent?.nom || "……………………";
-  const fonction = (d.declarantAgentFonction || agent?.poste || "sage-femme").toLowerCase();
-  const fille = a.sexeEnfant === "Féminin";
-  const etat = d.vivant ? (fille ? "Née vivante" : "Né vivant") : fille ? "Mort-née" : "Mort-né";
-  const mere = `${(d.mere.nom || "").toUpperCase()} ${d.mere.prenoms || ""}`.trim();
-  const neeLe = [d.mere.dateNaissance ? dateFr(d.mere.dateNaissance) : "", d.mere.lieuNaissance ? `à ${d.mere.lieuNaissance.toUpperCase()}` : ""].filter(Boolean).join(" ");
-
+  const c = contenu(a, d, staff);
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Déclaration de naissance N° ${esc(d.numero)}</title>
     <style>
       @page{size:A4;margin:18mm 18mm}
       @media screen{body{padding:18mm;max-width:210mm}}
-      body{font-family:Calibri,Carlito,Arial,sans-serif;color:#000;font-size:15px;margin:0}
+      body{font-family:Calibri,Carlito,Arial,sans-serif;color:#000;font-size:16px;margin:0}
       .entete{display:flex;justify-content:space-between;align-items:flex-start}
-      .g div{font-weight:bold;line-height:1.55}
-      .g div:last-child{font-weight:bold}
-      .d{text-align:center;font-weight:bold;line-height:1.55}
-      .d .lieu{margin-top:30px}
-      h1{text-align:center;font-size:16px;text-decoration:underline;margin:34px 0 22px;font-weight:bold}
-      p{margin:0;line-height:1.75}
+      .g div{line-height:1.7}
+      .d{text-align:center;line-height:1.7;padding-right:10mm}
+      .d .lieu{margin-top:44px}
+      h1{text-align:center;font-size:16px;text-decoration:underline;margin:40px 0 26px;font-weight:bold}
+      p{margin:0;line-height:1.85;white-space:pre-wrap}
       .bas{display:flex;justify-content:flex-end;margin-top:36px}
       .bas div{width:45%;text-align:center;min-height:120px}
     </style></head><body>
@@ -202,13 +196,7 @@ export function imprimerDeclaration(a: Accouchement, d: DeclarationNaissance, st
       </div>
     </div>
     <h1>DECLARATION DE NAISSANCE N° ${esc(d.numero)}</h1>
-    <p>Je soussigné${d.declarantAgentCivilite === "M." ? "" : "e"} ${esc(d.declarantAgentCivilite || "Mme")} <b>${esc(nomAgent)}</b> ${esc(fonction)}</p>
-    <p>En service à la maternité du <b><i>${esc(EN_TETE.etablissement)}</i></b>, déclare avoir donné des soins à</p>
-    <p>Madame : <b>${esc(mere)}</b></p>
-    <p>Née le : ${esc(neeLe)}</p>
-    <p>Qui a accouché le <b><i>${esc(dateFr(a.date))} à ${esc(heureEnToutesLettres(a.heure))}</i></b></p>
-    <p>D'un enfant de sexe <b><i>${fille ? "FÉMININ" : "MASCULIN"}</i></b></p>
-    <p><b><i>${etat}</i></b></p>
+    ${c.lignes.map((l) => `<p>${l.map(([t, st]) => (st === "bi" ? `<b><i>${esc(t)}</i></b>` : esc(t))).join("")}</p>`).join("\n    ")}
     <div class="bas"><div></div></div>
     <script>window.onload=function(){setTimeout(function(){window.print()},300)}</script>
     </body></html>`);
