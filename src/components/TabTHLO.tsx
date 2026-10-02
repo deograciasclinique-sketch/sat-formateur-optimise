@@ -13,10 +13,11 @@ import autoTable from "jspdf-autotable";
 import {
   AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, ClipboardCopy, FileDown, Lock, RotateCcw, Send, Settings2, Unlock, Activity,
 } from "lucide-react";
-import { Consultation, FichePediatrique, Hospitalisation } from "../types";
+import { Consultation, ExamenLabo, FichePediatrique, Hospitalisation } from "../types";
 import {
   MALADIES_THLO, TRANCHES_AGE, Compte, RapportTHLO, ConfigTHLO, CONFIG_THLO_DEFAUT, SemaineEpi,
   compterSemaine, semaineDe, semainePrecedente, decalerSemaine, libelleSemaine, valeursFinales, texteTHLO, somme, zero, dateLimite, isoDate,
+  indicateursSemaine, indicateursFinaux, autresAuto, numeroTLOH, INDICATEURS_FICHE, CleIndicateur,
 } from "../modules/thlo/thloData";
 import { formatWhatsAppNumber } from "../lib/whatsapp";
 
@@ -24,6 +25,8 @@ interface Props {
   consultations: Consultation[];
   pediatrie: FichePediatrique[];
   hospitalisations: Hospitalisation[];
+  /** Examens du laboratoire (pour compter les TDR paludisme et les tests dengue). */
+  laboExamens?: ExamenLabo[];
   rapports: RapportTHLO[];
   onUpdateRapports: (r: RapportTHLO[]) => void;
   config?: ConfigTHLO;
@@ -35,7 +38,7 @@ interface Props {
 const dateFr = (iso?: string) => (iso ? new Date(iso.length === 10 ? iso + "T00:00:00" : iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" }) : "");
 
 export default function TabTHLO({
-  consultations, pediatrie, hospitalisations, rapports, onUpdateRapports, config, onUpdateConfig, theme = "light", agentNom,
+  consultations, pediatrie, hospitalisations, laboExamens = [], rapports, onUpdateRapports, config, onUpdateConfig, theme = "light", agentNom,
 }: Props) {
   const isDark = theme === "dark";
   const cfg: ConfigTHLO = { ...CONFIG_THLO_DEFAUT, ...(config || {}) };
@@ -76,14 +79,42 @@ export default function TabTHLO({
   const semaineTerminee = semaine.fin < today;
   const agesAVerifier = auto.details.filter((d) => d.ageInconnu).length;
 
+  // --- Bloc de la fiche TLOH (TDR, PS, PG, dengue, autres) ---
+  const autoInd = useMemo(
+    () => indicateursSemaine(semaine, consultations, pediatrie, laboExamens),
+    [semaine, consultations, pediatrie, laboExamens]
+  );
+  const indicateurs = indicateursFinaux(rapport, autoInd, valeurs);
+  const autresAutomatique = autresAuto(valeurs);
+  const autresTexte = (rapport?.autres ?? "").trim() || autresAutomatique;
+  const [detailInd, setDetailInd] = useState<"tdr" | "dengue" | null>(null);
+  const [numDraft, setNumDraft] = useState("");
+  const [autresDraft, setAutresDraft] = useState("");
+
   const [obs, setObs] = useState("");
   const [redige, setRedige] = useState("");
   React.useEffect(() => {
     setObs(rapport?.observations || "");
     setRedige(rapport?.redigePar || agentNom || cfg.responsable || "");
     setDetailId(null);
+    setNumDraft(rapport?.numeroTLOH || "");
+    setAutresDraft(rapport?.autres || "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [semaine.id, rapport?.id]);
+
+  const corrigerIndicateur = (cle: CleIndicateur, valeur: string) => {
+    if (verrouille || cle === "ps" || cle === "pg") return;
+    const r = baseRapport();
+    const v = Math.max(0, parseInt(valeur, 10) || 0);
+    const autoV = (autoInd.valeurs as Record<string, number>)[cle];
+    sauver({ ...r, observations: obs, redigePar: redige, indicateursCorrections: { ...(r.indicateursCorrections || {}), [cle]: v === autoV ? null : v } });
+  };
+  const enregistrerFiche = () => {
+    if (verrouille) return;
+    const r = baseRapport();
+    if ((r.numeroTLOH || "") === numDraft.trim() && (r.autres || "") === autresDraft.trim()) return;
+    sauver({ ...r, observations: obs, redigePar: redige, numeroTLOH: numDraft.trim() || undefined, autres: autresDraft.trim() || undefined });
+  };
 
   const baseRapport = (): RapportTHLO =>
     rapport || {
@@ -124,16 +155,18 @@ export default function TabTHLO({
     sauver({
       ...baseRapport(), observations: obs.trim(), redigePar: redige.trim(), statut: "Validé", valideLe: new Date().toISOString(),
       valeursFigees: { cas: valeurs.cas, deces: valeurs.deces },
+      indicateursFiges: indicateurs,
+      numeroTLOH: numDraft.trim() || undefined, autres: autresDraft.trim() || undefined,
     });
   };
 
   const rouvrir = () => {
     if (!rapport) return;
     if (!window.confirm("Rouvrir ce rapport ? Les chiffres seront de nouveau recalculés à partir des dossiers.")) return;
-    sauver({ ...rapport, statut: "Brouillon", valeursFigees: undefined, transmisLe: undefined, moyenTransmission: undefined });
+    sauver({ ...rapport, statut: "Brouillon", valeursFigees: undefined, indicateursFiges: undefined, transmisLe: undefined, moyenTransmission: undefined });
   };
 
-  const texte = texteTHLO(semaine, cfg, valeurs, { ...baseRapport(), observations: obs, redigePar: redige });
+  const texte = texteTHLO(semaine, cfg, valeurs, { ...baseRapport(), observations: obs, redigePar: redige, numeroTLOH: numDraft }, { indicateurs, autres: autresTexte });
   const numDistrict = formatWhatsAppNumber(cfg.telephoneDistrict);
 
   const marquerTransmis = (moyen: string) => {
@@ -141,6 +174,7 @@ export default function TabTHLO({
     sauver({
       ...r, observations: obs.trim(), redigePar: redige.trim(), statut: "Transmis",
       valeursFigees: r.valeursFigees || { cas: valeurs.cas, deces: valeurs.deces },
+      indicateursFiges: r.indicateursFiges || indicateurs,
       valideLe: r.valideLe || new Date().toISOString(),
       transmisLe: new Date().toISOString(), transmisPar: redige.trim() || agentNom, moyenTransmission: moyen,
     });
@@ -154,12 +188,22 @@ export default function TabTHLO({
   const telechargerPDF = () => {
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     doc.setFontSize(14);
-    doc.text("THLO — Rapport hebdomadaire de surveillance épidémiologique (SIMR)", 14, 14);
+    doc.text(`${cfg.formationSanitaire} — TLOH N° ${numeroTLOH(rapport, semaine)}`, 14, 14);
     doc.setFontSize(10);
     doc.text(`Semaine épidémiologique ${libelleSemaine(semaine)}`, 14, 21);
-    doc.text(`Formation sanitaire : ${cfg.formationSanitaire}   District : ${cfg.district || "—"}   Région : ${cfg.region || "—"}`, 14, 27);
+    doc.text(`District : ${cfg.district || "—"}   Région : ${cfg.region || "—"}`, 14, 27);
     autoTable(doc, {
-      startY: 32,
+      startY: 31,
+      head: [["TDR réalisés", "TDR +", "TDR -", "PS", "PG", "Dengue cas suspects", "Dengue cas probables"]],
+      body: [[indicateurs.tdrRealises, indicateurs.tdrPositifs, indicateurs.tdrNegatifs, indicateurs.ps, indicateurs.pg, indicateurs.dengueSuspect, indicateurs.dengueProbable]],
+      styles: { fontSize: 10, halign: "center", fontStyle: "bold" },
+      headStyles: { fillColor: [13, 148, 136], fontStyle: "bold" },
+    });
+    const yAutres = (doc as any).lastAutoTable.finalY + 5;
+    doc.setFontSize(9);
+    doc.text(doc.splitTextToSize(`Autres : ${autresTexte || "RAS"}`, 265), 14, yAutres);
+    autoTable(doc, {
+      startY: yAutres + 5,
       head: [
         [{ content: "Maladie", rowSpan: 2 }, { content: "Cas", colSpan: 5 }, { content: "Décès", colSpan: 5 }],
         [...TRANCHES_AGE, "Total", ...TRANCHES_AGE, "Total"],
@@ -180,7 +224,7 @@ export default function TabTHLO({
     doc.text("* Maladie à notification immédiate (dans les 24 h) au District.", 14, y);
     if (obs.trim()) doc.text(`Observations : ${obs.trim()}`.slice(0, 180), 14, y + 6);
     doc.text(`Rédigé par : ${redige || "—"}      Statut : ${rapport?.statut || "Brouillon"}${rapport?.transmisLe ? ` (transmis le ${dateFr(rapport.transmisLe)})` : ""}`, 14, y + 12);
-    doc.save(`THLO_${semaine.id}.pdf`);
+    doc.save(`TLOH_${semaine.id}.pdf`);
   };
 
   // Historique des 12 dernières semaines (complétude et promptitude).
@@ -224,7 +268,7 @@ export default function TabTHLO({
     <div className={`p-4 space-y-4 ${isDark ? "text-gray-100" : "text-gray-900"}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold flex items-center gap-2"><Activity className="w-5 h-5 text-emerald-600" /> THLO — Surveillance épidémiologique hebdomadaire</h2>
+          <h2 className="text-xl font-bold flex items-center gap-2"><Activity className="w-5 h-5 text-emerald-600" /> TLOH — Surveillance épidémiologique hebdomadaire</h2>
           <p className={`text-sm ${muted}`}>
             Les cas et décès se comptent tout seuls à partir des consultations, des fiches pédiatriques et des hospitalisations. Vérifiez, corrigez si besoin, validez puis transmettez au District.
           </p>
@@ -323,6 +367,106 @@ export default function TabTHLO({
           </div>
         </div>
       )}
+
+      {/* Fiche TLOH : en-tête + paludisme / dengue / autres */}
+      <div className={`${card} p-4 space-y-3`}>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="text-lg font-bold uppercase tracking-wide">{cfg.formationSanitaire || "Formation sanitaire"}</div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="font-bold">TLOH N°</span>
+              {verrouille ? (
+                <b>{numeroTLOH(rapport, semaine)}</b>
+              ) : (
+                <input
+                  value={numDraft} onChange={(e) => setNumDraft(e.target.value)} onBlur={enregistrerFiche}
+                  placeholder={String(semaine.numero).padStart(2, "0")}
+                  className={`w-24 px-2 py-1 rounded border bg-transparent font-bold ${isDark ? "border-gray-600" : "border-gray-300"}`}
+                />
+              )}
+              <span className={`text-xs ${muted}`}>(par défaut : n° de la semaine)</span>
+            </div>
+          </div>
+          <div className={`text-xs ${muted} max-w-md`}>
+            Calcul automatique : TDR à partir des résultats du laboratoire et des diagnostics (« TDR+ », « TDR négatif ») ; PS et PG = lignes paludisme du tableau ; dengue « probable » si le diagnostic le dit ou si un test dengue est positif.
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          {INDICATEURS_FICHE.map((ind) => {
+            const v = indicateurs[ind.cle];
+            const corr = rapport?.indicateursCorrections?.[ind.cle];
+            const corrige = !verrouille && corr !== null && corr !== undefined && ind.cle !== "ps" && ind.cle !== "pg";
+            const lectureSeule = verrouille || ind.cle === "ps" || ind.cle === "pg";
+            return (
+              <div key={ind.cle} className={`rounded-lg border p-2 ${corrige ? "border-amber-500 bg-amber-500/10" : isDark ? "border-gray-700" : "border-gray-200"}`} title={ind.aide}>
+                <div className={`text-xs font-semibold ${muted}`}>{ind.label}</div>
+                {lectureSeule ? (
+                  <div className="text-2xl font-bold">{v}</div>
+                ) : (
+                  <input type="number" min={0} inputMode="numeric" value={v} onChange={(e) => corrigerIndicateur(ind.cle, e.target.value)}
+                    className="w-full text-2xl font-bold bg-transparent outline-none" />
+                )}
+                {corrige && (
+                  <button onClick={() => { const r = baseRapport(); sauver({ ...r, indicateursCorrections: { ...(r.indicateursCorrections || {}), [ind.cle]: null } }); }}
+                    className="text-[11px] text-amber-600 inline-flex items-center gap-0.5"><RotateCcw className="w-3 h-3" /> auto ({(autoInd.valeurs as Record<string, number>)[ind.cle]})</button>
+                )}
+                {(ind.cle === "ps" || ind.cle === "pg") && !verrouille && <div className={`text-[11px] ${muted}`}>suit le tableau</div>}
+              </div>
+            );
+          })}
+        </div>
+
+        {(() => {
+          const alertes: string[] = [];
+          if (indicateurs.tdrPositifs + indicateurs.tdrNegatifs !== indicateurs.tdrRealises)
+            alertes.push(`TDR + (${indicateurs.tdrPositifs}) + TDR − (${indicateurs.tdrNegatifs}) ≠ TDR réalisés (${indicateurs.tdrRealises})${autoInd.details.some((d) => d.cle === "tdr" && d.resultat === "indetermine") ? " : certains résultats de TDR sont illisibles, vérifiez le détail" : ""}.`);
+          if (indicateurs.ps + indicateurs.pg > indicateurs.tdrPositifs && indicateurs.tdrRealises > 0)
+            alertes.push(`PS + PG (${indicateurs.ps + indicateurs.pg}) dépasse le nombre de TDR positifs (${indicateurs.tdrPositifs}) : des cas de paludisme ont-ils été confirmés autrement (goutte épaisse) ?`);
+          const dengueTableau = somme(valeurs.cas["dengue"] || zero());
+          if (indicateurs.dengueSuspect + indicateurs.dengueProbable !== dengueTableau)
+            alertes.push(`Dengue : suspects + probables (${indicateurs.dengueSuspect + indicateurs.dengueProbable}) ≠ cas de dengue du tableau (${dengueTableau}).`);
+          return alertes.length > 0 && !verrouille ? (
+            <div className="text-sm text-amber-600 space-y-0.5">{alertes.map((a, i) => <div key={i} className="flex gap-1.5"><AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {a}</div>)}</div>
+          ) : null;
+        })()}
+
+        <div className="flex flex-wrap gap-3 text-xs">
+          {(["tdr", "dengue"] as const).map((k) => {
+            const n = autoInd.details.filter((d) => d.cle === k).length;
+            return n > 0 ? (
+              <button key={k} onClick={() => setDetailInd(detailInd === k ? null : k)} className="font-semibold text-emerald-600">
+                {detailInd === k ? "Masquer" : `Voir les ${n} ${k === "tdr" ? "TDR" : "cas de dengue"} trouvés`}
+              </button>
+            ) : null;
+          })}
+        </div>
+        {detailInd && (
+          <div className={`rounded p-2 text-xs space-y-1 ${isDark ? "bg-gray-900" : "bg-gray-50"}`}>
+            {autoInd.details.filter((d) => d.cle === detailInd).map((d, i) => (
+              <div key={i} className="flex flex-wrap gap-x-3">
+                <b>{d.patient}</b><span>{dateFr(d.date)}</span><span>{d.source}</span>
+                <span className={`font-semibold ${d.resultat === "positif" || d.resultat === "probable" ? "text-red-600" : d.resultat === "indetermine" ? "text-amber-600" : ""}`}>{d.resultat === "indetermine" ? "résultat illisible" : d.resultat}</span>
+                <span className={muted}>« {d.texte} »</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div>
+          <label className="text-sm font-medium">Autres</label>
+          {verrouille ? (
+            <div className="text-sm mt-1">{autresTexte || "RAS"}</div>
+          ) : (
+            <textarea
+              className="w-full mt-1 px-3 py-2 rounded border bg-transparent min-h-[50px]"
+              value={autresDraft} onChange={(e) => setAutresDraft(e.target.value)} onBlur={enregistrerFiche}
+              placeholder={autresAutomatique ? `Automatique : ${autresAutomatique}` : "RAS (aucune autre maladie sous surveillance cette semaine)"}
+            />
+          )}
+          {!verrouille && !autresDraft.trim() && <p className={`text-xs ${muted}`}>Laissé vide, le rapport reprend automatiquement les autres maladies du tableau ci-dessous.</p>}
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[

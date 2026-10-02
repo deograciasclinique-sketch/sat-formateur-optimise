@@ -151,7 +151,7 @@ const getTabLabel = (id: string): string => {
     factures: "Factures & Journal",
     assurances: "Assurances & Tiers-Payant",
     rh: "Ressources Humaines",
-    thlo: "THLO — Surveillance hebdo",
+    thlo: "TLOH — Surveillance hebdo",
     indicateurs: "Indicateurs Épidémio",
     qualite: "Démarche Qualité",
     documents: "Coffre-fort Documents",
@@ -1492,7 +1492,7 @@ export default function App() {
       {
         title: "📊 Qualité & Configuration",
         items: [
-          { id: "thlo", label: "THLO — Surveillance hebdo", icon: Activity, alertCount: (() => {
+          { id: "thlo", label: "TLOH — Surveillance hebdo", icon: Activity, alertCount: (() => {
             // Rapport de la semaine passée pas encore transmis alors que la date limite est dépassée.
             const s = semainePrecedente();
             const r = thloRapports.find((x) => x.id === s.id);
@@ -2212,6 +2212,7 @@ export default function App() {
               consultations={consultations}
               pediatrie={pediatrie}
               hospitalisations={hospitalisations}
+              laboExamens={laboExamens}
               rapports={thloRapports}
               onUpdateRapports={handleUpdateThloRapports}
               config={thloConfig}
