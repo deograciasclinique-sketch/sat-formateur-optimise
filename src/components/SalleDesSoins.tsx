@@ -11,9 +11,9 @@
  * Tout est synchronisé en temps réel entre les postes, comme les consultations.
  */
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
-  Syringe, Plus, Search, Trash2, X, User, Clock, Activity, ClipboardList, CalendarClock, CheckCircle2, AlertTriangle, Ban, Pill, Bell,
+  Syringe, Plus, Search, Trash2, X, User, Clock, Activity, ClipboardList, CalendarClock, CheckCircle2, AlertTriangle, Ban, Pill,
 } from "lucide-react";
 import {
   Consultation, Hospitalisation, Medicament, SoinRealise, ConstantesSoin, PlanSoins, LigneTraitement, MedicamentAdministre,
@@ -194,108 +194,6 @@ export function cloturerPlansComplets(plans: PlanSoins[], soins: SoinRealise[]):
   return change ? out : plans;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Horaires des prises et alertes (30 min avant l'heure)              */
-/* ------------------------------------------------------------------ */
-
-export const MINUTES_AVANT_ALERTE = 30;
-
-/** "HH:MM" → minutes depuis minuit. */
-const minutesBrutes = (h: string) => {
-  const [a, b] = (h || "").split(":").map((x) => parseInt(x, 10));
-  return (isNaN(a) ? 0 : a) * 60 + (isNaN(b) ? 0 : b);
-};
-/** Minutes d'un horaire de prise : « 00:00 » = minuit en fin de journée (24:00). */
-const minutesCreneau = (h: string) => { const m = minutesBrutes(h); return m === 0 ? 1440 : m; };
-
-/** Horaires proposés par défaut pour une fréquence. */
-export const horairesParDefaut = (frequence: string): string[] => [...freqParValeur(frequence).horaires];
-
-export type StatutCreneau = "fait" | "a_venir" | "bientot" | "retard" | "hors_plan";
-export interface CreneauPrise {
-  plan: PlanSoins;
-  ligne: LigneTraitement;
-  date: string;
-  heure: string;        // horaire prévu "HH:MM"
-  minutes: number;      // minutes depuis minuit (00:00 = 1440)
-  fait?: { heure: string; agent: string };
-  statut: StatutCreneau;
-  ecartMinutes: number; // minutes avant l'heure (> 0) ou de retard (< 0)
-}
-
-/**
- * Horaires prévus d'un plan pour un jour donné, avec leur état.
- * Chaque prise enregistrée « couvre » l'horaire prévu le plus proche
- * (une prise donnée jusqu'à 30 min en avance compte pour cet horaire).
- */
-export function creneauxDuJour(plan: PlanSoins, soins: SoinRealise[], date: string, maintenant = new Date()): CreneauPrise[] {
-  const out: CreneauPrise[] = [];
-  const jour = ecartJours(plan.dateDebut, date) + 1;
-  const estAujourdhui = date === localDate(maintenant);
-  const minNow = maintenant.getHours() * 60 + maintenant.getMinutes();
-  // Le 1er jour, les horaires d'avant le début du traitement ne comptent pas.
-  const debut = plan.createdAt ? new Date(plan.createdAt) : null;
-  const minDebut = debut && !isNaN(debut.getTime()) && localDate(debut) === date && date === plan.dateDebut
-    ? debut.getHours() * 60 + debut.getMinutes() : -1;
-
-  plan.lignes.forEach((l) => {
-    if (jour < 1 || jour > (l.dureeJours || 1)) return;
-    const horaires = (l.horaires || []).filter((h) => /^\d{1,2}:\d{2}$/.test(h));
-    if (!horaires.length) return;
-    const creneaux = horaires.map((h) => ({ heure: h, minutes: minutesCreneau(h), fait: undefined as undefined | { heure: string; agent: string } }))
-      .sort((a, b) => a.minutes - b.minutes);
-    const prises = prisesDuJour(soins, plan.id, l.id, date)
-      .map((s) => ({ heure: s.heure, agent: s.agentNom, m: minutesBrutes(s.heure) }))
-      .sort((a, b) => a.m - b.m);
-    prises.forEach((p) => {
-      const libres = creneaux.filter((c) => !c.fait);
-      if (!libres.length) return;
-      const avant = libres.filter((c) => c.minutes <= p.m + MINUTES_AVANT_ALERTE);
-      const cible = avant.length ? avant[avant.length - 1] : libres[0];
-      cible.fait = { heure: p.heure, agent: p.agent };
-    });
-    creneaux.forEach((c) => {
-      let statut: StatutCreneau;
-      const ecart = c.minutes - minNow;
-      if (c.fait) statut = "fait";
-      else if (minDebut >= 0 && c.minutes < minDebut) statut = "hors_plan";
-      else if (!estAujourdhui) statut = date > localDate(maintenant) ? "a_venir" : "retard";
-      else if (ecart <= 0) statut = "retard";
-      else if (ecart <= MINUTES_AVANT_ALERTE) statut = "bientot";
-      else statut = "a_venir";
-      out.push({ plan, ligne: l, date, heure: c.minutes === 1440 ? "00:00" : c.heure, minutes: c.minutes, fait: c.fait, statut, ecartMinutes: estAujourdhui ? ecart : 0 });
-    });
-  });
-  return out.sort((a, b) => a.minutes - b.minutes);
-}
-
-/** Groupe d'alerte : un patient, un horaire, un ou plusieurs médicaments. */
-export interface AlerteSoin {
-  cle: string;          // planId|date|heure
-  plan: PlanSoins;
-  heure: string;
-  minutes: number;
-  statut: "bientot" | "retard";
-  ecartMinutes: number;
-  lignes: LigneTraitement[];
-}
-
-/** Prises d'aujourd'hui à faire dans les 30 prochaines minutes ou en retard. */
-export function alertesSoins(plans: PlanSoins[], soins: SoinRealise[], maintenant = new Date()): AlerteSoin[] {
-  const date = localDate(maintenant);
-  const groupes = new Map<string, AlerteSoin>();
-  plans.filter((p) => p.statut === "En cours").forEach((p) => {
-    creneauxDuJour(p, soins, date, maintenant).forEach((c) => {
-      if (c.statut !== "bientot" && c.statut !== "retard") return;
-      const cle = `${p.id}|${date}|${c.heure}`;
-      const g = groupes.get(cle);
-      if (g) g.lignes.push(c.ligne);
-      else groupes.set(cle, { cle, plan: p, heure: c.heure, minutes: c.minutes, statut: c.statut, ecartMinutes: c.ecartMinutes, lignes: [c.ligne] });
-    });
-  });
-  return [...groupes.values()].sort((a, b) => a.minutes - b.minutes || a.plan.patient.localeCompare(b.plan.patient));
-}
-
 /** Nombre de prises restant à faire aujourd'hui, tous plans confondus (pour les compteurs). */
 export function prisesAFaireAujourdhui(plans: PlanSoins[], soins: SoinRealise[]): number {
   const t = localDate();
@@ -320,12 +218,10 @@ export interface PreRemplissageSoin {
   planId?: string;
   // Texte de la prescription à rappeler en haut du formulaire.
   rappel?: string[];
-  // Depuis une alerte : médicaments du plan à cocher (ceux de l'horaire signalé).
-  lignesACocher?: string[];
 }
 
-type LigneForm = { key: string; produit: string; dose: string; voie: string; frequence: string; duree: string; horaires: string[] };
-const ligneVide = (): LigneForm => ({ key: generateUid(), produit: "", dose: "", voie: "", frequence: "1/j", duree: "1", horaires: horairesParDefaut("1/j") });
+type LigneForm = { key: string; produit: string; dose: string; voie: string; frequence: string; duree: string };
+const ligneVide = (): LigneForm => ({ key: generateUid(), produit: "", dose: "", voie: "", frequence: "1/j", duree: "1" });
 
 type ChampsConst = { temperature: string; tensionArterielle: string; pouls: string; saturationO2: string; glycemie: string };
 const constVides: ChampsConst = { temperature: "", tensionArterielle: "", pouls: "", saturationO2: "", glycemie: "" };
@@ -374,14 +270,13 @@ export function FormulaireSoin({
   // Mode libre : lignes de médicaments modifiables.
   const [lignes, setLignes] = useState<LigneForm[]>(() =>
     pre?.lignes && pre.lignes.length
-      ? pre.lignes.map((l) => { const f = frequenceDepuisTexte(l.frequence); return { key: generateUid(), produit: l.produit, dose: l.dose || "", voie: l.voie || "", frequence: f, duree: String(l.dureeJours || 1), horaires: horairesParDefaut(f) }; })
+      ? pre.lignes.map((l) => ({ key: generateUid(), produit: l.produit, dose: l.dose || "", voie: l.voie || "", frequence: frequenceDepuisTexte(l.frequence), duree: String(l.dureeJours || 1) }))
       : []
   );
   // Mode plan : prises cochées (par défaut, celles qui restent à faire aujourd'hui).
   const [coches, setCoches] = useState<Record<string, boolean>>(() => {
     const o: Record<string, boolean> = {};
-    const cibles = pre?.lignesACocher && pre.lignesACocher.length ? new Set(pre.lignesACocher) : null;
-    if (planExistant) etatPlan(planExistant, soins, localDate()).lignes.forEach((x) => (o[x.ligne.id] = x.active && x.reste > 0 && (!cibles || cibles.has(x.ligne.id))));
+    if (planExistant) etatPlan(planExistant, soins, localDate()).lignes.forEach((x) => (o[x.ligne.id] = x.active && x.reste > 0));
     return o;
   });
   const [creerPlan, setCreerPlan] = useState<boolean | null>(null); // null = automatique
@@ -411,10 +306,8 @@ export function FormulaireSoin({
       setLiens({ consultationId: p.consultationId, hospitalisationId: p.hospitalisationId });
     }
   };
-  const majLigne = (key: string, champ: Exclude<keyof LigneForm, "horaires">, val: string) =>
-    setLignes((ls) => ls.map((l) => (l.key !== key ? l : champ === "frequence" ? { ...l, frequence: val, horaires: horairesParDefaut(val) } : { ...l, [champ]: val })));
-  const majHoraire = (key: string, i: number, val: string) =>
-    setLignes((ls) => ls.map((l) => (l.key === key ? { ...l, horaires: l.horaires.map((h, j) => (j === i ? val : h)) } : l)));
+  const majLigne = (key: string, champ: keyof LigneForm, val: string) =>
+    setLignes((ls) => ls.map((l) => (l.key === key ? { ...l, [champ]: val } : l)));
 
   const enregistrer = () => {
     const type = typeSoin === "Autre" ? typeAutre.trim() : typeSoin;
@@ -434,15 +327,12 @@ export function FormulaireSoin({
     } else {
       const invalides = lignesRemplies.filter((l) => l.frequence !== "unique" && !(parseInt(l.duree, 10) >= 1));
       if (invalides.length) return setErreur("Indiquez la durée (en jours) de chaque médicament.");
-      if (planACreer && lignesRemplies.some((l) => l.horaires.some((h) => !/^\d{1,2}:\d{2}$/.test(h))))
-        return setErreur("Indiquez toutes les heures de prise (pour les alertes).");
       if (planACreer) {
         const lt: LigneTraitement[] = lignesRemplies.map((l) => {
           const f = freqParValeur(l.frequence);
           return {
             id: generateUid(), produit: l.produit.trim(), dose: l.dose.trim() || undefined, voie: l.voie || undefined,
-            frequence: f.label, prisesParJour: f.prises, dureeJours: l.frequence === "unique" ? 1 : parseInt(l.duree, 10),
-            horaires: [...l.horaires].sort((a, b) => minutesCreneau(a) - minutesCreneau(b)),
+            frequence: f.label, prisesParJour: f.prises, dureeJours: l.frequence === "unique" ? 1 : parseInt(l.duree, 10), horaires: f.horaires,
           } as LigneTraitement;
         });
         plan = propre({
@@ -600,16 +490,6 @@ export function FormulaireSoin({
                           value={l.frequence === "unique" ? "1" : l.duree} onChange={(e) => majLigne(l.key, "duree", e.target.value)} />
                       </label>
                     </div>
-                    {l.horaires.length > 0 && (
-                      <div className="mt-2 flex flex-wrap items-end gap-2">
-                        <span className={`text-xs font-semibold pb-2 flex items-center gap-1 ${muted}`}><Bell className="w-3.5 h-3.5" /> Heures de prise :</span>
-                        {l.horaires.map((h, j) => (
-                          <input key={j} type="time" className="px-2 py-1.5 rounded border bg-transparent text-sm" value={h}
-                            onChange={(e) => majHoraire(l.key, j, e.target.value)} aria-label={`Heure de la prise ${j + 1}`} />
-                        ))}
-                        <span className={`text-xs pb-2 ${muted}`}>alerte 30 min avant</span>
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>
@@ -724,32 +604,13 @@ export function soinsDuPatient(soins: SoinRealise[], nom: string): SoinRealise[]
 /*  Carte d'un plan de traitement                                      */
 /* ------------------------------------------------------------------ */
 
-function PastilleCreneau({ c }: { c: CreneauPrise }) {
-  const styles: Record<StatutCreneau, string> = {
-    fait: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-    a_venir: "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200",
-    bientot: "bg-amber-400 text-amber-950 animate-pulse",
-    retard: "bg-red-600 text-white",
-    hors_plan: "bg-gray-100 text-gray-400 line-through dark:bg-gray-800 dark:text-gray-500",
-  };
-  const titre =
-    c.statut === "fait" ? `Faite à ${c.fait?.heure} par ${c.fait?.agent}` :
-    c.statut === "bientot" ? `Dans ${c.ecartMinutes} min` :
-    c.statut === "retard" ? "Pas encore faite : en retard" :
-    c.statut === "hors_plan" ? "Avant le début du traitement" : "À venir";
-  const icone = c.statut === "fait" ? "✓ " : c.statut === "bientot" ? "⏰ " : c.statut === "retard" ? "⚠ " : "";
-  return <span title={titre} className={`inline-block text-xs font-bold px-1.5 py-0.5 rounded ${styles[c.statut]}`}>{icone}{c.heure}</span>;
-}
-
-export function CartePlan({ e, isDark, date, creneaux, onFaire, onArreter, onHistorique, onHoraires }: {
+export function CartePlan({ e, isDark, date, onFaire, onArreter, onHistorique }: {
   e: EtatPlan;
   isDark: boolean;
   date: string;
-  creneaux?: CreneauPrise[];
   onFaire?: () => void;
   onArreter?: () => void;
   onHistorique?: () => void;
-  onHoraires?: () => void;
 }) {
   const muted = isDark ? "text-gray-400" : "text-gray-500";
   const bord = isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white";
@@ -795,11 +656,7 @@ export function CartePlan({ e, isDark, date, creneaux, onFaire, onArreter, onHis
                     {x.faites.length}/{x.ligne.prisesParJour} {date === localDate() ? "aujourd'hui" : "ce jour"}
                   </span>
                   {x.faites.length > 0 && <span className={muted}> ({x.faites.map((f) => `${f.heure} ${f.agent.split(" ")[0]}`).join(", ")})</span>}
-                  {creneaux && creneaux.some((c) => c.ligne.id === x.ligne.id) && (
-                    <span className="ml-1 inline-flex flex-wrap gap-1 align-middle">
-                      {creneaux.filter((c) => c.ligne.id === x.ligne.id).map((c) => <PastilleCreneau key={c.heure} c={c} />)}
-                    </span>
-                  )}
+                  {x.reste > 0 && x.ligne.horaires && x.ligne.horaires.length > 0 && <span className={muted}> · prévu : {x.ligne.horaires.join(", ")}</span>}
                 </>
               )}
               {x.manquees > 0 && <span className="ml-1 text-red-600 font-bold">· {x.manquees} prise(s) manquée(s)</span>}
@@ -816,11 +673,6 @@ export function CartePlan({ e, isDark, date, creneaux, onFaire, onArreter, onHis
               {aFaire ? <><Syringe className="w-4 h-4" /> Faire les soins ({e.resteAujourdhui} prise(s) à faire)</> : <><CheckCircle2 className="w-4 h-4" /> Toutes les prises du jour sont faites</>}
             </button>
           )}
-          {onHoraires && (
-            <button onClick={onHoraires} className={`rounded-lg border px-3 py-2 text-sm font-semibold flex items-center gap-1.5 ${isDark ? "border-gray-600" : "border-gray-300"}`}>
-              <Bell className="w-4 h-4" /> Horaires
-            </button>
-          )}
           {onArreter && (
             <button onClick={onArreter} className={`rounded-lg border px-3 py-2 text-sm font-semibold flex items-center gap-1.5 ${isDark ? "border-gray-600" : "border-gray-300"}`}>
               <Ban className="w-4 h-4" /> {e.jour > e.joursTotal ? "Clôturer" : "Arrêter"}
@@ -828,67 +680,6 @@ export function CartePlan({ e, isDark, date, creneaux, onFaire, onArreter, onHis
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Modifier les heures de prise d'un plan                             */
-/* ------------------------------------------------------------------ */
-
-function EditeurHoraires({ plan, isDark, onAnnuler, onEnregistrer }: {
-  plan: PlanSoins;
-  isDark: boolean;
-  onAnnuler: () => void;
-  onEnregistrer: (p: PlanSoins) => void;
-}) {
-  const [h, setH] = useState<Record<string, string[]>>(() => {
-    const o: Record<string, string[]> = {};
-    plan.lignes.forEach((l) => {
-      const base = (l.horaires || []).slice(0, l.prisesParJour);
-      while (base.length < l.prisesParJour) base.push("");
-      o[l.id] = base;
-    });
-    return o;
-  });
-  const [erreur, setErreur] = useState("");
-  const muted = isDark ? "text-gray-400" : "text-gray-500";
-  const bord = isDark ? "border-gray-700" : "border-gray-200";
-  const valider = () => {
-    if (Object.values(h).some((arr) => arr.some((x) => !/^\d{1,2}:\d{2}$/.test(x)))) return setErreur("Indiquez toutes les heures.");
-    onEnregistrer(propre({
-      ...plan,
-      lignes: plan.lignes.map((l) => ({ ...l, horaires: [...(h[l.id] || [])].sort((a, b) => minutesCreneau(a) - minutesCreneau(b)) })),
-    }));
-  };
-  return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onAnnuler}>
-      <div className={`w-full sm:max-w-lg max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-4 sm:p-5 ${isDark ? "bg-gray-900 text-gray-100" : "bg-white text-gray-900"}`} onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="text-lg font-bold flex items-center gap-2"><Bell className="w-5 h-5 text-amber-600" /> Heures de prise — {plan.patient}</h3>
-          <button onClick={onAnnuler} className={`p-1.5 rounded ${muted}`} aria-label="Fermer"><X className="w-5 h-5" /></button>
-        </div>
-        <p className={`text-sm mb-3 ${muted}`}>Une alerte sonne {MINUTES_AVANT_ALERTE} minutes avant chaque heure, sur tous les postes de la salle des soins.</p>
-        <div className="space-y-2">
-          {plan.lignes.filter((l) => l.prisesParJour > 0 && l.dureeJours > 0).map((l) => (
-            <div key={l.id} className={`rounded-lg border p-3 ${bord}`}>
-              <div className="text-sm font-bold">{texteMed(l)}</div>
-              <div className={`text-xs mb-2 ${muted}`}>{l.frequence}</div>
-              <div className="flex flex-wrap gap-2">
-                {(h[l.id] || []).map((x, i) => (
-                  <input key={i} type="time" className="px-2 py-1.5 rounded border bg-transparent text-sm" value={x} aria-label={`Heure de la prise ${i + 1}`}
-                    onChange={(e) => setH({ ...h, [l.id]: h[l.id].map((y, j) => (j === i ? e.target.value : y)) })} />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-        {erreur && <p className="text-sm text-red-600 font-semibold mt-3">{erreur}</p>}
-        <div className="flex gap-2 mt-4">
-          <button onClick={onAnnuler} className={`flex-1 rounded-lg border px-4 py-2.5 font-semibold ${bord}`}>Annuler</button>
-          <button onClick={valider} className="flex-[2] rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 font-semibold">Enregistrer les horaires</button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -915,13 +706,6 @@ export default function SalleDesSoins({
   const [tousLesJours, setTousLesJours] = useState(false);
   const [recherche, setRecherche] = useState("");
   const [voirTermines, setVoirTermines] = useState(false);
-  const [planHoraires, setPlanHoraires] = useState<string | null>(null);
-  // Horloge : rafraîchit l'état des horaires (bientôt / en retard) chaque 30 s.
-  const [maintenant, setMaintenant] = useState(() => new Date());
-  useEffect(() => {
-    const t = window.setInterval(() => setMaintenant(new Date()), 30000);
-    return () => window.clearInterval(t);
-  }, []);
   const muted = isDark ? "text-gray-400" : "text-gray-500";
   const bord = isDark ? "border-gray-700" : "border-gray-200";
 
@@ -1024,9 +808,7 @@ export default function SalleDesSoins({
           <div className="grid gap-3 md:grid-cols-2">
             {enCours.map((e) => (
               <CartePlan key={e.plan.id} e={e} isDark={isDark} date={jour}
-                creneaux={creneauxDuJour(e.plan, soins, jour, maintenant)}
                 onFaire={() => onOuvrirFormulaire({ patient: e.plan.patient, planId: e.plan.id })}
-                onHoraires={() => setPlanHoraires(e.plan.id)}
                 onArreter={() => arreter(e.plan)}
                 onHistorique={() => { setRecherche(e.plan.patient); setTousLesJours(true); }} />
             ))}
@@ -1110,15 +892,6 @@ export default function SalleDesSoins({
           </div>
         )}
       </section>
-
-      {planHoraires && plans.find((p) => p.id === planHoraires) && (
-        <EditeurHoraires
-          plan={plans.find((p) => p.id === planHoraires)!}
-          isDark={isDark}
-          onAnnuler={() => setPlanHoraires(null)}
-          onEnregistrer={(np) => { onUpdatePlans(plans.map((x) => (x.id === np.id ? np : x))); setPlanHoraires(null); }}
-        />
-      )}
 
       {retard > 0 && (
         <p className="text-xs text-red-600 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Des prises ont été manquées : vérifiez avec le médecin s'il faut prolonger ou adapter le traitement.</p>

@@ -37,6 +37,7 @@ import {
   ConsultationPrenatale,
   DocumentArchive,
   SoinRealise,
+  Partogramme,
   PlanSoins,
 } from "./types";
 import {
@@ -67,7 +68,6 @@ import TabFacturation from "./components/TabFacturation";
 import TabAccueilCaisse from "./components/TabAccueilCaisse";
 import TabInfirmier from "./components/TabInfirmier";
 import { prisesAFaireAujourdhui } from "./components/SalleDesSoins";
-import AlertesSoins from "./components/AlertesSoins";
 import TabRDV from "./components/TabRDV";
 import TabRH from "./components/TabRH";
 import TabHospitalisation from "./components/TabHospitalisation";
@@ -141,7 +141,7 @@ const getTabLabel = (id: string): string => {
     urgences: "Triage & Urgences",
     hospit: "Hospitalisations",
     pediatrie: "Surveillance Pédiatrique",
-    maternite: "Suivi Maternité & CPN",
+    maternite: "Maternité, CPN & Salle d'accouchement",
     vaccination: "Vaccination & PEV",
     labo: "Laboratoire d'analyses",
     pharma: "Pharmacie & Stocks",
@@ -366,6 +366,8 @@ export default function App() {
   // Salle des soins : registre des soins réalisés (Salle des Infirmiers)
   const [soins, setSoins] = useState<SoinRealise[]>([]);
   const [plansSoins, setPlansSoins] = useState<PlanSoins[]>([]);
+  // Salle d'accouchement : partogrammes (Guide de soins du travail OMS 2020)
+  const [partogrammes, setPartogrammes] = useState<Partogramme[]>([]);
   const [thloConfig, setThloConfig] = useState<ConfigTHLO>(CONFIG_THLO_DEFAUT);
 
   // --- Synchronisation temps réel multi-appareils (Firestore) ---
@@ -404,6 +406,7 @@ export default function App() {
     dg_thlo_config: setThloConfig,
     dg_soins: setSoins,
     dg_plans_soins: setPlansSoins,
+    dg_partogrammes: setPartogrammes,
   });
   // Garde en mémoire la dernière valeur confirmée comme envoyée au cloud pour chaque clé,
   // afin de ne renvoyer que ce qui a réellement changé (et d'éviter les boucles avec les
@@ -658,8 +661,6 @@ export default function App() {
 
   // Active Panel Route
   const [activeTab, setActiveTab] = useState<string>("dashboard");
-  // Alerte de soin → ouvrir la Salle des soins sur le plan concerné.
-  const [demandeSoin, setDemandeSoin] = useState<{ planId: string; lignes: string[]; n: number } | null>(null);
 
   // Keep activeTab within allowed tabs
   useEffect(() => {
@@ -979,17 +980,6 @@ export default function App() {
         showToast(`${info.icone} ${info.titre}`, `${c.patient} vient d'être envoyé(e).`, "info");
         sendBrowserNotification(`${info.icone} ${info.titre}`, `${c.patient} vient d'être envoyé(e).`, `patient-${c.id}`);
       });
-
-      // Actes payés à la caisse : le patient arrive en salle infirmier pour ses soins.
-      const avant = new Map(prevConsultations.map((c) => [c.id, c.statut]));
-      if (allowedTabs.includes("infirmier")) {
-        consultations.forEach((c) => {
-          if (c.statut !== "Attente exécution actes" || !avant.has(c.id) || avant.get(c.id) === c.statut) return;
-          const titre = c.decision === "Envoyer en salle infirmier" ? "💉 Patient envoyé en salle infirmier" : "💉 Soins à exécuter";
-          showToast(titre, `${c.patient} a payé ses soins et arrive en salle infirmier.`, "info");
-          sendBrowserNotification(titre, `${c.patient} a payé ses soins et arrive en salle infirmier.`, `soins-${c.id}`);
-        });
-      }
     }
 
     prevConsultationsRef.current = consultations;
@@ -1051,6 +1041,7 @@ export default function App() {
     setThloConfig({ ...CONFIG_THLO_DEFAUT, ...safeGet<Partial<ConfigTHLO>>("dg_thlo_config", {}) });
     setSoins(safeGet<SoinRealise[]>("dg_soins", []));
     setPlansSoins(safeGet<PlanSoins[]>("dg_plans_soins", []));
+    setPartogrammes(safeGet<Partogramme[]>("dg_partogrammes", []));
     setIsLoaded(true);
   }, []);
 
@@ -1192,14 +1183,15 @@ export default function App() {
       dg_thlo_rapports: thloRapports,
       dg_thlo_config: thloConfig,
       dg_soins: soins,
-      dg_plans_soins: plansSoins
+      dg_plans_soins: plansSoins,
+      dg_partogrammes: partogrammes
     };
   }, [
     staff, medicaments, mouvements, tasks, consultations, pediatrie,
     materniteCpns, materniteAccouchements, rdv, hospitalisations, ficheReferences,
     hospEvolutions, factures, depenses, incidents, actions, audits,
     conges, absences, rhFiches, prisesEnCharge, urgences, vaccinations,
-    laboExamens, documents, actesTarifaires, thloRapports, thloConfig, soins, plansSoins
+    laboExamens, documents, actesTarifaires, thloRapports, thloConfig, soins, plansSoins, partogrammes
   ]);
 
   // Periodic auto-save effect
@@ -1439,6 +1431,11 @@ export default function App() {
     safeSet("dg_plans_soins", p);
   };
 
+  const handleUpdatePartogrammes = (p: Partogramme[]) => {
+    setPartogrammes(p);
+    safeSet("dg_partogrammes", p);
+  };
+
   const handleUpdateSoins = (newSoins: SoinRealise[]) => {
     setSoins(newSoins);
     safeSet("dg_soins", newSoins);
@@ -1468,7 +1465,7 @@ export default function App() {
           { id: "urgences", label: "Triage & Urgences", icon: ShieldAlert, alertCount: urgences.filter((u) => u.statut !== "Sorti(e) ou Libéré(e)").length },
           { id: "hospit", label: "Hospitalisations", icon: HeartPulse, alertCount: hospitalisations.filter((h) => h.statut === "En cours").length },
           { id: "pediatrie", label: "Surveillance Pédiatrique", icon: Activity },
-          { id: "maternite", label: "Suivi Maternité & CPN", icon: Sparkles },
+          { id: "maternite", label: "Maternité, CPN & Accouchement", icon: Sparkles, alertCount: partogrammes.filter((p) => p.statut === "En cours").length },
           { id: "vaccination", label: "Vaccination & PEV", icon: ShieldCheck },
           { id: "planif_familiale", label: "Planification Familiale", icon: Heart }
         ]
@@ -1518,6 +1515,7 @@ export default function App() {
   }, [
     allowedTabs,
     plansSoins,
+    partogrammes,
     soins,
     urgences,
     hospitalisations,
@@ -2287,8 +2285,6 @@ export default function App() {
               plansSoins={plansSoins}
               onUpdatePlansSoins={handleUpdatePlansSoins}
               agentNom={currentUser?.nom || ""}
-              demandeSoin={demandeSoin}
-              onDemandeSoinTraitee={() => setDemandeSoin(null)}
             />
           )}
 
@@ -2383,6 +2379,8 @@ export default function App() {
               currentUser={currentUser}
               consultations={consultations}
               onUpdateConsultations={handleUpdateConsultations}
+              partogrammes={partogrammes}
+              onUpdatePartogrammes={handleUpdatePartogrammes}
             />
           )}
 
@@ -2794,19 +2792,6 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
-
-      {/* Alertes de la Salle des soins : 30 min avant chaque prise, sur tous les onglets */}
-      {isLoaded && currentUser && allowedTabs.includes("infirmier") && (
-        <AlertesSoins
-          plans={plansSoins}
-          soins={soins}
-          isDark={theme === "dark"}
-          onFaire={(planId, lignes) => {
-            setActiveTab("infirmier");
-            setDemandeSoin({ planId, lignes, n: Date.now() });
-          }}
-        />
-      )}
     </div>
     </SelfHealingErrorBoundary>
   );
