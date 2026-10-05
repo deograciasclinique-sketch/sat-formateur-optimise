@@ -233,6 +233,59 @@ export default function InjectablesPF({ staff, currentUser, planifs, clinicName 
 
   const clienteOuverte = clientes.find((c) => c.id === ouverte) || null;
 
+  // Fiches PF « injectable » (consentement signé dans la rubrique) qui ne sont
+  // pas encore dans le suivi des injections.
+  const fichesASuivre = planifs.filter(
+    (p) => /inject|dmpa|sayana|net-en/i.test(p.methodeChoisie) && p.statut !== "Retrait effectué" && p.statut !== "Terminé" && !clientes.some((c) => c.ficheId === p.id)
+  );
+
+  function produitDeFiche(methode: string) {
+    const m = methode.toLowerCase();
+    if (m.includes("sayana") || m.includes("sous-cutané")) return "dmpa_sc";
+    if (m.includes("net-en") || m.includes("bimestriel")) return "net_en";
+    return "dmpa_im";
+  }
+
+  function inscrireFiches(fiches: FichePlanifFamiliale[]) {
+    const nouvelles: ClienteInjectable[] = fiches.map((p, k) => {
+      const morceaux = p.patient.split(" ");
+      const date = p.dateDebut || getTodayStr();
+      const prod = produitDeFiche(p.methodeChoisie);
+      const agent = staff.find((x) => x.id === p.agentId);
+      return {
+        id: generateUid(),
+        numero: `INJ-${date.slice(0, 4)}-${String(clientes.length + k + 1).padStart(3, "0")}`,
+        ficheId: p.id,
+        nom: p.nomPatiente || morceaux.slice(1).join(" ") || p.patient,
+        prenom: p.prenomPatiente || morceaux[0] || "",
+        age: p.age,
+        contact: p.contact && p.contact !== "—" ? p.contact : undefined,
+        adresse: p.adresse,
+        nombreEnfants: p.nombreEnfants,
+        dateEnregistrement: date,
+        actif: true,
+        injections: [
+          {
+            id: generateUid(),
+            date,
+            produitId: prod,
+            typeVisite: p.estNouvelleFois === false ? "Renouvellement" : "Nouvelle acceptante",
+            ta: p.ta,
+            poids: p.poids ? String(p.poids) : undefined,
+            grossesseExclue: true,
+            effets: "Aucun",
+            agentId: p.agentId,
+            agentNom: agent?.nom,
+            prochaineDate: ajouterJours(date, produit(prod).intervalleJours),
+            observations: "Première injection enregistrée depuis la fiche de consentement PF",
+          },
+        ],
+        createdAt: new Date().toISOString(),
+      };
+    });
+    setClientes((prev) => [...nouvelles, ...prev]);
+  }
+
   return (
     <div className="space-y-6">
       {/* En-tête */}
@@ -243,7 +296,7 @@ export default function InjectablesPF({ staff, currentUser, planifs, clinicName 
               <Syringe className="w-4 h-4 text-primary-600" /> Contraception injectable
             </h2>
             <p className="text-sm text-stone-500">
-              Fiche de chaque cliente, historique de ses injections et rappel automatique de la prochaine date (DMPA tous les 3 mois, NET-EN tous les 2 mois).
+              Suivi des injections : historique de chaque cliente et rappel automatique de la prochaine date (DMPA tous les 3 mois, NET-EN tous les 2 mois). La première visite se fait avec la fiche de consentement ci-dessus.
             </p>
           </div>
           <button
@@ -254,6 +307,31 @@ export default function InjectablesPF({ staff, currentUser, planifs, clinicName 
           </button>
         </div>
       </div>
+
+      {fichesASuivre.length > 0 && (
+        <div className="bg-primary-50 dark:bg-primary-950/30 border border-primary-200 dark:border-primary-900 rounded-3xl p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold text-primary-800 dark:text-primary-300">
+              {fichesASuivre.length} cliente{fichesASuivre.length > 1 ? "s" : ""} du registre PF à ajouter au suivi des injections
+            </div>
+            <button onClick={() => inscrireFiches(fichesASuivre)} className="px-3 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-xs font-bold">
+              Tout ajouter au suivi
+            </button>
+          </div>
+          <div className="space-y-1.5">
+            {fichesASuivre.map((p) => (
+              <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 text-xs bg-white dark:bg-stone-900 rounded-xl px-3 py-2">
+                <span>
+                  <strong>{p.patient}</strong> · {p.methodeChoisie} · injection du {fmt(p.dateDebut)}
+                </span>
+                <button onClick={() => inscrireFiches([p])} className="text-primary-700 dark:text-primary-300 font-bold">
+                  Ajouter au suivi
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Clientes à relancer */}
       <div className={carteCls + " space-y-3"}>

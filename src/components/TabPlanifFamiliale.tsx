@@ -8,6 +8,8 @@ import { FichePlanifFamiliale, Staff, ExamenLabo } from "../types";
 import { generateUid, getTodayStr, safeGet, safeSet } from "../data";
 import RetraitsContraception from "./RetraitsContraception";
 import InjectablesPF from "./InjectablesPF";
+import { useCloudSyncedState } from "../lib/useCloudSyncedState";
+import { db, authReady } from "../lib/firebase";
 import {
   Plus,
   Trash2,
@@ -60,6 +62,96 @@ const MEC_CONDITIONS: MECCondition[] = [
   { id: "tumeur_foie", label: "Tumeur hépatique bénigne ou maligne / Cirrhose sévère", category: "general" }
 ];
 
+// ------------------------------------------------------------------
+// Rubriques par méthode : chacune a son counseling GATHER, son consentement
+// éclairé, ses critères MEC OMS et son guide clinique, mais toutes les fiches
+// vont dans le même registre de suivi PF.
+// ------------------------------------------------------------------
+type FamillePF = "implant" | "diu" | "injectables" | "pilules" | "barriere" | "naturelles";
+
+const FAMILLES_PF: Record<FamillePF, { label: string; methodes: { value: string; label: string }[]; mec: string[]; procedure: string }> = {
+  implant: {
+    label: "Implants",
+    methodes: [
+      { value: "Implants (Jadelle)", label: "Jadelle — 2 bâtonnets, 5 ans" },
+      { value: "Implants (Implanon)", label: "Implanon NXT — 1 bâtonnet, 3 ans" },
+    ],
+    mec: ["implants"],
+    procedure: "implant",
+  },
+  diu: {
+    label: "DIU",
+    methodes: [
+      { value: "DIU au Cuivre", label: "DIU au cuivre (TCu 380A) — 10 ans" },
+      { value: "DIU hormonal (SIU-LNG)", label: "DIU hormonal au lévonorgestrel (SIU-LNG) — 5 ans" },
+    ],
+    mec: ["diu_cu", "diu_lng"],
+    procedure: "diu",
+  },
+  injectables: {
+    label: "Injectables",
+    methodes: [
+      { value: "Injectable Trimestriel (DMPA)", label: "DMPA-IM (Dépo-Provera 150 mg) — 3 mois" },
+      { value: "Injectable sous-cutané (Sayana Press)", label: "DMPA-SC (Sayana Press 104 mg) — 3 mois" },
+      { value: "Injectable bimestriel (NET-EN)", label: "NET-EN (Noristérat 200 mg) — 2 mois" },
+    ],
+    mec: ["injectable"],
+    procedure: "injectable",
+  },
+  pilules: {
+    label: "Pilules",
+    methodes: [
+      { value: "Pilule combinée (COC)", label: "Pilule orale combinée (COC)" },
+      { value: "Pilule progestative seule (POP)", label: "Pilule progestative seule (POP)" },
+    ],
+    mec: ["coc", "pop"],
+    procedure: "pilule",
+  },
+  barriere: {
+    label: "Préservatifs & barrière",
+    methodes: [
+      { value: "Préservatif masculin", label: "Préservatif masculin" },
+      { value: "Préservatif féminin", label: "Préservatif féminin" },
+      { value: "Spermicides / diaphragme", label: "Spermicides / diaphragme" },
+    ],
+    mec: ["barriere"],
+    procedure: "barriere",
+  },
+  naturelles: {
+    label: "MAMA & méthodes naturelles",
+    methodes: [
+      { value: "MAMA (allaitement maternel exclusif)", label: "MAMA — allaitement maternel exclusif" },
+      { value: "Méthode des jours fixes (Collier du cycle)", label: "Méthode des jours fixes (collier du cycle)" },
+      { value: "Autre méthode naturelle", label: "Autre méthode naturelle (glaire, température…)" },
+    ],
+    mec: ["mama", "naturelle"],
+    procedure: "naturelles",
+  },
+};
+const ORDRE_FAMILLES: FamillePF[] = ["implant", "diu", "injectables", "pilules", "barriere", "naturelles"];
+
+function familleDe(methode: string): FamillePF {
+  const m = (methode || "").toLowerCase();
+  if (m.includes("implant") || m.includes("jadelle") || m.includes("implanon")) return "implant";
+  if (m.includes("diu") || m.includes("siu")) return "diu";
+  if (m.includes("inject") || m.includes("dmpa") || m.includes("sayana") || m.includes("net-en")) return "injectables";
+  if (m.includes("pilule") || m.includes("coc") || m.includes("pop")) return "pilules";
+  if (m.includes("préservatif") || m.includes("preservatif") || m.includes("barri") || m.includes("spermicide") || m.includes("diaphragme")) return "barriere";
+  return "naturelles";
+}
+
+const MEC_METHODES = [
+  { id: "coc", name: "COCs (Combinée)", desc: "Pilules orales combinées", type: "Hormonale" },
+  { id: "pop", name: "POPs (Progestatif)", desc: "Micro-pilules progestatives", type: "Hormonale" },
+  { id: "injectable", name: "Injectables (DMPA / NET-EN)", desc: "Injection tous les 2 ou 3 mois", type: "Hormonale" },
+  { id: "implants", name: "Implants", desc: "Jadelle / Implanon", type: "LARC" },
+  { id: "diu_cu", name: "DIU au Cuivre", desc: "Dispositif Intra-Utérin non hormonal", type: "LARC" },
+  { id: "diu_lng", name: "DIU hormonal (SIU-LNG)", desc: "Système intra-utérin au lévonorgestrel", type: "LARC" },
+  { id: "barriere", name: "Préservatifs & barrière", desc: "Masculin, féminin, spermicides", type: "Barrière" },
+  { id: "mama", name: "MAMA", desc: "Méthode de l'allaitement maternel et de l'aménorrhée", type: "Naturelle" },
+  { id: "naturelle", name: "Méthodes naturelles", desc: "Jours fixes, glaire, température", type: "Naturelle" },
+];
+
 // Methods evaluation table based on conditions chosen
 // 1 = Green (Sans restriction), 2 = Yellow (Avantages > Risques), 3 = Orange (Risques > Avantages), 4 = Red (Contre-indiqué)
 const getMECRating = (conditionIds: string[], methodId: string): { rating: 1 | 2 | 3 | 4; reasons: string[] } => {
@@ -93,6 +185,22 @@ const getMECRating = (conditionIds: string[], methodId: string): { rating: 1 | 2
       else if (id === "cancer_sein") { rating = Math.max(rating, 4) as any; reasons.push("Sensibilité hormonale tumorale"); }
       else if (id === "tumeur_foie") { rating = Math.max(rating, 3) as any; reasons.push("Risque d'altération hépatique"); }
     }
+    else if (methodId === "diu_lng") { // DIU hormonal (SIU-LNG)
+      if (id === "grosse_suspectee") { rating = Math.max(rating, 4) as any; reasons.push("Grossesse : insertion contre-indiquée"); }
+      else if (id === "infection_pelv") { rating = Math.max(rating, 4) as any; reasons.push("Infection génitale haute active : risque infectieux grave"); }
+      else if (id === "cancer_sein") { rating = Math.max(rating, 4) as any; reasons.push("Cancer du sein actuel : progestatif contre-indiqué"); }
+      else if (id === "tumeur_foie") { rating = Math.max(rating, 3) as any; reasons.push("Atteinte hépatique : métabolisme hormonal altéré"); }
+      else if (id === "postpartum_non_allait" || id === "allait_6s") { rating = Math.max(rating, 2) as any; reasons.push("Insertion dans les 48h, sinon reporter à 4 semaines"); }
+    }
+    else if (methodId === "mama") { // Allaitement maternel exclusif
+      if (id === "grosse_suspectee") { rating = Math.max(rating, 4) as any; reasons.push("Grossesse : méthode sans objet"); }
+      else if (id === "postpartum_non_allait") { rating = Math.max(rating, 4) as any; reasons.push("Pas d'allaitement : la MAMA n'est pas possible"); }
+    }
+    else if (methodId === "naturelle") { // Méthodes basées sur la connaissance de la fécondité
+      if (id === "grosse_suspectee") { rating = Math.max(rating, 4) as any; reasons.push("Grossesse : méthode sans objet"); }
+      else if (id === "allait_6s" || id === "allait_6s_6m" || id === "postpartum_non_allait") { rating = Math.max(rating, 2) as any; reasons.push("Cycles irréguliers après l'accouchement : méthode moins fiable"); }
+    }
+    // "barriere" : aucune restriction médicale (catégorie 1), protège aussi des IST/VIH.
     else if (methodId === "diu_cu") { // Copper IUD (DIU au Cuivre)
       if (id === "grosse_suspectee") { rating = Math.max(rating, 4) as any; reasons.push("Grossesse : Risque majeur d'avortement septique"); }
       else if (id === "infection_pelv") { rating = Math.max(rating, 4) as any; reasons.push("Infection génitale haute active : Risque infectieux grave"); }
@@ -128,18 +236,46 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
     }
   })();
 
-  // Registry states
-  const [planifs, setPlanifs] = useState<FichePlanifFamiliale[]>([]);
-  const [vuePF, setVuePF] = useState<"suivi" | "injectables" | "retraits">("suivi");
+  // Registre unique de suivi PF, synchronisé en temps réel entre appareils.
+  const [planifs, setPlanifs] = useCloudSyncedState<FichePlanifFamiliale[]>("dg_planif_familiale", []);
+  const [vuePF, setVuePF] = useState<FamillePF | "retraits" | "registre">("implant");
+  const estFamille = vuePF !== "retraits" && vuePF !== "registre";
+  const famille = FAMILLES_PF[estFamille ? (vuePF as FamillePF) : "implant"];
+  const [registreFamille, setRegistreFamille] = useState<FamillePF | "toutes">("implant");
+
+  // Passage unique (par appareil) des fiches PF qui n'étaient enregistrées que
+  // localement vers le registre partagé : fusion avec ce qui est déjà dans le
+  // cloud (rien n'est perdu) et retrait des 2 fiches d'exemple d'origine.
+  useEffect(() => {
+    const DRAPEAU = "dg_planif_familiale_cloud_v1";
+    if (localStorage.getItem(DRAPEAU) === "ok" || !db) return;
+    let annule = false;
+    (async () => {
+      try {
+        await authReady;
+        const locales = safeGet<FichePlanifFamiliale[]>("dg_planif_familiale", []);
+        const snap = await db.collection("dg_live_sync").doc("dg_planif_familiale").get();
+        const cloud: FichePlanifFamiliale[] = snap.exists && Array.isArray(snap.data()?.data) ? snap.data()!.data : [];
+        const estExemple = (p: FichePlanifFamiliale) =>
+          (p.id === "PF-2026-001" && p.patient === "Fatoumata Barro") || (p.id === "PF-2026-002" && p.patient === "Mariam Ouédraogo");
+        const parId = new Map<string, FichePlanifFamiliale>();
+        [...locales, ...cloud].forEach((p) => { if (!estExemple(p)) parId.set(p.id, p); });
+        const fusion = Array.from(parId.values()).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+        if (annule) return;
+        setPlanifs(fusion);
+        localStorage.setItem(DRAPEAU, "ok");
+      } catch (e) {
+        console.error("[PF] Transfert du registre vers le cloud impossible pour l'instant :", e);
+      }
+    })();
+    return () => { annule = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Quand un retrait est réalisé pour une patiente suivie ici, sa fiche PF
   // passe automatiquement au statut « Retrait effectué ».
   const marquerFicheRetiree = (ficheId: string) => {
-    setPlanifs((prev) => {
-      const updated = prev.map((p) => (p.id === ficheId ? { ...p, statut: "Retrait effectué" } : p));
-      safeSet("dg_planif_familiale", updated);
-      return updated;
-    });
+    setPlanifs((prev) => prev.map((p) => (p.id === ficheId ? { ...p, statut: "Retrait effectué" } : p)));
   };
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStatusFilter, setSelectedStatusFilter] = useState("Tous");
@@ -157,7 +293,7 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
   const [estNouvelleFois, setEstNouvelleFois] = useState(true);
   const [age, setAge] = useState("");
   const [contact, setContact] = useState("");
-  const [methodeChoisie, setMethodeChoisie] = useState("DIU au Cuivre");
+  const [methodeChoisie, setMethodeChoisie] = useState("Implants (Jadelle)");
   const [dateDebut, setDateDebut] = useState(getTodayStr());
   const [dateSuiviPrevu, setDateSuiviPrevu] = useState("");
   const [counselingEffectue, setCounselingEffectue] = useState(true);
@@ -169,7 +305,7 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
 
   // WHO Disk UI state
   const [selectedMecConditions, setSelectedMecConditions] = useState<string[]>([]);
-  const [viewProcedureTab, setViewProcedureTab] = useState<"diu" | "implant" | "injectable" | "pilule">("diu");
+  const [viewProcedureTab, setViewProcedureTab] = useState<string>("implant");
 
   // Counseling Interactive Checklists
   const [counselingSteps, setCounselingSteps] = useState({
@@ -188,54 +324,6 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
   } | null>(null);
 
   // Load registry from LocalStorage
-  useEffect(() => {
-    const data = safeGet<FichePlanifFamiliale[]>("dg_planif_familiale", []);
-    // Fallback seed
-    if (data.length === 0) {
-      const initial: FichePlanifFamiliale[] = [
-        {
-          id: "PF-2026-001",
-          patient: "Fatoumata Barro",
-          age: 28,
-          contact: "+226 70 41 55 92",
-          methodeChoisie: "Implants (Jadelle)",
-          dateDebut: "2026-06-15",
-          dateSuiviPrevu: "2026-09-15",
-          counselingEffectue: true,
-          consentementSigne: true,
-          ta: "120/70",
-          poids: 64,
-          contraintesSelectionnees: [],
-          notesMedicales: "Excellente tolérance clinique. Pas d'effets secondaires signalés.",
-          agentId: staff[0]?.id || "sage_femme",
-          statut: "En cours",
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: "PF-2026-002",
-          patient: "Mariam Ouédraogo",
-          age: 32,
-          contact: "+226 65 12 90 44",
-          methodeChoisie: "DIU au Cuivre",
-          dateDebut: "2026-07-02",
-          dateSuiviPrevu: "2026-08-02",
-          counselingEffectue: true,
-          consentementSigne: true,
-          ta: "115/80",
-          poids: 58,
-          contraintesSelectionnees: ["allait_6s_6m"],
-          notesMedicales: "Insertion réussie sans douleur aiguë. Fil de contrôle vérifié à 1.5 cm.",
-          agentId: staff[1]?.id || "sage_femme",
-          statut: "En cours",
-          createdAt: new Date().toISOString()
-        }
-      ];
-      setPlanifs(initial);
-      safeSet("dg_planif_familiale", initial);
-    } else {
-      setPlanifs(data);
-    }
-  }, [staff]);
 
   // Handle lab prescription
   const [pfPrescriptionAnalyse, setPfPrescriptionAnalyse] = useState("");
@@ -312,9 +400,7 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
       createdAt: new Date().toISOString()
     };
 
-    const updated = [newRecord, ...planifs];
-    setPlanifs(updated);
-    safeSet("dg_planif_familiale", updated);
+    setPlanifs((prev) => [newRecord, ...prev]);
 
     // Reset Form
     setPatient("");
@@ -339,9 +425,7 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
   // Delete planning record
   const handleDeletePlanif = (id: string) => {
     if (confirm("Voulez-vous vraiment archiver ou supprimer définitivement cette fiche de planification familiale ?")) {
-      const updated = planifs.filter((p) => p.id !== id);
-      setPlanifs(updated);
-      safeSet("dg_planif_familiale", updated);
+      setPlanifs((prev) => prev.filter((p) => p.id !== id));
     }
   };
 
@@ -493,8 +577,22 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
     setCounselingEffectue(true);
   };
 
+  // Changement de rubrique : la méthode, le guide clinique et le filtre du
+  // registre s'adaptent à la famille de méthodes affichée.
+  useEffect(() => {
+    if (!estFamille) {
+      if (vuePF === "registre") setRegistreFamille("toutes");
+      return;
+    }
+    setMethodeChoisie(famille.methodes[0].value);
+    setViewProcedureTab(famille.procedure);
+    setRegistreFamille(vuePF as FamillePF);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vuePF]);
+
   // Filter and search
   const filteredPlanifs = planifs.filter((p) => {
+    if (registreFamille !== "toutes" && familleDe(p.methodeChoisie) !== registreFamille) return false;
     const matchesSearch = p.patient.toLowerCase().includes(searchTerm.toLowerCase()) || p.id.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = selectedStatusFilter === "Tous" || p.statut === selectedStatusFilter;
     return matchesSearch && matchesStatus;
@@ -515,7 +613,7 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
                 Planification Familiale & Suivi
               </h1>
               <p className="text-xs text-stone-500 dark:text-stone-400 font-medium">
-                {profile.name} · Aide à la décision OMS & Fiche de consentement
+                {profile.name} · Counseling GATHER, éligibilité OMS, consentement éclairé et registre unique de suivi
               </p>
             </div>
           </div>
@@ -538,31 +636,24 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
         </div>
       </div>
 
-      {/* CHOIX DE LA RUBRIQUE */}
-      <div className="flex gap-1.5 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-1.5">
-        <button
-          onClick={() => setVuePF("suivi")}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${vuePF === "suivi" ? "bg-primary-600 text-white shadow-sm" : "text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800"}`}
-        >
-          Nouvelles procédures & suivi
-        </button>
-        <button
-          onClick={() => setVuePF("injectables")}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${vuePF === "injectables" ? "bg-primary-600 text-white shadow-sm" : "text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800"}`}
-        >
-          Injectables
-        </button>
-        <button
-          onClick={() => setVuePF("retraits")}
-          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${vuePF === "retraits" ? "bg-primary-600 text-white shadow-sm" : "text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800"}`}
-        >
-          Demandes de retrait
-        </button>
+      {/* CHOIX DE LA RUBRIQUE : une rubrique par méthode + retraits + registre unique */}
+      <div className="flex flex-wrap gap-1.5 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-1.5">
+        {[
+          ...ORDRE_FAMILLES.map((k) => ({ k, l: FAMILLES_PF[k].label })),
+          { k: "retraits", l: "Demandes de retrait" },
+          { k: "registre", l: "Registre PF (toutes méthodes)" },
+        ].map((t) => (
+          <button
+            key={t.k}
+            onClick={() => setVuePF(t.k as typeof vuePF)}
+            className={`flex-1 min-w-[120px] py-2.5 px-2 rounded-xl text-xs font-bold transition-all ${
+              vuePF === t.k ? "bg-primary-600 text-white shadow-sm" : "text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800"
+            }`}
+          >
+            {t.l}
+          </button>
+        ))}
       </div>
-
-      {vuePF === "injectables" && (
-        <InjectablesPF staff={staff} currentUser={currentUser} planifs={planifs} clinicName={profile.name} />
-      )}
 
       {vuePF === "retraits" && (
         <RetraitsContraception
@@ -575,10 +666,12 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
       )}
 
       {/* THREE MAIN AREAS */}
-      <div className={`grid grid-cols-1 lg:grid-cols-12 gap-8 ${vuePF !== "suivi" ? "hidden" : ""}`}>
+      <div className={`grid grid-cols-1 lg:grid-cols-12 gap-8 ${vuePF === "retraits" ? "hidden" : ""}`}>
         
         {/* LEFT COLUMN: WHO MEC WHEEL & PROCEDURES (8 COLS) */}
-        <div className="lg:col-span-8 space-y-8">
+        <div className={`${estFamille ? "lg:col-span-8" : "lg:col-span-12"} space-y-8`}>
+
+          {estFamille && (<>
 
           {/* STEP 2: REGISTER RECORD & INFORMED CONSENT FORM */}
           <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-850 rounded-3xl p-6 shadow-xs">
@@ -587,7 +680,7 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
                 <UserCheck className="w-3.5 h-3.5" /> Fiche de Consentement Éclairé
               </span>
               <h2 className="text-base font-semibold text-stone-900 dark:text-white">
-                Nouvelle Procédure PF
+                Nouvelle Procédure PF — {famille.label}
               </h2>
             </div>
 
@@ -750,13 +843,9 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
                   onChange={(e) => setMethodeChoisie(e.target.value)}
                   className="w-full bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-850 rounded-lg px-3 py-2.5 text-stone-900 dark:text-white focus:outline-none"
                 >
-                  <option value="DIU au Cuivre">Dispositif Intra-Utérin (DIU) au Cuivre</option>
-                  <option value="Implants (Jadelle)">Implants (Jadelle - 5 ans)</option>
-                  <option value="Implants (Implanon)">Implants (Implanon - 3 ans)</option>
-                  <option value="Injectable Trimestriel (DMPA)">Contraceptif Injectable (DMPA)</option>
-                  <option value="Pilule combinée (COC)">Pilule orale combinée (COC)</option>
-                  <option value="Pilule progestative seule (POP)">Pilule progestative seule (POP)</option>
-                  <option value="Préservatifs & Méthodes Barrières">Préservatifs & Barrières</option>
+                  {famille.methodes.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
                 </select>
               </div>
 
@@ -879,7 +968,7 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
                   Critères d'Éligibilité (MEC OMS)
                 </h2>
                 <p className="text-sm text-stone-500">
-                  Sélectionnez les facteurs de risque ou pathologies de la patiente pour voir l'adaptation des méthodes contraceptives.
+                  Sélectionnez les facteurs de risque ou pathologies de la patiente pour vérifier si la méthode « {famille.label} » lui convient.
                 </p>
               </div>
             </div>
@@ -943,14 +1032,8 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
                 Recommandations d'éligibilité de l'OMS :
               </span>
               
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                {[
-                  { id: "coc", name: "COCs (Combinée)", desc: "Pilules orales combinées", type: "Hormonale" },
-                  { id: "pop", name: "POPs (Progestatif)", desc: "Micro-pilules progestatives", type: "Hormonale" },
-                  { id: "injectable", name: "Injectable (DMPA)", desc: "Injection trimestrielle", type: "Hormonale" },
-                  { id: "implants", name: "Implants", desc: "Jadelle / Nexplanon", type: "LARC" },
-                  { id: "diu_cu", name: "DIU au Cuivre", desc: "Dispositif Intra-Utérin", type: "LARC" }
-                ].map((meth) => {
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {MEC_METHODES.filter((m) => famille.mec.includes(m.id)).map((meth) => {
                   const { rating, reasons } = getMECRating(selectedMecConditions, meth.id);
                   let colorClass = "";
                   let labelText = "";
@@ -1044,11 +1127,13 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
             {/* Quick tabs */}
             <div className="flex border-b border-stone-100 dark:border-stone-800 mb-4 overflow-x-auto gap-2">
               {[
-                { id: "diu", label: "DIU au Cuivre" },
-                { id: "implant", label: "Implants (Jadelle)" },
-                { id: "injectable", label: "Injectable (DMPA)" },
-                { id: "pilule", label: "Pillules Orales" }
-              ].map((tab) => (
+                { id: "implant", label: "Implants (Jadelle / Implanon)" },
+                { id: "diu", label: "DIU (cuivre / hormonal)" },
+                { id: "injectable", label: "Injectables (DMPA / NET-EN)" },
+                { id: "pilule", label: "Pilules orales" },
+                { id: "barriere", label: "Préservatifs & barrière" },
+                { id: "naturelles", label: "MAMA & méthodes naturelles" }
+              ].filter((tab) => tab.id === famille.procedure).map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setViewProcedureTab(tab.id as any)}
@@ -1071,7 +1156,7 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
                   <div className="bg-primary-500/5 rounded-2xl p-4 border border-primary-500/10">
                     <h3 className="font-semibold text-primary-800 dark:text-primary-400 text-xs mb-1">Indications & Matériel</h3>
                     <p className="text-sm">
-                      Le DIU au Cuivre (Dispositif Intra-Utérin) assure une contraception très efficace pendant 10 ans. 
+                      Le DIU au Cuivre (Dispositif Intra-Utérin) assure une contraception très efficace pendant 10 ans ; le DIU hormonal au lévonorgestrel (SIU-LNG) protège 5 ans et réduit l'abondance des règles. La technique de pose est la même (suivre la notice de l'inserteur du SIU-LNG). 
                       <strong> Matériel requis :</strong> Speculum stérile, pince de Pozzi, hystéromètre stérile, ciseaux longs, pince de Cheron, antiseptique vaginal.
                     </p>
                   </div>
@@ -1130,6 +1215,55 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
                 </div>
               )}
 
+              {viewProcedureTab === "barriere" && (
+                <div className="space-y-3">
+                  <div className="bg-primary-500/5 rounded-2xl p-4 border border-primary-500/10">
+                    <h3 className="font-semibold text-primary-800 dark:text-primary-400 text-xs mb-1">Préservatifs masculin et féminin — double protection</h3>
+                    <p className="text-sm">
+                      Seules méthodes qui protègent à la fois contre la grossesse et contre les IST/VIH. Aucune restriction médicale (catégorie 1 OMS). Efficacité dépendante d'une utilisation correcte à chaque rapport.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <h4 className="font-semibold text-stone-800 dark:text-white text-xs">Conseils d'utilisation à démontrer (sur modèle) :</h4>
+                    <ol className="list-decimal pl-4 space-y-1.5 text-sm">
+                      <li><strong className="text-stone-800 dark:text-stone-200">Vérifier :</strong> date de péremption et emballage intact ; ouvrir avec les doigts, jamais avec les dents ou des ciseaux.</li>
+                      <li><strong className="text-stone-800 dark:text-stone-200">Préservatif masculin :</strong> pincer le réservoir et le dérouler sur le pénis en érection avant tout contact ; retirer après l'éjaculation en tenant la base, avant la fin de l'érection.</li>
+                      <li><strong className="text-stone-800 dark:text-stone-200">Préservatif féminin :</strong> peut être inséré jusqu'à 8 h avant le rapport ; anneau interne au fond du vagin, anneau externe à l'extérieur ; guider le pénis à l'intérieur de l'anneau.</li>
+                      <li><strong className="text-stone-800 dark:text-stone-200">Lubrifiant :</strong> uniquement à base d'eau ou de silicone avec le préservatif masculin en latex (jamais d'huile, de vaseline ou de beurre de karité).</li>
+                      <li><strong className="text-stone-800 dark:text-stone-200">Un préservatif neuf à chaque rapport</strong>, puis le jeter (latrine ou poubelle).</li>
+                      <li><strong className="text-stone-800 dark:text-stone-200">En cas de rupture ou de glissement :</strong> informer sur la contraception d'urgence (dans les 5 jours) et le dépistage des IST/VIH.</li>
+                    </ol>
+                  </div>
+                </div>
+              )}
+
+              {viewProcedureTab === "naturelles" && (
+                <div className="space-y-3">
+                  <div className="bg-primary-500/5 rounded-2xl p-4 border border-primary-500/10">
+                    <h3 className="font-semibold text-primary-800 dark:text-primary-400 text-xs mb-1">MAMA et méthodes basées sur la connaissance de la fécondité</h3>
+                    <p className="text-sm">
+                      Méthodes sans produit, qui demandent une bonne compréhension par la cliente (et l'adhésion du conjoint pour les méthodes naturelles).
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <h4 className="font-semibold text-stone-800 dark:text-white text-xs">MAMA — les 3 conditions à vérifier :</h4>
+                    <ol className="list-decimal pl-4 space-y-1.5 text-sm">
+                      <li><strong className="text-stone-800 dark:text-stone-200">Bébé de moins de 6 mois.</strong></li>
+                      <li><strong className="text-stone-800 dark:text-stone-200">Pas de retour des règles</strong> depuis l'accouchement.</li>
+                      <li><strong className="text-stone-800 dark:text-stone-200">Allaitement exclusif</strong> (ou presque), jour et nuit, à la demande.</li>
+                    </ol>
+                    <p className="text-sm">Dès qu'une condition n'est plus remplie, proposer une autre méthode (pilule progestative, injectable, implant, DIU…).</p>
+                    <h4 className="font-semibold text-stone-800 dark:text-white text-xs pt-1">Méthode des jours fixes (collier du cycle) :</h4>
+                    <ul className="list-disc pl-4 space-y-1.5 text-sm">
+                      <li>Réservée aux femmes ayant des cycles réguliers de 26 à 32 jours.</li>
+                      <li>Jours 8 à 19 du cycle : abstinence ou préservatif.</li>
+                      <li>Placer l'anneau sur la perle rouge le 1er jour des règles, puis avancer d'une perle chaque jour.</li>
+                      <li>Si les cycles sortent de 26–32 jours plus d'une fois par an, changer de méthode.</li>
+                    </ul>
+                  </div>
+                </div>
+              )}
+
               {viewProcedureTab === "pilule" && (
                 <div className="space-y-3">
                   <div className="bg-primary-500/5 rounded-2xl p-4 border border-primary-500/10">
@@ -1157,6 +1291,8 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
             </div>
           </div>
 
+          </>)}
+
           {/* DYNAMIC REGISTRY LIST */}
           <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-850 rounded-3xl p-6 shadow-xs">
             
@@ -1166,8 +1302,25 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
                   Registre des Suivis de Planification Familiale
                 </h2>
                 <p className="text-sm text-stone-500">
-                  Visualisez les patientes en cours de traitement contraceptif et gérez les visites de rappel.
+                  Registre unique pour toutes les méthodes. {registreFamille === "toutes" ? "Toutes les méthodes sont affichées." : `Affichage : ${FAMILLES_PF[registreFamille].label}.`}
                 </p>
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {(["toutes", ...ORDRE_FAMILLES] as const).map((k) => {
+                    const n = k === "toutes" ? planifs.length : planifs.filter((p) => familleDe(p.methodeChoisie) === k).length;
+                    return (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setRegistreFamille(k)}
+                        className={`px-2.5 py-1 rounded-full text-2xs font-bold border ${
+                          registreFamille === k ? "bg-primary-600 text-white border-primary-600" : "bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-300 border-stone-200 dark:border-stone-700"
+                        }`}
+                      >
+                        {k === "toutes" ? "Toutes" : FAMILLES_PF[k].label} ({n})
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Status selectors */}
@@ -1521,6 +1674,7 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
         </div>
 
         {/* RIGHT COLUMN: RECRUITMENT FORM, COUNSELING & CONSENT BUILDER (4 COLS) */}
+        {estFamille && (
         <div className="lg:col-span-4 space-y-8">
           
           {/* STEP 1: COUNSELING WORKSTATION (GATHER METHOD) */}
@@ -1601,8 +1755,14 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
           {/* Note: Step 2 form moved to the left column above the OMS eligibility wheel */}
 
         </div>
+        )}
 
       </div>
+
+      {/* Suivi des injections (rubrique Injectables) */}
+      {vuePF === "injectables" && (
+        <InjectablesPF staff={staff} currentUser={currentUser} planifs={planifs} clinicName={profile.name} />
+      )}
 
       {/* DOCUMENT PREVIEWS & PRINT MODALS */}
       {activePreviewDoc && (
