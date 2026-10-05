@@ -7,6 +7,7 @@ import React, { useState, useEffect } from "react";
 import { FichePlanifFamiliale, Staff, ExamenLabo } from "../types";
 import { generateUid, getTodayStr, safeGet, safeSet } from "../data";
 import RetraitsContraception from "./RetraitsContraception";
+import InjectablesPF from "./InjectablesPF";
 import {
   Plus,
   Trash2,
@@ -129,7 +130,7 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
 
   // Registry states
   const [planifs, setPlanifs] = useState<FichePlanifFamiliale[]>([]);
-  const [vuePF, setVuePF] = useState<"suivi" | "retraits">("suivi");
+  const [vuePF, setVuePF] = useState<"suivi" | "injectables" | "retraits">("suivi");
 
   // Quand un retrait est réalisé pour une patiente suivie ici, sa fiche PF
   // passe automatiquement au statut « Retrait effectué ».
@@ -546,12 +547,22 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
           Nouvelles procédures & suivi
         </button>
         <button
+          onClick={() => setVuePF("injectables")}
+          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${vuePF === "injectables" ? "bg-primary-600 text-white shadow-sm" : "text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800"}`}
+        >
+          Injectables
+        </button>
+        <button
           onClick={() => setVuePF("retraits")}
           className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${vuePF === "retraits" ? "bg-primary-600 text-white shadow-sm" : "text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800"}`}
         >
           Demandes de retrait
         </button>
       </div>
+
+      {vuePF === "injectables" && (
+        <InjectablesPF staff={staff} currentUser={currentUser} planifs={planifs} clinicName={profile.name} />
+      )}
 
       {vuePF === "retraits" && (
         <RetraitsContraception
