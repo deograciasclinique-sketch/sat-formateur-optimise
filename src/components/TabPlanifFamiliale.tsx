@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from "react";
 import { FichePlanifFamiliale, Staff, ExamenLabo } from "../types";
 import { generateUid, getTodayStr, safeGet, safeSet } from "../data";
+import RetraitsContraception from "./RetraitsContraception";
 import {
   Plus,
   Trash2,
@@ -128,6 +129,17 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
 
   // Registry states
   const [planifs, setPlanifs] = useState<FichePlanifFamiliale[]>([]);
+  const [vuePF, setVuePF] = useState<"suivi" | "retraits">("suivi");
+
+  // Quand un retrait est réalisé pour une patiente suivie ici, sa fiche PF
+  // passe automatiquement au statut « Retrait effectué ».
+  const marquerFicheRetiree = (ficheId: string) => {
+    setPlanifs((prev) => {
+      const updated = prev.map((p) => (p.id === ficheId ? { ...p, statut: "Retrait effectué" } : p));
+      safeSet("dg_planif_familiale", updated);
+      return updated;
+    });
+  };
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedStatusFilter, setSelectedStatusFilter] = useState("Tous");
   const [viewMode, setViewMode] = useState<"synthetic" | "detailed">("detailed");
@@ -525,8 +537,34 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
         </div>
       </div>
 
+      {/* CHOIX DE LA RUBRIQUE */}
+      <div className="flex gap-1.5 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-1.5">
+        <button
+          onClick={() => setVuePF("suivi")}
+          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${vuePF === "suivi" ? "bg-primary-600 text-white shadow-sm" : "text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800"}`}
+        >
+          Nouvelles procédures & suivi
+        </button>
+        <button
+          onClick={() => setVuePF("retraits")}
+          className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all ${vuePF === "retraits" ? "bg-primary-600 text-white shadow-sm" : "text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800"}`}
+        >
+          Demandes de retrait
+        </button>
+      </div>
+
+      {vuePF === "retraits" && (
+        <RetraitsContraception
+          staff={staff}
+          currentUser={currentUser}
+          planifs={planifs}
+          onFicheRetiree={marquerFicheRetiree}
+          clinicName={profile.name}
+        />
+      )}
+
       {/* THREE MAIN AREAS */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <div className={`grid grid-cols-1 lg:grid-cols-12 gap-8 ${vuePF !== "suivi" ? "hidden" : ""}`}>
         
         {/* LEFT COLUMN: WHO MEC WHEEL & PROCEDURES (8 COLS) */}
         <div className="lg:col-span-8 space-y-8">
