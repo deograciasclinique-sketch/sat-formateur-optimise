@@ -838,6 +838,7 @@ export default function TabConsultation({
 
         const newCons: Consultation = {
       id: pendingSource?.id || generateUid(),
+      codePatient: pendingSource?.codePatient,
       patient: consPatient.trim(),
       age: parseFloat(consAge) || 0,
       sexe: consSexe as any,
@@ -1638,7 +1639,7 @@ export default function TabConsultation({
                     : "border-amber-200 bg-white hover:bg-amber-50"
                 }`}
               >
-                <div className="font-semibold text-sm text-stone-900">{c.patient}</div>
+                <div className="font-semibold text-sm text-stone-900">{c.codePatient && <span className="font-mono text-emerald-600 mr-1.5">{c.codePatient}</span>}{c.patient}</div>
                 <div className="text-xs text-stone-500">
                   {c.age ? `${c.age} ans` : ""} {c.plainte ? `· ${c.plainte}` : ""}
                 </div>

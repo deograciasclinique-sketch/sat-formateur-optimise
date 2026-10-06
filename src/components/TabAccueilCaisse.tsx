@@ -8,10 +8,17 @@ import { Consultation, Facture, FactureLigne, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { Plus, UserPlus, Wallet, ArrowRight, Clock, CheckCircle2, Trash2, ReceiptText, Search, ShieldCheck, AlertTriangle } from "lucide-react";
 import { VALIDITE_RECU_JOURS, dernierRecu, listeRecusValides, dateCourteFr, RecuConsultation } from "../lib/recuConsultation";
+import { PatientRegistre, chercherPatients, doublonsPossibles, nouveauCode, ageActuel, anneeDepuisAge, estUnCode, normaliserCode } from "../lib/patients";
+import CartePatient from "./CartePatient";
+import BarcodeScanner from "./BarcodeScanner";
+import { IdCard, ScanLine, X } from "lucide-react";
 
 interface TabAccueilCaisseProps {
   consultations: Consultation[];
   onUpdateConsultations: (consults: Consultation[]) => void;
+  // Registre des patients (un code par patient, enregistré une seule fois).
+  patients?: PatientRegistre[];
+  onUpdatePatients?: (p: PatientRegistre[]) => void;
   factures: Facture[];
   onUpdateFactures: (factures: Facture[]) => void;
   // Catalogue des actes/tarifs (onglet "Actes & Tarifs"), pour que la
@@ -206,11 +213,67 @@ function SelecteurActes({
 export default function TabAccueilCaisse({
   consultations,
   onUpdateConsultations,
+  patients = [],
+  onUpdatePatients = () => {},
   factures,
   onUpdateFactures,
   actes = [],
   theme = "light",
 }: TabAccueilCaisseProps) {
+  // --- Patient déjà enregistré : retrouvé par son code, son nom ou son téléphone ---
+  const [rechercheCode, setRechercheCode] = useState("");
+  const [patientSel, setPatientSel] = useState<PatientRegistre | null>(null);
+  const [scanOuvert, setScanOuvert] = useState(false);
+  const [carte, setCarte] = useState<{ p: PatientRegistre; nouveau: boolean } | null>(null);
+  const resultatsCode = useMemo(() => (patientSel ? [] : chercherPatients(patients, rechercheCode)), [patients, rechercheCode, patientSel]);
+
+  const choisirPatient = (p: PatientRegistre) => {
+    setPatientSel(p);
+    setRechercheCode("");
+    setPatient(p.nom);
+    const a = ageActuel(p);
+    setAge(a !== undefined ? String(a) : "");
+    if (p.sexe) setSexe(p.sexe);
+    setContact(p.contact || "");
+    setCommune(p.commune || "");
+  };
+  const oublierPatient = () => {
+    setPatientSel(null);
+    setPatient(""); setAge(""); setSexe("Masculin"); setContact(""); setCommune("");
+  };
+  const apresScan = (texte: string) => {
+    setScanOuvert(false);
+    const code = normaliserCode(texte);
+    const p = patients.find((x) => x.code === code);
+    if (p) choisirPatient(p);
+    else { setRechercheCode(texte); alert(`Aucun patient avec le code ${code || texte}.`); }
+  };
+
+  // Code du patient de la visite : celui choisi, sinon nouvelle fiche au registre.
+  const enregistrerAuRegistre = (infos: { nom: string; age?: number; sexe?: "Masculin" | "Féminin"; contact?: string; commune?: string }, existant?: PatientRegistre | null) => {
+    const maintenant = new Date().toISOString();
+    if (existant) {
+      const maj: PatientRegistre = {
+        ...existant,
+        contact: infos.contact || existant.contact,
+        commune: infos.commune || existant.commune,
+        sexe: infos.sexe || existant.sexe,
+        anneeNaissance: existant.dateNaissance ? existant.anneeNaissance : anneeDepuisAge(infos.age) ?? existant.anneeNaissance,
+        updatedAt: maintenant,
+      };
+      onUpdatePatients(patients.map((x) => (x.code === existant.code ? maj : x)));
+      return { p: maj, nouveau: false };
+    }
+    const p: PatientRegistre = {
+      code: nouveauCode(new Set(patients.map((x) => x.code))),
+      nom: infos.nom.trim(), sexe: infos.sexe, anneeNaissance: anneeDepuisAge(infos.age),
+      contact: infos.contact || undefined, commune: infos.commune || undefined,
+      createdAt: maintenant, updatedAt: maintenant, origine: "accueil",
+    };
+    onUpdatePatients([p, ...patients]);
+    return { p, nouveau: true };
+  };
+
   const [patient, setPatient] = useState("");
   const [age, setAge] = useState("");
   const [sexe, setSexe] = useState<"Masculin" | "Féminin">("Masculin");
@@ -246,6 +309,12 @@ export default function TabAccueilCaisse({
   const recuFormulaire = useMemo(
     () => (patient.trim().length >= 3 ? dernierRecu(factures, consultations, patient, contact, today) : null),
     [factures, consultations, patient, contact, today]
+  );
+
+  // Patients déjà au registre avec le même nom (pour ne pas créer de doublon).
+  const memeNom = useMemo(
+    () => (!patientSel && patient.trim().length >= 3 ? doublonsPossibles(patients, patient, contact) : []),
+    [patients, patient, contact, patientSel]
   );
 
   // --- Patients à encaisser (ex. venus sur RDV avec un reçu expiré) --------
@@ -300,9 +369,17 @@ export default function TabAccueilCaisse({
     mode = "Espèces"
   ) => {
     const o = recu.consultationOrigine;
+    const nomVisite = (infos?.patient || recu.patient).trim();
+    const existant = patientSel || (o?.codePatient ? patients.find((x) => x.code === o.codePatient) : undefined)
+      || (doublonsPossibles(patients, nomVisite, infos?.contact || recu.contact).length === 1 ? doublonsPossibles(patients, nomVisite, infos?.contact || recu.contact)[0] : undefined);
+    const { p: fiche, nouveau } = enregistrerAuRegistre(
+      { nom: nomVisite, age: infos?.age || o?.age, sexe: infos?.sexe || o?.sexe, contact: (infos?.contact || recu.contact || "").trim(), commune: (infos?.commune || o?.commune || "").trim() },
+      existant
+    );
     const newCons: Consultation = {
       id: generateUid(),
-      patient: (infos?.patient || recu.patient).trim(),
+      codePatient: fiche.code,
+      patient: existant ? existant.nom : nomVisite,
       age: infos?.age || o?.age || 0,
       sexe: infos?.sexe || o?.sexe || "Masculin",
       contact: (infos?.contact || recu.contact || "").trim(),
@@ -327,15 +404,16 @@ export default function TabAccueilCaisse({
     if (totalActes > 0) {
       onUpdateFactures([
         {
-          id: generateUid(), patient: newCons.patient, date: today, mode, lignes: lignesPanierVersFacture(panierActes),
+          id: generateUid(), codePatient: fiche.code, patient: newCons.patient, date: today, mode, lignes: lignesPanierVersFacture(panierActes),
           total: totalActes, montantPaye: totalActes, statut: "Payée", createdAt: new Date().toISOString(),
           consultationId: newCons.id, typePaiement: "Actes",
         },
         ...factures,
       ]);
     }
+    if (nouveau) setCarte({ p: fiche, nouveau: true });
     alert(
-      `${newCons.patient} envoyé(e) ${destination === "Maternite" ? "à la maternité" : destination === "Laboratoire" ? "au laboratoire" : "à l'infirmerie"} sans payer la consultation (reçu du ${dateCourteFr(recu.payeLe)} valable jusqu'au ${dateCourteFr(recu.valableJusquau)}).` +
+      `${newCons.patient} (${fiche.code}) envoyé(e) ${destination === "Maternite" ? "à la maternité" : destination === "Laboratoire" ? "au laboratoire" : "à l'infirmerie"} sans payer la consultation (reçu du ${dateCourteFr(recu.payeLe)} valable jusqu'au ${dateCourteFr(recu.valableJusquau)}).` +
       (totalActes > 0 ? `\nAutres actes encaissés : ${totalActes.toLocaleString("fr-FR")} FCFA.` : "")
     );
   };
@@ -389,6 +467,8 @@ export default function TabAccueilCaisse({
   };
 
   const resetForm = () => {
+    setPatientSel(null);
+    setRechercheCode("");
     setPatient("");
     setAge("");
     setSexe("Masculin");
@@ -428,6 +508,16 @@ export default function TabAccueilCaisse({
       return;
     }
 
+    // Même nom déjà au registre sans patient choisi : vérifier avant de créer un nouveau dossier.
+    if (!patientSel && memeNom.length > 0 &&
+      !window.confirm(`${memeNom.length > 1 ? `${memeNom.length} patients portent` : "Un patient porte"} déjà ce nom (${memeNom.map((x) => x.code).join(", ")}).\n\nOK = créer quand même un NOUVEAU patient.\nAnnuler = revenir et choisir le patient existant.`)) {
+      return;
+    }
+    const { p: fiche, nouveau } = enregistrerAuRegistre(
+      { nom: patient, age: parseFloat(age) || undefined, sexe, contact: contact.trim(), commune: commune.trim() },
+      patientSel
+    );
+
     const statutParDestination: Record<typeof serviceDestination, Consultation["statut"]> = {
       Infirmerie: "Attente prise en charge infirmier",
       Maternite: "Attente prise en charge maternité",
@@ -436,7 +526,8 @@ export default function TabAccueilCaisse({
 
     const newCons: Consultation = {
       id: generateUid(),
-      patient: patient.trim(),
+      codePatient: fiche.code,
+      patient: patientSel ? patientSel.nom : patient.trim(),
       age: parseFloat(age) || 0,
       sexe,
       contact: contact.trim(),
@@ -460,6 +551,7 @@ export default function TabAccueilCaisse({
 
     const newFacture: Facture = {
       id: generateUid(),
+      codePatient: fiche.code,
       patient: newCons.patient,
       date: getTodayStr(),
       mode: modePaiement,
@@ -475,6 +567,7 @@ export default function TabAccueilCaisse({
     onUpdateConsultations([newCons, ...consultations]);
     onUpdateFactures([newFacture, ...factures]);
     resetForm();
+    if (nouveau) setCarte({ p: fiche, nouveau: true });
   };
 
   const handleEncaisserActesExistant = () => {
@@ -491,6 +584,7 @@ export default function TabAccueilCaisse({
 
     const newFacture: Facture = {
       id: generateUid(),
+      codePatient: selected.codePatient,
       patient: selected.patient,
       date: getTodayStr(),
       mode: modePaiementExistant,
@@ -579,6 +673,71 @@ export default function TabAccueilCaisse({
           isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"
         }`}
       >
+        {/* Patient déjà enregistré : son code suffit */}
+        {patientSel ? (
+          <div className="rounded-lg border-2 border-emerald-500 bg-emerald-500/10 p-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <IdCard className="w-6 h-6 text-emerald-600 shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-emerald-700 uppercase">Patient déjà enregistré</div>
+                <div className="font-bold truncate">
+                  <span className="font-mono">{patientSel.code}</span> · {patientSel.nom}
+                </div>
+                <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-600"}`}>
+                  {[patientSel.sexe, ageActuel(patientSel) !== undefined ? `${ageActuel(patientSel)} ans` : "", patientSel.contact, patientSel.commune].filter(Boolean).join(" · ")}
+                  {" · "}{consultations.filter((c) => c.codePatient === patientSel.code).length} visite(s) au dossier
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setCarte({ p: patientSel, nouveau: false })} className="px-3 py-1.5 rounded border text-sm font-medium flex items-center gap-1.5">
+                <IdCard className="w-4 h-4" /> Carte
+              </button>
+              <button type="button" onClick={oublierPatient} className="px-3 py-1.5 rounded border text-sm font-medium flex items-center gap-1.5">
+                <X className="w-4 h-4" /> Autre patient
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className={`rounded-lg border p-3 space-y-2 ${isDark ? "border-gray-700" : "border-emerald-200 bg-emerald-50/40"}`}>
+            <label className="text-sm font-semibold flex items-center gap-2">
+              <IdCard className="w-4 h-4 text-emerald-600" /> Patient déjà venu ? Tapez son code patient (ou son nom / téléphone)
+            </label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-2.5 top-2.5 text-gray-400" />
+                <input
+                  className="w-full pl-8 pr-3 py-2 rounded border bg-transparent font-mono uppercase placeholder:normal-case placeholder:font-sans"
+                  placeholder="Ex : DG-7K3PM"
+                  value={rechercheCode}
+                  onChange={(e) => setRechercheCode(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && resultatsCode.length === 1) choisirPatient(resultatsCode[0]); }}
+                />
+              </div>
+              <button type="button" onClick={() => setScanOuvert(true)} className="px-3 py-2 rounded border text-sm font-medium flex items-center gap-1.5" title="Scanner la carte patient">
+                <ScanLine className="w-4 h-4" /> Scanner
+              </button>
+            </div>
+            {rechercheCode.trim().length >= 2 && (
+              resultatsCode.length === 0 ? (
+                <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                  {estUnCode(rechercheCode) ? `Aucun patient avec le code ${normaliserCode(rechercheCode)}.` : "Aucun patient trouvé."} S'il vient pour la première fois, remplissez le formulaire ci-dessous : un code lui sera attribué.
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {resultatsCode.map((p) => (
+                    <button key={p.code} type="button" onClick={() => choisirPatient(p)}
+                      className={`w-full text-left px-3 py-2 rounded border text-sm flex flex-wrap justify-between gap-2 ${isDark ? "border-gray-700 hover:bg-gray-700" : "border-gray-200 bg-white hover:bg-emerald-50"}`}>
+                      <span><b className="font-mono">{p.code}</b> · {p.nom}</span>
+                      <span className="text-xs text-gray-500">{[p.sexe, ageActuel(p) !== undefined ? `${ageActuel(p)} ans` : "", p.contact].filter(Boolean).join(" · ")}</span>
+                    </button>
+                  ))}
+                </div>
+              )
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <label className="text-sm font-medium">Nom du patient *</label>
@@ -587,7 +746,19 @@ export default function TabAccueilCaisse({
               value={patient}
               onChange={(e) => setPatient(e.target.value)}
               placeholder="Nom et prénoms"
+              readOnly={!!patientSel}
+              title={patientSel ? "Patient déjà enregistré : cliquez sur « Autre patient » pour en changer" : undefined}
             />
+            {memeNom.length > 0 && (
+              <div className="mt-1 rounded border border-amber-400 bg-amber-500/10 p-2 text-xs space-y-1">
+                <div className="font-semibold text-amber-700">Déjà enregistré ? Choisissez-le pour ne pas créer de doublon :</div>
+                {memeNom.map((p) => (
+                  <button key={p.code} type="button" onClick={() => choisirPatient(p)} className="block underline text-left">
+                    {p.code} · {p.nom}{p.contact ? ` · ${p.contact}` : ""}{ageActuel(p) !== undefined ? ` · ${ageActuel(p)} ans` : ""}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div>
             <label className="text-sm font-medium">Contact</label>
@@ -942,6 +1113,8 @@ export default function TabAccueilCaisse({
           </div>
         )}
       </div>
+      {carte && <CartePatient patient={carte.p} nouveau={carte.nouveau} onClose={() => setCarte(null)} />}
+      {scanOuvert && <BarcodeScanner onScan={apresScan} onClose={() => setScanOuvert(false)} theme={theme} />}
     </div>
   );
 }

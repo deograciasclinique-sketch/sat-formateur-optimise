@@ -65,6 +65,7 @@ export interface MesureConstantes {
 
 export interface DossierPatient {
   key: string;
+  code?: string; // code patient du registre
   nom: string;
   contact: string;
   age?: number;
@@ -129,7 +130,26 @@ export function construireDossiers(consultations: Consultation[], rdvs: RendezVo
     if (!numerosParNom.has(n)) numerosParNom.set(n, new Set());
     if (tel8(r.contact)) numerosParNom.get(n)!.add(tel8(r.contact));
   });
+  // Code patient : les visites qui portent un code sont regroupées par code ;
+  // les autres (RDV, anciennes hospitalisations…) rejoignent le code connu
+  // pour ce nom quand il n'y en a qu'un et que le téléphone ne contredit pas.
+  const codesParNom = new Map<string, Map<string, string>>(); // nom -> code -> tel
+  recs.forEach((r) => {
+    const code = r.item?.codePatient;
+    if (!code) return;
+    const n = normNom(r.nom);
+    if (!codesParNom.has(n)) codesParNom.set(n, new Map());
+    const m = codesParNom.get(n)!;
+    if (!m.get(code)) m.set(code, tel8(r.contact));
+  });
   const cle = (r: Rec) => {
+    if (r.item?.codePatient) return `code:${r.item.codePatient}`;
+    const codes = codesParNom.get(normNom(r.nom));
+    if (codes) {
+      const t = tel8(r.contact);
+      const ok = [...codes.entries()].filter(([, tc]) => !t || !tc || tc === t);
+      if (ok.length === 1) return `code:${ok[0][0]}`;
+    }
     const n = normNom(r.nom);
     const nums = numerosParNom.get(n)!;
     if (nums.size <= 1) return n;
@@ -140,7 +160,7 @@ export function construireDossiers(consultations: Consultation[], rdvs: RendezVo
   recs.forEach((r) => {
     const k = cle(r);
     if (!map.has(k)) {
-      map.set(k, { key: k, nom: r.nom.trim(), contact: "", consultations: [], rdvs: [], hospitalisations: [], mesures: [] });
+      map.set(k, { key: k, code: k.startsWith("code:") ? k.slice(5) : undefined, nom: r.nom.trim(), contact: "", consultations: [], rdvs: [], hospitalisations: [], mesures: [] });
     }
     const d = map.get(k)!;
     if (!d.contact && r.contact) d.contact = r.contact;
@@ -179,7 +199,11 @@ export function construireDossiers(consultations: Consultation[], rdvs: RendezVo
   }).sort((a, b) => (b.derniereVisite || "").localeCompare(a.derniereVisite || ""));
 }
 
-export function trouverDossier(dossiers: DossierPatient[], nom: string, contact?: string) {
+export function trouverDossier(dossiers: DossierPatient[], nom: string, contact?: string, code?: string) {
+  if (code) {
+    const parCode = dossiers.find((d) => d.code === code);
+    if (parCode) return parCode;
+  }
   const n = normNom(nom);
   const t = tel8(contact);
   return dossiers.find((d) => normNom(d.nom) === n && (!t || !tel8(d.contact) || tel8(d.contact) === t))
@@ -549,7 +573,7 @@ export function DossierPatientView({
   ];
 
   return (
-    <Modal title={`Dossier — ${d.nom}`} onClose={onClose} isDark={isDark}>
+    <Modal title={`Dossier — ${d.code ? `${d.code} · ` : ""}${d.nom}`} onClose={onClose} isDark={isDark}>
       <div className={`rounded-lg border p-3 mb-3 ${bord}`}>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
           {d.age ? <span><b>{d.age} ans</b></span> : null}
@@ -782,14 +806,19 @@ export function ListeDossiers({
     const n = normNom(q);
     const t = q.replace(/\D/g, "");
     if (!n) return dossiers.slice(0, 50);
-    return dossiers.filter((d) => normNom(d.nom).includes(n) || (t.length >= 3 && (d.contact || "").replace(/\D/g, "").includes(t))).slice(0, 100);
+    const qc = q.toUpperCase().replace(/[^A-Z0-9]/g, "");
+    return dossiers.filter((d) =>
+      normNom(d.nom).includes(n) ||
+      (t.length >= 3 && (d.contact || "").replace(/\D/g, "").includes(t)) ||
+      (qc.length >= 3 && !!d.code && d.code.replace(/[^A-Z0-9]/g, "").includes(qc))
+    ).slice(0, 100);
   }, [dossiers, q]);
 
   return (
     <div className="space-y-3">
       <div className="relative">
         <Search className={`w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 ${muted}`} />
-        <input className="w-full pl-9 pr-3 py-2 rounded border bg-transparent" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Chercher un patient par nom ou téléphone…" />
+        <input className="w-full pl-9 pr-3 py-2 rounded border bg-transparent" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Chercher un patient par code (DG-…), nom ou téléphone…" />
       </div>
       <p className={`text-sm ${muted}`}>{dossiers.length} dossiers patients{!q ? " · les 50 derniers vus" : ""}</p>
       {filtres.length === 0 ? (
@@ -799,7 +828,9 @@ export function ListeDossiers({
           {filtres.map((d) => (
             <button key={d.key} onClick={() => onDossier(d)}
               className={`text-left rounded-lg border p-3 transition ${isDark ? "border-gray-700 bg-gray-800 hover:bg-gray-700" : "border-gray-200 bg-white hover:bg-gray-50"}`}>
-              <div className="font-semibold">{d.nom}</div>
+              <div className="font-semibold">
+                {d.code && <span className="font-mono text-emerald-600 mr-1.5">{d.code}</span>}{d.nom}
+              </div>
               <div className={`text-xs ${muted}`}>
                 {[d.age ? `${d.age} ans` : "", d.sexe, d.contact].filter(Boolean).join(" · ")}
               </div>

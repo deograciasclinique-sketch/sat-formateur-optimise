@@ -66,6 +66,7 @@ import TabTaches from "./components/TabTaches";
 import TabPharmacie from "./components/TabPharmacie";
 import TabFacturation from "./components/TabFacturation";
 import TabAccueilCaisse from "./components/TabAccueilCaisse";
+import { PatientRegistre, rattacherConsultations } from "./lib/patients";
 import TabInfirmier from "./components/TabInfirmier";
 import { prisesAFaireAujourdhui } from "./components/SalleDesSoins";
 import TabRDV from "./components/TabRDV";
@@ -339,6 +340,8 @@ export default function App() {
   const [assures, setAssures] = useState<any[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [consultations, setConsultations] = useState<Consultation[]>([]);
+  // Registre des patients : un code par patient, enregistré une seule fois.
+  const [patients, setPatients] = useState<PatientRegistre[]>([]);
   const [pediatrie, setPediatrie] = useState<FichePediatrique[]>([]);
   const [materniteCpns, setMaterniteCpns] = useState<ConsultationPrenatale[]>([]);
   const [materniteAccouchements, setMaterniteAccouchements] = useState<Accouchement[]>([]);
@@ -381,6 +384,7 @@ export default function App() {
     dg_pharma_mouvements: setMouvements,
     dg_tasks: setTasks,
     dg_consultations: setConsultations,
+    dg_patients: setPatients,
     dg_pediatrie: setPediatrie,
     dg_maternite_cpn: setMaterniteCpns,
     dg_maternite_accouchements: setMaterniteAccouchements,
@@ -1044,6 +1048,7 @@ export default function App() {
 
     setMaterniteAccouchements(safeGet<Accouchement[]>("dg_maternite_accouchements", []));
     setRdv(safeGet<RendezVous[]>("dg_rdv", []));
+    setPatients(safeGet<PatientRegistre[]>("dg_patients", []));
     setHospCapacite(safeGet<number>("dg_hosp_capacite", 20));
     setHospitalisations(safeGet<Hospitalisation[]>("dg_hospitalisations", []));
     setHospEvolutions(safeGet<Evolution[]>("dg_hosp_evolutions", []));
@@ -1188,6 +1193,7 @@ export default function App() {
       dg_pharma_mouvements: mouvements,
       dg_tasks: tasks,
       dg_consultations: consultations,
+      dg_patients: patients,
       dg_pediatrie: pediatrie,
       dg_maternite_cpn: materniteCpns,
       dg_maternite_accouchements: materniteAccouchements,
@@ -1216,7 +1222,7 @@ export default function App() {
       dg_partogrammes: partogrammes
     };
   }, [
-    staff, medicaments, mouvements, tasks, consultations, pediatrie,
+    staff, medicaments, mouvements, tasks, consultations, patients, pediatrie,
     materniteCpns, materniteAccouchements, rdv, hospitalisations, ficheReferences,
     hospEvolutions, factures, depenses, incidents, actions, audits,
     conges, absences, rhFiches, prisesEnCharge, urgences, vaccinations,
@@ -1335,6 +1341,33 @@ export default function App() {
     setConsultations(newConsults);
     safeSet("dg_consultations", newConsults);
   };
+
+  const handleUpdatePatients = (next: PatientRegistre[]) => {
+    setPatients(next);
+    safeSet("dg_patients", next);
+  };
+
+  // Rattachement automatique au registre : toute visite sans code patient
+  // (dossiers d'avant le registre, visites créées depuis un RDV…) reçoit le
+  // code de son patient, créé au besoin. On attend un peu après la connexion
+  // pour avoir reçu le registre des autres appareils et éviter les doublons.
+  const [registrePret, setRegistrePret] = useState(false);
+  useEffect(() => {
+    if (!isLoaded) return;
+    const t = setTimeout(() => setRegistrePret(true), authReadyState ? 12000 : 30000);
+    return () => clearTimeout(t);
+  }, [isLoaded, authReadyState]);
+  useEffect(() => {
+    if (!registrePret) return;
+    const t = setTimeout(() => {
+      const r = rattacherConsultations(patients, consultations);
+      if (!r) return;
+      if (r.registre.length !== patients.length || JSON.stringify(r.registre) !== JSON.stringify(patients)) handleUpdatePatients(r.registre);
+      handleUpdateConsultations(r.consultations);
+    }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registrePret, consultations, patients]);
 
   const handleUpdatePediatrie = (newPed: FichePediatrique[]) => {
     setPediatrie(newPed);
@@ -2292,6 +2325,8 @@ export default function App() {
             <TabAccueilCaisse
               consultations={consultations}
               onUpdateConsultations={handleUpdateConsultations}
+              patients={patients}
+              onUpdatePatients={handleUpdatePatients}
               factures={factures}
               onUpdateFactures={handleUpdateFactures}
               actes={actesTarifaires}

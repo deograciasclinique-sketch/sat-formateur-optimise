@@ -130,6 +130,7 @@ export default function TabInfirmier({
       const last = dossier?.consultations[0];
       const nouvelle: Consultation = {
         id: generateUid(),
+        codePatient: dossier?.code,
         patient: rdv.patient,
         age: envoi.age,
         sexe: envoi.sexe,
@@ -689,7 +690,7 @@ export default function TabInfirmier({
                   : "border-gray-200 bg-white hover:bg-gray-50"
               }`}
             >
-              <div className="font-medium">{c.patient}</div>
+              <div className="font-medium">{c.codePatient && <span className="font-mono text-emerald-600 mr-1.5">{c.codePatient}</span>}{c.patient}</div>
               <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
                 {c.age ? `${c.age} ans` : ""} {c.contact ? `· ${c.contact}` : ""}
               </div>
@@ -706,10 +707,10 @@ export default function TabInfirmier({
         ) : (
           <div className={`rounded-lg border p-4 space-y-4 ${isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-semibold text-lg">{selected.patient}</h3>
+              <h3 className="font-semibold text-lg">{selected.codePatient && <span className="font-mono text-emerald-600 mr-2">{selected.codePatient}</span>}{selected.patient}</h3>
               <div className="flex gap-2">
                 {(() => {
-                  const d = trouverDossier(dossiers, selected.patient, selected.contact);
+                  const d = trouverDossier(dossiers, selected.patient, selected.contact, selected.codePatient);
                   return d && (d.consultations.length > 1 || d.rdvs.length > 0 || d.hospitalisations.length > 0) ? (
                     <button onClick={() => setDossierKey(d.key)} className={`text-sm font-semibold rounded-lg px-3 py-1.5 border flex items-center gap-1 ${isDark ? "border-gray-600" : "border-gray-300"}`}>
                       <FolderOpen className="w-4 h-4" /> Dossier
@@ -1139,7 +1140,7 @@ export default function TabInfirmier({
                 }`}
               >
                 <div>
-                  <div className="font-medium">{c.patient}</div>
+                  <div className="font-medium">{c.codePatient && <span className="font-mono text-emerald-600 mr-1.5">{c.codePatient}</span>}{c.patient}</div>
                   <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
                     {(c.ordonnance || []).length > 0
                       ? `${c.ordonnance.length} ligne(s) d'ordonnance à exécuter`

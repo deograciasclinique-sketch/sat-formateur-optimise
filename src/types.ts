@@ -110,6 +110,7 @@ export interface FactureLigne {
 
 export interface Facture {
   id: string;
+  codePatient?: string;
   patient: string;
   date: string;
   mode: string;
@@ -725,6 +726,8 @@ export interface ConduiteItem {
 
 export interface Consultation {
   id: string;
+  // Code patient du registre (src/lib/patients.ts), ex : "DG-7K3PM".
+  codePatient?: string;
   patient: string;
   age: number;
   sexe: "Masculin" | "Féminin";
