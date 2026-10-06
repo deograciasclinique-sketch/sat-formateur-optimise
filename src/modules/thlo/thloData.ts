@@ -21,6 +21,7 @@ export interface MaladieTHLO {
   immediate?: boolean; // à notifier aussi dans les 24 h
   motsCles: string[];  // recherchés dans le diagnostic (sans accents, minuscules)
   exclut?: string[];   // si un de ces mots est présent, le cas va à une autre ligne
+  abreviations?: string[]; // sigles reconnus seulement s'ils sont écrits seuls (« PS », « PG »)
 }
 
 // Liste des maladies de la fiche hebdomadaire. Elle couvre les maladies à
@@ -39,8 +40,8 @@ export const MALADIES_THLO: MaladieTHLO[] = [
   { id: "rage", nom: "Rage humaine", immediate: true, motsCles: ["rage humaine", "rage"] , exclut: ["morsure"] },
   { id: "covid", nom: "COVID-19", immediate: true, motsCles: ["covid", "sars-cov"] },
   { id: "diphterie", nom: "Diphtérie", immediate: true, motsCles: ["diphter"] },
-  { id: "palu_grave", nom: "Paludisme grave", motsCles: ["paludisme grave", "palu grave", "paludisme severe", "neuropalu", "paludisme compliqu", "acces palustre grave", "palustre grave", "palustre severe"] },
-  { id: "palu_simple", nom: "Paludisme simple", motsCles: ["paludisme", "palu ", "palustre", "plasmodium"], exclut: ["grave", "severe", "neuropalu", "compliqu"] },
+  { id: "palu_grave", nom: "Paludisme grave", abreviations: ["pg"], motsCles: ["paludisme grave", "palu grave", "paludisme severe", "neuropalu", "neuro-palu", "paludisme compliqu", "acces palustre grave", "palustre grave", "palustre severe"] },
+  { id: "palu_simple", nom: "Paludisme simple", abreviations: ["ps"], motsCles: ["paludisme", "palu ", "palustre", "plasmodium"], exclut: ["grave", "severe", "neuropalu", "neuro-palu", "compliqu"] },
   { id: "diarrhee_sanglante", nom: "Diarrhée sanglante (shigellose)", motsCles: ["diarrhee sanglante", "shigell", "dysenter"] },
   { id: "typhoide", nom: "Fièvre typhoïde", motsCles: ["typho"] },
   { id: "tuberculose", nom: "Tuberculose", motsCles: ["tubercul"] },
@@ -115,14 +116,17 @@ export function maladiesDansTexte(texte?: string): MaladieTHLO[] {
   const t = norm((texte || "").replace(/\+/g, " positif "));
   if (t.trim() === "") return [];
   return MALADIES_THLO.filter((m) => {
+    // Abréviations écrites seules dans le diagnostic : « PS », « PG ».
+    if (m.abreviations && m.abreviations.some((a) => new RegExp(`(^|[ -])${a}( |$)`).test(t) && !estNie(t, t.search(new RegExp(`(^|[ -])${a}( |$)`)) + 1, a.length))) return true;
     const trouve = m.motsCles.some((k) => {
       const key = k;
       let from = 0;
       for (;;) {
         const pos = t.indexOf(key, from);
         if (pos === -1) return false;
-        // Le mot-clé doit commencer un mot.
-        const debutMot = t[pos - 1] === " " || pos === 0;
+        // Le mot-clé doit commencer un mot (ou suivre un trait d'union :
+        // « neuro-paludisme »).
+        const debutMot = t[pos - 1] === " " || t[pos - 1] === "-" || pos === 0;
         if (debutMot && !estNie(t, pos, key.length)) return true;
         from = pos + 1;
       }
@@ -174,13 +178,39 @@ export interface BlocTDR {
   dengueProbables: string[]; // patients avec NS1 + et/ou IgM +
 }
 
+/** Un dossier de la semaine et ce que le TLOH en a retenu (liste de contrôle). */
+export interface DossierTLOH {
+  id: string;
+  patient: string;
+  date: string;
+  source: "Consultation" | "Pédiatrie" | "Hospitalisation";
+  texte: string;
+  maladies: string[]; // noms des maladies comptées
+  etat: "compte" | "sans_diagnostic" | "hors_liste";
+}
+
 export interface ResultatAuto {
   cas: Record<string, Compte>;
   deces: Record<string, Compte>;
   details: CasTHLO[];
   nbDossiersAnalyses: number;
   sansDiagnostic: number; // consultations de la semaine encore sans diagnostic
+  dossiers: DossierTLOH[];
   tdr: BlocTDR;
+}
+
+/** Diagnostic vide ou laissé au texte par défaut (« A préciser », « En attente »…). */
+export function diagnosticVide(texte?: string): boolean {
+  const t = (texte || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]+/g, " ").trim();
+  return !t || /^(a preciser|en attente|non precise|non renseigne|inconnu|aucun|neant|rien|na|nd)$/.test(t);
+}
+
+/** Ramène une date (ISO avec heure, ou jj/mm/aaaa) au format AAAA-MM-JJ. */
+export function jourDe(d?: string): string {
+  const v = (d || "").trim();
+  const fr = v.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/);
+  if (fr) return `${fr[3]}-${fr[2].padStart(2, "0")}-${fr[1].padStart(2, "0")}`;
+  return v.slice(0, 10);
 }
 
 const normNom = (s: string) => (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -192,8 +222,9 @@ export function compterSemaine(
   hospitalisations: Hospitalisation[],
   examens: ExamenLabo[] = []
 ): ResultatAuto {
-  const dansSemaine = (d?: string) => !!d && d >= semaine.debut && d <= semaine.fin;
+  const dansSemaine = (d?: string) => { const j = jourDe(d); return !!j && j >= semaine.debut && j <= semaine.fin; };
   const details: CasTHLO[] = [];
+  const dossiers: DossierTLOH[] = [];
   const dejaCompte = new Set<string>(); // un patient = un cas par maladie et par semaine
   let nb = 0;
   let sansDiag = 0;
@@ -208,7 +239,8 @@ export function compterSemaine(
   consultations.filter((c) => dansSemaine(c.date)).forEach((c) => {
     nb++;
     // Le diagnostic final (de sortie) prime sur le diagnostic de présomption.
-    const texte = [c.diagnosticFinal || c.diagnostic, c.mdoDeclare].filter(Boolean).join(" · ");
+    const diag = [c.diagnosticFinal, c.diagnostic].find((x) => !diagnosticVide(x)) || "";
+    const texte = [diag, c.mdoDeclare].filter((x) => !diagnosticVide(x)).join(" · ");
     if (!texte.trim() && !c.classementPalu) sansDiag++;
     let maladies = maladiesDansTexte(texte);
     // Le classement PS / PG choisi par le médecin prime sur le texte du diagnostic.
@@ -217,6 +249,12 @@ export function compterSemaine(
       const m = MALADIES_THLO.find((x) => x.id === (c.classementPalu === "PG" ? "palu_grave" : "palu_simple"));
       if (m) maladies.push(m);
     }
+    dossiers.push({
+      id: c.id, patient: c.patient, date: jourDe(c.date), source: "Consultation",
+      texte: c.classementPalu ? `Classé ${c.classementPalu}${texte ? ` · ${texte}` : ""}` : texte,
+      maladies: maladies.map((m) => m.nom),
+      etat: maladies.length ? "compte" : !texte.trim() ? "sans_diagnostic" : "hors_liste",
+    });
     maladies.forEach((m) =>
       ajouter({
         // Un âge à 0 correspond le plus souvent à un âge non saisi à
@@ -232,10 +270,36 @@ export function compterSemaine(
   pediatrie.filter((p) => dansSemaine(p.date)).forEach((p) => {
     nb++;
     const age = typeof p.ageMois === "number" ? p.ageMois / 12 : undefined;
-    maladiesDansTexte(p.diagnostic).forEach((m) =>
+    const mp = maladiesDansTexte(p.diagnostic);
+    if (!(p.diagnostic || "").trim()) sansDiag++;
+    dossiers.push({
+      id: p.id, patient: p.patient, date: jourDe(p.date), source: "Pédiatrie", texte: p.diagnostic || "",
+      maladies: mp.map((m) => m.nom), etat: mp.length ? "compte" : !(p.diagnostic || "").trim() ? "sans_diagnostic" : "hors_liste",
+    });
+    mp.forEach((m) =>
       ajouter({ maladieId: m.id, patient: p.patient, date: p.date, tranche: trancheAge(age), ageInconnu: age === undefined, source: "Pédiatrie", texte: p.diagnostic, refId: p.id })
     );
   });
+
+  // Hospitalisations admises pendant la semaine : un malade hospitalisé
+  // directement (sans passer par une consultation) est aussi un cas.
+  hospitalisations
+    .filter((h) => dansSemaine(h.dateAdmission))
+    .forEach((h) => {
+      const texte = [h.diagnosticSortie, h.motif].filter(Boolean).join(" · ");
+      const mh = maladiesDansTexte(texte);
+      const cons = consultations.find((c) => normNom(c.patient) === normNom(h.patient) && c.age > 0);
+      dossiers.push({
+        id: h.id, patient: h.patient, date: jourDe(h.dateAdmission), source: "Hospitalisation", texte,
+        maladies: mh.map((m) => m.nom), etat: mh.length ? "compte" : !texte.trim() ? "sans_diagnostic" : "hors_liste",
+      });
+      mh.forEach((m) =>
+        ajouter({
+          maladieId: m.id, patient: h.patient, date: jourDe(h.dateAdmission), tranche: trancheAge(cons?.age),
+          ageInconnu: !cons, source: "Hospitalisation", texte, refId: h.id,
+        })
+      );
+    });
 
   // Décès : hospitalisations sorties avec le statut « Décès » pendant la semaine.
   hospitalisations
@@ -295,7 +359,7 @@ export function compterSemaine(
   // la précédente) est considéré comme classé.
   const debutLarge = new Date(semaine.debut + "T00:00:00"); debutLarge.setDate(debutLarge.getDate() - 7);
   const dl = isoDate(debutLarge);
-  consultations.filter((c) => c.classementPalu && c.date >= dl && c.date <= semaine.fin).forEach((c) => classes.add(normNom(c.patient)));
+  consultations.filter((c) => c.classementPalu && jourDe(c.date) >= dl && jourDe(c.date) <= semaine.fin).forEach((c) => classes.add(normNom(c.patient)));
   const vus = new Set<string>();
   const paluNonClasses = palu.filter((t) => {
     const k = normNom(t.patient);
@@ -312,6 +376,7 @@ export function compterSemaine(
 
   return {
     cas, deces, details, nbDossiersAnalyses: nb, sansDiagnostic: sansDiag,
+    dossiers: dossiers.sort((a, b) => a.date.localeCompare(b.date) || a.patient.localeCompare(b.patient)),
     tdr: { palu, dengue, paluNonClasses, dengueSuspects: [...suspects.values()], dengueProbables: [...probables.values()] },
   };
 }

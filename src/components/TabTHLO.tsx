@@ -35,6 +35,8 @@ interface Props {
   agentNom?: string;
 }
 
+type FiltreControle = "tous" | "compte" | "sans_diagnostic" | "hors_liste";
+
 const dateFr = (iso?: string) => (iso ? new Date(iso.length === 10 ? iso + "T00:00:00" : iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" }) : "");
 
 export default function TabTHLO({
@@ -59,6 +61,7 @@ export default function TabTHLO({
     return () => clearInterval(t);
   }, [choixManuel, semaine.id]);
   const [seulementAvecCas, setSeulementAvecCas] = useState(false);
+  const [controle, setControle] = useState<FiltreControle | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [showConfig, setShowConfig] = useState(!config?.district);
   const [cfgDraft, setCfgDraft] = useState<ConfigTHLO>(cfg);
@@ -220,8 +223,10 @@ export default function TabTHLO({
   const transmises = historique.filter((h) => h.r?.statut === "Transmis");
   const aTemps = transmises.filter((h) => h.r!.transmisLe!.slice(0, 10) <= dateLimite(h.s, cfg));
 
-  const statutChip = (st?: string) => {
-    const s = st || "Non commencé";
+  // Sans rapport enregistré, les chiffres sont quand même calculés en direct :
+  // « Calcul automatique » (semaine en cours) ou « À valider » (semaine finie).
+  const statutChip = (st?: string, sem?: SemaineEpi) => {
+    const s = st || (sem && sem.fin >= today ? "Calcul automatique" : "À valider");
     const cls = s === "Transmis" ? "bg-emerald-500/15 text-emerald-600" : s === "Validé" ? "bg-blue-500/15 text-blue-600" : s === "Brouillon" ? "bg-amber-500/15 text-amber-600" : "bg-gray-500/15 text-gray-500";
     return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${cls}`}>{s}</span>;
   };
@@ -309,7 +314,8 @@ export default function TabTHLO({
           <button onClick={() => allerA(decalerSemaine(semaine, 1))} disabled={semaine.id === semaineCourante.id} aria-label="Semaine suivante" className={`p-2 rounded border disabled:opacity-30 ${isDark ? "border-gray-600" : "border-gray-300"}`}><ChevronRight className="w-4 h-4" /></button>
         </div>
         <div className="flex items-center gap-2">
-          {statutChip(rapport?.statut)}
+          {statutChip(rapport?.statut, semaine)}
+          {!rapport && <span className={`text-xs ${muted}`}>chiffres mis à jour à chaque consultation, rien à faire avant la validation</span>}
           {rapport?.transmisLe && <span className={`text-xs ${muted}`}>transmis le {dateFr(rapport.transmisLe)}{rapport.moyenTransmission ? ` (${rapport.moyenTransmission})` : ""}</span>}
         </div>
       </div>
@@ -424,18 +430,66 @@ export default function TabTHLO({
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
-          ["Dossiers de la semaine", auto.nbDossiersAnalyses],
-          ["Encore sans diagnostic", auto.sansDiagnostic],
-          ["Cas notifiés", totalCas],
-          ["Décès", totalDeces],
-          ["Maladies avec cas", maladiesAvecCas.length],
-        ].map(([l, v]) => (
-          <div key={l as string} className={`${card} p-3`}>
+          ["Dossiers de la semaine", auto.dossiers.length, "tous"],
+          ["Encore sans diagnostic", auto.sansDiagnostic, "sans_diagnostic"],
+          ["Cas notifiés", totalCas, "compte"],
+          ["Décès", totalDeces, ""],
+          ["Maladies avec cas", maladiesAvecCas.length, ""],
+        ].map(([l, v, f]) => (
+          <button
+            key={l as string}
+            type="button"
+            disabled={!f}
+            onClick={() => setControle(controle === f ? null : (f as FiltreControle))}
+            className={`${card} p-3 text-left ${f ? "hover:ring-2 hover:ring-emerald-400 cursor-pointer" : "cursor-default"} ${controle === f ? "ring-2 ring-emerald-500" : ""}`}
+          >
             <div className={`text-xs uppercase font-semibold ${muted}`}>{l}</div>
-            <div className={`text-2xl font-bold ${l === "Décès" && Number(v) > 0 ? "text-red-600" : ""}`}>{v}</div>
-          </div>
+            <div className={`text-2xl font-bold ${l === "Décès" && Number(v) > 0 ? "text-red-600" : l === "Encore sans diagnostic" && Number(v) > 0 ? "text-amber-600" : ""}`}>{v}</div>
+            {f && <div className={`text-[11px] ${muted}`}>{controle === f ? "masquer la liste" : "voir la liste"}</div>}
+          </button>
         ))}
       </div>
+
+      {/* Liste de contrôle : chaque dossier de la semaine et ce que le TLOH en a retenu */}
+      {controle && (
+        <div className={`${card} p-3`}>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="font-semibold">Contrôle des dossiers de la semaine</div>
+            <div className="flex flex-wrap gap-1.5 text-xs">
+              {([
+                ["tous", `Tous (${auto.dossiers.length})`],
+                ["compte", `Comptés (${auto.dossiers.filter((d) => d.etat === "compte").length})`],
+                ["sans_diagnostic", `Sans diagnostic (${auto.dossiers.filter((d) => d.etat === "sans_diagnostic").length})`],
+                ["hors_liste", `Hors maladies surveillées (${auto.dossiers.filter((d) => d.etat === "hors_liste").length})`],
+              ] as [FiltreControle, string][]).map(([k, l]) => (
+                <button key={k} type="button" onClick={() => setControle(k)}
+                  className={`px-2.5 py-1 rounded-full border font-semibold ${controle === k ? "bg-emerald-600 text-white border-emerald-600" : isDark ? "border-gray-600" : "border-gray-300"}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className={`text-xs mb-2 ${muted}`}>
+            Le TLOH ne compte que les maladies sous surveillance (paludisme, dengue, méningite, rougeole…). Une consultation pour une autre maladie apparaît ici en « hors maladies surveillées » : c'est normal. Une consultation « sans diagnostic » sera comptée dès que le diagnostic (ou le classement PS / PG) sera saisi.
+          </p>
+          <div className="space-y-1 max-h-96 overflow-y-auto">
+            {auto.dossiers.filter((d) => controle === "tous" || d.etat === controle).length === 0 && <div className={`text-sm ${muted}`}>Aucun dossier.</div>}
+            {auto.dossiers.filter((d) => controle === "tous" || d.etat === controle).map((d) => (
+              <div key={d.source + d.id} className={`flex flex-wrap items-start justify-between gap-2 text-sm rounded px-2 py-1.5 ${isDark ? "bg-gray-900" : "bg-gray-50"}`}>
+                <div className="min-w-0">
+                  <b>{d.patient || "(sans nom)"}</b> <span className={`text-xs ${muted}`}>· {dateFr(d.date)} · {d.source}</span>
+                  <div className={`text-xs ${muted} truncate`}>{d.texte || "Diagnostic non saisi"}</div>
+                </div>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                  d.etat === "compte" ? "bg-emerald-500/15 text-emerald-600" : d.etat === "sans_diagnostic" ? "bg-amber-500/15 text-amber-600" : "bg-gray-500/15 text-gray-500"
+                }`}>
+                  {d.etat === "compte" ? `Compté : ${d.maladies.join(", ")}` : d.etat === "sans_diagnostic" ? "Sans diagnostic" : "Hors maladies surveillées"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {agesAVerifier > 0 && !verrouille && (
         <p className="text-sm text-amber-600 flex items-center gap-2">
@@ -585,7 +639,7 @@ export default function TabTHLO({
                 className={`text-left rounded border p-2 ${s.id === semaine.id ? "ring-2 ring-emerald-500" : ""} ${isDark ? "border-gray-700 hover:bg-gray-700" : "border-gray-200 hover:bg-gray-50"}`}>
                 <div className="flex justify-between items-center gap-1">
                   <b className="text-sm">S{String(s.numero).padStart(2, "0")}</b>
-                  {statutChip(r?.statut)}
+                  {statutChip(r?.statut, s)}
                 </div>
                 <div className={`text-xs ${muted}`}>{dateFr(s.debut).replace(/ \d{4}$/, "")} → {dateFr(s.fin).replace(/ \d{4}$/, "")}</div>
                 <div className={`text-xs mt-0.5 ${enRetard ? "text-red-600 font-semibold" : muted}`}>
