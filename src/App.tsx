@@ -601,14 +601,16 @@ export default function App() {
         tabs: [
           "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
           "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
-          "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings", "bilan",
+          "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings",
+          // Bilan mensuel : réservé au responsable du service.
+          ...(p.includes("responsable") ? ["bilan"] : []),
         ],
       };
     }
 
     const tabs = ["taches"]; // tout le monde voit les tâches
     if (p.includes("medecin") || p.includes("pediatre") || p.includes("praticien")) {
-      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs", "thlo", "bilan");
+      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs", "thlo");
       return { reconnu: true, tabs };
     }
     if (p.includes("sage-femme") || p.includes("maternit")) {
