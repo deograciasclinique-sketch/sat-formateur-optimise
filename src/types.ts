@@ -786,8 +786,10 @@ export interface Consultation {
   // Décision prise en Consultation Générale (cahier des charges, points 1-3) :
   // c'est ici, et uniquement ici, que se décide l'orientation du patient
   // (retour à domicile, observation, hospitalisation, référence ou urgences).
-  decision?: "Retour à domicile" | "Mise en observation" | "Hospitalisation" | "Référer vers un autre service" | "Admission aux urgences";
+  decision?: "Retour à domicile" | "Mise en observation" | "Hospitalisation" | "Référer vers un autre service" | "Admission aux urgences" | "Renvoi en salle infirmière";
   referenceService?: string;
+  // Consignes du médecin pour la salle infirmière (décision « Renvoi en salle infirmière »).
+  consignesInfirmier?: string;
   // Renseigné automatiquement quand la décision crée un dossier lié
   // (hospitalisation ou urgences), pour tracer le lien entre les deux dossiers.
   linkedHospitalisationId?: string;

@@ -215,6 +215,10 @@ export default function TabInfirmier({
   const todayIso = new Date().toISOString().slice(0, 10);
 
   const [date, setDate] = useState(todayIso);
+  // Identité transmise par le secrétariat (modifiable si besoin).
+  const [contactPatient, setContactPatient] = useState("");
+  const [agePatient, setAgePatient] = useState("");
+  const [sexePatient, setSexePatient] = useState<"Masculin" | "Féminin">("Masculin");
   const [profession, setProfession] = useState("");
   const [commune, setCommune] = useState("");
   const [villageSecteur, setVillageSecteur] = useState("");
@@ -304,6 +308,9 @@ export default function TabInfirmier({
   const openPatient = (c: Consultation) => {
     setSelectedId(c.id);
     setDate(c.date || todayIso);
+    setContactPatient(c.contact || "");
+    setAgePatient(c.age ? String(c.age) : "");
+    setSexePatient(c.sexe || "Masculin");
     setProfession(c.profession || "");
     setCommune(c.commune || "");
     setVillageSecteur(c.villageSecteur || "");
@@ -378,6 +385,9 @@ export default function TabInfirmier({
     return {
       ...selected!,
       date,
+      contact: contactPatient.trim(),
+      age: parseFloat(agePatient) || selected!.age || 0,
+      sexe: sexePatient,
       profession: profession.trim(),
       commune: commune.trim(),
       villageSecteur: villageSecteur.trim(),
@@ -721,6 +731,42 @@ export default function TabInfirmier({
                   <CalendarPlus className="w-4 h-4" /> Programmer un RDV
                 </button>
               </div>
+            </div>
+
+            {/* Identité transmise par le secrétariat */}
+            <div className={`rounded-lg border p-3 ${isDark ? "border-gray-700" : "border-emerald-200 bg-emerald-50/40"}`}>
+              <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700 mb-2">Identité du patient (secrétariat)</div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="col-span-2">
+                  <label className="text-sm font-medium">Téléphone du patient</label>
+                  <div className="flex gap-2 mt-1">
+                    <input
+                      type="tel"
+                      className="w-full px-3 py-2 rounded border bg-transparent"
+                      placeholder="Ex : 70 00 00 00"
+                      value={contactPatient}
+                      onChange={(e) => setContactPatient(e.target.value)}
+                    />
+                    {contactPatient.trim() && (
+                      <a href={`tel:${contactPatient.replace(/\s/g, "")}`} className="px-3 py-2 rounded border text-sm font-semibold text-emerald-700 whitespace-nowrap" title="Appeler">Appeler</a>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Âge</label>
+                  <input type="number" min={0} className="w-full mt-1 px-3 py-2 rounded border bg-transparent" value={agePatient} onChange={(e) => setAgePatient(e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Sexe</label>
+                  <select className="w-full mt-1 px-3 py-2 rounded border bg-transparent" value={sexePatient} onChange={(e) => setSexePatient(e.target.value as "Masculin" | "Féminin")}>
+                    <option value="Masculin">Masculin</option>
+                    <option value="Féminin">Féminin</option>
+                  </select>
+                </div>
+              </div>
+              {!contactPatient.trim() && (
+                <p className="text-xs text-amber-600 mt-1.5">Numéro non renseigné par le secrétariat : demandez-le au patient et saisissez-le ici.</p>
+              )}
             </div>
 
             <div>
@@ -1129,7 +1175,7 @@ export default function TabInfirmier({
       {actesAExecuter.length > 0 && (
         <div className="md:col-span-3 space-y-2 pt-4 border-t border-dashed">
           <h2 className="text-lg font-bold flex items-center gap-2">
-            <Syringe className="w-5 h-5" /> Soins à exécuter (actes payés)
+            <Syringe className="w-5 h-5" /> Soins à exécuter (décisions du médecin)
           </h2>
           <div className="space-y-2">
             {actesAExecuter.map((c) => (
@@ -1146,8 +1192,17 @@ export default function TabInfirmier({
                       ? `${c.ordonnance.length} ligne(s) d'ordonnance à exécuter`
                       : catASoinsInfirmiers(c.conduiteATenir)
                       ? "Injectables / soins prescrits dans la conduite à tenir"
+                      : c.consignesInfirmier
+                      ? "Renvoyé par le médecin pour exécution"
                       : "Aucun soin à exécuter (voir Laboratoire pour les examens)"}
+                    {c.contact ? ` · 📞 ${c.contact}` : ""}
                   </div>
+                  {c.decision === "Renvoi en salle infirmière" && (
+                    <div className="mt-1 text-xs rounded border border-amber-300 bg-amber-50 text-amber-900 px-2 py-1">
+                      <b>Consignes du médecin :</b> {c.consignesInfirmier || "voir la conduite à tenir et l'ordonnance"}
+                      {c.diagnostic ? <span className="block text-amber-800">Diagnostic : {c.diagnosticFinal || c.diagnostic}</span> : null}
+                    </div>
+                  )}
                   {catASoinsInfirmiers(c.conduiteATenir) && (
                     <div className="mt-1 text-emerald-700 dark:text-emerald-400">
                       <ConduiteATenirListe items={c.conduiteATenir} seulementType={TYPES_INFIRMIER} compact />

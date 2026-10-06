@@ -224,6 +224,8 @@ export default function SalleAccouchement({
   const [maintenant, setMaintenant] = useState(new Date());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showAdmission, setShowAdmission] = useState(false);
+  // Correction des informations d'admission d'un partogramme existant.
+  const [editPartoId, setEditPartoId] = useState<string | null>(null);
   const [vueDetail, setVueDetail] = useState<"saisie" | "grille" | "issue" | "postpartum">("saisie");
 
   // Horloge : rafraîchit les alertes et les rappels toutes les 30 s.
@@ -338,9 +340,36 @@ export default function SalleAccouchement({
     return Math.floor((Date.now() - new Date(ddr).getTime()) / (7 * 24 * 3600 * 1000));
   };
 
+  const ouvrirCorrectionAdmission = (p: Partogramme) => {
+    const loc = (iso?: string) => (iso ? versInputLocal(new Date(iso)) : "");
+    setAdm({
+      patient: p.patient || "", contact: p.contact || "", age: p.age !== undefined ? String(p.age) : "",
+      gestite: p.gestite !== undefined ? String(p.gestite) : "", parite: p.parite !== undefined ? String(p.parite) : "",
+      ddr: p.ddr || "", admission: loc(p.admission), debutTravail: loc(p.debutTravail), ruptureMembranes: loc(p.ruptureMembranes),
+      facteursRisque: p.facteursRisque || "", sageFemmeId: p.sageFemmeId || "",
+    });
+    setEditPartoId(p.id);
+    setShowAdmission(true);
+  };
+
   const handleAdmettre = () => {
     if (!adm.patient.trim()) {
       alert("Veuillez saisir le nom de la parturiente.");
+      return;
+    }
+    if (editPartoId) {
+      onUpdatePartogrammes(partogrammes.map((p) => p.id !== editPartoId ? p : nettoyer<Partogramme>({
+        ...p,
+        patient: adm.patient.trim(), contact: txt(adm.contact), age: num(adm.age), gestite: num(adm.gestite), parite: num(adm.parite),
+        ddr: txt(adm.ddr), saAdmission: adm.ddr ? saAuJour(adm.ddr) : p.saAdmission,
+        admission: adm.admission ? new Date(adm.admission).toISOString() : p.admission,
+        debutTravail: adm.debutTravail ? new Date(adm.debutTravail).toISOString() : undefined,
+        ruptureMembranes: adm.ruptureMembranes ? new Date(adm.ruptureMembranes).toISOString() : undefined,
+        facteursRisque: txt(adm.facteursRisque), sageFemmeId: adm.sageFemmeId || p.sageFemmeId,
+      })));
+      setEditPartoId(null);
+      setShowAdmission(false);
+      setAdm({ patient: "", contact: "", age: "", gestite: "", parite: "", ddr: "", admission: versInputLocal(), debutTravail: "", ruptureMembranes: "", facteursRisque: "", sageFemmeId: "" });
       return;
     }
     if (enCours.some((p) => p.patient.trim().toLowerCase() === adm.patient.trim().toLowerCase())) {
@@ -566,7 +595,13 @@ export default function SalleAccouchement({
           </h3>
           <button
             type="button"
-            onClick={() => setShowAdmission(true)}
+            onClick={() => {
+              if (editPartoId) {
+                setEditPartoId(null);
+                setAdm({ patient: "", contact: "", age: "", gestite: "", parite: "", ddr: "", admission: versInputLocal(), debutTravail: "", ruptureMembranes: "", facteursRisque: "", sageFemmeId: "" });
+              }
+              setShowAdmission(true);
+            }}
             className="px-4 py-2 text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg flex items-center gap-1.5"
           >
             <UserPlus className="w-4 h-4" /> Admettre une parturiente
@@ -671,6 +706,9 @@ export default function SalleAccouchement({
                   Remettre en cours
                 </button>
               )}
+              <button type="button" onClick={() => ouvrirCorrectionAdmission(selected)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-amber-300 text-amber-800 hover:bg-amber-50">
+                Corriger l'admission
+              </button>
               <button type="button" onClick={() => handleSupprimerPartogramme(selected.id)} className="p-2 rounded-lg text-stone-400 hover:text-danger-600" title="Supprimer">
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -1095,8 +1133,8 @@ export default function SalleAccouchement({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 overflow-y-auto">
           <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl border border-stone-200 max-h-[92vh] overflow-y-auto">
             <div className="p-4 border-b border-stone-100 flex items-center justify-between">
-              <h3 className="font-serif font-bold text-base flex items-center gap-2"><UserPlus className="w-5 h-5 text-pink-600" /> Admission en salle d'accouchement</h3>
-              <button type="button" onClick={() => setShowAdmission(false)} className="p-1.5 rounded-lg hover:bg-stone-100"><X className="w-5 h-5 text-stone-500" /></button>
+              <h3 className="font-serif font-bold text-base flex items-center gap-2"><UserPlus className="w-5 h-5 text-pink-600" /> {editPartoId ? "Corriger l'admission" : "Admission en salle d'accouchement"}</h3>
+              <button type="button" onClick={() => { setShowAdmission(false); setEditPartoId(null); }} className="p-1.5 rounded-lg hover:bg-stone-100"><X className="w-5 h-5 text-stone-500" /></button>
             </div>
             <div className="p-5 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1138,7 +1176,7 @@ export default function SalleAccouchement({
                 <textarea value={adm.facteursRisque} onChange={(e) => setAdm({ ...adm, facteursRisque: e.target.value })} placeholder="Ex. utérus cicatriciel, HTA, anémie, grossesse gémellaire..." className={`${inputCls} h-16 resize-none`} />
               </Champ>
               <button type="button" onClick={handleAdmettre} className="w-full text-sm font-bold py-2.5 bg-pink-600 hover:bg-pink-700 text-white rounded-lg">
-                Admettre et ouvrir le partogramme
+                {editPartoId ? "Enregistrer les corrections" : "Admettre et ouvrir le partogramme"}
               </button>
             </div>
           </div>

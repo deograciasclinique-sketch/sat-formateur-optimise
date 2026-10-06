@@ -112,6 +112,7 @@ export default function TabConsultation({
   const [consMedecin, setConsMedecin] = useState(currentUser?.id || "");
   // Décision de Consultation Générale (cahier des charges, points 1-3)
   const [consDecision, setConsDecision] = useState<NonNullable<Consultation["decision"]>>("Retour à domicile");
+  const [consConsignesInf, setConsConsignesInf] = useState("");
   const [consReferenceService, setConsReferenceService] = useState("");
 
   // Dossier repris depuis la file d'attente "Attente consultation médecin"
@@ -668,6 +669,7 @@ export default function TabConsultation({
     setTempLabResults([]);
     setShowFormCamera(false);
     setConsDecision("Retour à domicile");
+    setConsConsignesInf("");
     setConsReferenceService("");
     setPendingSource(null);
   };
@@ -704,6 +706,7 @@ export default function TabConsultation({
     setConsCAT(c.conduiteATenir || []);
     setPresLines(c.ordonnance || []);
     setConsDecision((c.decision as any) || "Retour à domicile");
+    setConsConsignesInf(c.consignesInfirmier || "");
     setConsReferenceService(c.referenceService || "");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -881,13 +884,22 @@ export default function TabConsultation({
       agentCode: currentUser?.codeEntree || "0000",
       decision: consDecision,
       referenceService: consDecision === "Référer vers un autre service" ? consReferenceService.trim() : undefined,
+      consignesInfirmier: consDecision === "Renvoi en salle infirmière" ? consConsignesInf.trim() : undefined,
       // Dossier repris depuis la salle infirmier/maternité : une fois le
       // médecin passé, il repasse par le circuit paiement des actes / clôture
       // plutôt que de rester "Terminée" par défaut comme une saisie directe.
       // Des soins infirmiers prévus dans la conduite à tenir passent aussi par
       // le paiement des actes puis la salle infirmier.
-      statut: pendingSource ? (presLines.length > 0 || catASoinsInfirmiers(consCAT) ? "Attente paiement actes" : "Terminée") : undefined,
+      statut: consDecision === "Renvoi en salle infirmière"
+        // Renvoi explicite en salle infirmière : passage à la caisse s'il y a
+        // des actes à payer, sinon directement dans la liste des soins à exécuter.
+        ? (presLines.length > 0 || catASoinsInfirmiers(consCAT) ? "Attente paiement actes" : "Attente exécution actes")
+        : pendingSource ? (presLines.length > 0 || catASoinsInfirmiers(consCAT) ? "Attente paiement actes" : "Terminée") : undefined,
     };
+    if (consDecision === "Renvoi en salle infirmière" && !consConsignesInf.trim() && !catASoinsInfirmiers(consCAT) && presLines.length === 0) {
+      alert("Indiquez les consignes pour la salle infirmière (ce qu'il faut exécuter).");
+      return;
+    }
 
     const medecinNomForDecision = staff.find((s) => s.id === consMedecin)?.nom || currentUser?.nom || "";
     const nowTime = new Date().toTimeString().slice(0, 5);
@@ -2534,7 +2546,21 @@ export default function TabConsultation({
                 <option value="Hospitalisation">🏥 Hospitalisation</option>
                 <option value="Référer vers un autre service">↗️ Référer vers un autre service</option>
                 <option value="Admission aux urgences">🚨 Admettre aux urgences</option>
+                <option value="Renvoi en salle infirmière">💉 Renvoyer en salle infirmière (exécution de la décision)</option>
               </select>
+              {consDecision === "Renvoi en salle infirmière" && (
+                <div className="mt-2 space-y-1.5">
+                  <textarea
+                    placeholder="Consignes pour l'infirmier : ex. injection de …, pansement, perfusion, surveillance des constantes 2 h, puis exéat…"
+                    value={consConsignesInf}
+                    onChange={(e) => setConsConsignesInf(e.target.value)}
+                    className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none h-20 resize-none"
+                  />
+                  <p className="text-2xs text-info-700 bg-info-50 border border-info-100 rounded-lg px-2.5 py-1.5">
+                    Le dossier repart en salle infirmière, avec ces consignes, la conduite à tenir et l'ordonnance. S'il y a des actes à payer, le patient passe d'abord à la caisse.
+                  </p>
+                </div>
+              )}
               {consDecision === "Référer vers un autre service" && (
                 <input
                   type="text"

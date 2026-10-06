@@ -9,7 +9,8 @@ import SalleAccouchement from "./SalleAccouchement";
 import { alertesEnCours, taElevee } from "../lib/lcg";
 import { generateUid, getTodayStr } from "../data";
 import DeclarationNaissanceModal, { imprimerDeclaration } from "./DeclarationNaissance";
-import { Plus, Trash2, Calendar, Clipboard, Heart, HelpCircle, CheckCircle, FlaskConical, Upload, Image, Download, Eye, X, AlertTriangle, FolderOpen, UserPlus } from "lucide-react";
+import { Plus, Trash2, Calendar, Clipboard, Heart, HelpCircle, CheckCircle, FlaskConical, Upload, Image, Download, Eye, X, AlertTriangle, FolderOpen, UserPlus, Pencil } from "lucide-react";
+import { logActivity } from "../lib/activityLogger";
 
 interface TabMaterniteProps {
   cpns: ConsultationPrenatale[];
@@ -120,6 +121,11 @@ export default function TabMaternite({
   const [accSageFemme, setAccSageFemme] = useState("");
   // Accouchement dont on établit / consulte la déclaration de naissance.
   const [declarationAccId, setDeclarationAccId] = useState<string | null>(null);
+  // Correction d'une fiche déjà enregistrée (CPN ou accouchement).
+  const [editCpnId, setEditCpnId] = useState<string | null>(null);
+  const [editAccId, setEditAccId] = useState<string | null>(null);
+  const cpnFormRef = React.useRef<HTMLDivElement>(null);
+  const accFormRef = React.useRef<HTMLDivElement>(null);
   const declarationAcc = accouchements.find((a) => a.id === declarationAccId) || null;
 
   const handleEchoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -209,6 +215,7 @@ export default function TabMaternite({
   const auMoinsUnSigneDanger = dangerSaignement || dangerCephalees || dangerVisionFloue || dangerDouleurEpigastrique || dangerFievre || dangerDiminutionMAF;
 
   const resetCpnForm = () => {
+    setEditCpnId(null);
     setCpnPatient("");
     setCpnContact("");
     setCpnPoids("");
@@ -243,6 +250,38 @@ export default function TabMaternite({
     setCpnAvortements("");
   };
 
+  const n2s = (v?: number) => (v === undefined || v === null || isNaN(v as number) ? "" : String(v));
+  const chargerCpn = (c: ConsultationPrenatale) => {
+    setEditCpnId(c.id);
+    setCpnPatient(c.patient || ""); setCpnContact(c.contact || ""); setCpnDdr(c.ddr || "");
+    setCpnDateVisite(c.dateVisite || getTodayStr()); setCpnNumero(c.numeroVisite);
+    setCpnGestite(n2s(c.gestite)); setCpnParite(n2s(c.parite)); setCpnAvortements(n2s(c.avortements));
+    setCpnPoids(c.poids ? String(c.poids) : ""); setCpnTa(c.ta || ""); setCpnHauteurUterine(n2s(c.hauteurUterine));
+    setCpnBcf((c.bcf as any) || ""); setCpnBcfFrequence(n2s(c.bcfFrequence)); setCpnMafPresents(c.mafPresents ?? true);
+    setCpnPresentation(c.presentation || ""); setCpnOedemesMembres(!!c.oedemesMembres); setCpnPalleurConjonctivale(!!c.palleurConjonctivale);
+    setCpnAlbuminurie(c.albuminurie || "Négatif"); setCpnGlycosurie(c.glycosurie || "Négatif"); setCpnHemoglobine(n2s(c.hemoglobine));
+    setCpnGroupeSanguin(c.groupeSanguin || ""); setCpnRhesus(c.rhesus || ""); setCpnSerologieVIH(c.serologieVIH || "");
+    setCpnSerologieSyphilis(c.serologieSyphilis || ""); setCpnSerologieHepatiteB(c.serologieHepatiteB || "");
+    setCpnFerAcideFolique(!!c.ferAcideFolique); setCpnMild(!!c.mild); setCpnVatDoses(n2s(c.vatDoses)); setCpnTpiDoses(n2s(c.tpiDoses));
+    setDangerSaignement(!!c.dangerSaignement); setDangerCephalees(!!c.dangerCephalees); setDangerVisionFloue(!!c.dangerVisionFloue);
+    setDangerDouleurEpigastrique(!!c.dangerDouleurEpigastrique); setDangerFievre(!!c.dangerFievre); setDangerDiminutionMAF(!!c.dangerDiminutionMAF);
+    setTempEchographies(c.echographies ? [...c.echographies] : []);
+    setCpnAgent(c.agentId || ""); setCpnProchainRdv(c.prochainRdv || ""); setCpnNotes(c.notes || "");
+    setVue("cpn");
+    setTimeout(() => cpnFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+  const chargerAcc = (a: Accouchement) => {
+    setEditAccId(a.id);
+    setAccPatient(a.patient || a.patiente || ""); setAccDate(a.date || getTodayStr()); setAccHeure(a.heure && a.heure !== "—" ? a.heure : "");
+    setAccMode(a.mode); setAccSexeEnfant(a.sexeEnfant || a.sexe || "Masculin"); setAccPoidsEnfant(a.poidsEnfant ? String(a.poidsEnfant) : "");
+    setAccEtatEnfant(a.etatEnfant || ""); setAccComplications(a.complications || ""); setAccSageFemme(a.sageFemmeId || "");
+    setVue("cpn");
+    setTimeout(() => accFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+  const annulerAcc = () => {
+    setEditAccId(null); setAccPatient(""); setAccPoidsEnfant(""); setAccComplications(""); setAccHeure("");
+  };
+
   const handleAddCpn = () => {
     if (!cpnPatient.trim() || !cpnDdr) {
       alert("Veuillez saisir au moins le nom de la gestante et la date des dernières règles (DDR).");
@@ -252,8 +291,10 @@ export default function TabMaternite({
     const sa = getAmenorrhoeaWeeks(cpnDdr);
     const dpa = getExpectedDeliveryDate(cpnDdr);
 
+    const ancienne = editCpnId ? cpns.find((x) => x.id === editCpnId) : undefined;
     const newCpn: ConsultationPrenatale = {
-      id: generateUid(),
+      ...(ancienne || {}),
+      id: ancienne?.id || generateUid(),
       patient: cpnPatient.trim(),
       contact: cpnContact.trim(),
       ddr: cpnDdr,
@@ -295,9 +336,16 @@ export default function TabMaternite({
       agentId: cpnAgent,
       notes: cpnNotes.trim(),
       echographies: tempEchographies.length > 0 ? [...tempEchographies] : undefined,
-      createdAt: new Date().toISOString()
+      createdAt: ancienne?.createdAt || new Date().toISOString()
     };
 
+    if (ancienne) {
+      onUpdateCpns(cpns.map((x) => (x.id === ancienne.id ? newCpn : x)));
+      logActivity("Fiche CPN corrigée", "autre", `${newCpn.patient} · ${newCpn.numeroVisite} du ${newCpn.dateVisite}`, currentUser?.nom);
+      resetCpnForm();
+      alert("Fiche CPN corrigée pour : " + newCpn.patient);
+      return;
+    }
     onUpdateCpns([newCpn, ...cpns]);
     resetCpnForm();
     alert("Consultation Prénatale (CPN) enregistrée pour : " + newCpn.patient);
@@ -311,8 +359,10 @@ export default function TabMaternite({
 
     const p = parseFloat(accPoidsEnfant) || 0;
 
+    const ancien = editAccId ? accouchements.find((x) => x.id === editAccId) : undefined;
     const newAcc: Accouchement = {
-      id: generateUid(),
+      ...(ancien || {}),
+      id: ancien?.id || generateUid(),
       patient: accPatient.trim(),
       date: accDate || getTodayStr(),
       heure: accHeure || "—",
@@ -322,9 +372,16 @@ export default function TabMaternite({
       etatEnfant: accEtatEnfant.trim(),
       complications: accComplications.trim(),
       sageFemmeId: accSageFemme,
-      createdAt: new Date().toISOString()
+      createdAt: ancien?.createdAt || new Date().toISOString()
     };
 
+    if (ancien) {
+      onUpdateAccouchements(accouchements.map((x) => (x.id === ancien.id ? newAcc : x)));
+      logActivity("Accouchement corrigé", "autre", `${newAcc.patient} · ${newAcc.date}`, currentUser?.nom);
+      annulerAcc();
+      alert("Accouchement corrigé pour : " + newAcc.patient + (ancien.declarationNaissance ? "\n\nPensez à vérifier aussi la déclaration de naissance si besoin (bouton « Voir »)." : ""));
+      return;
+    }
     onUpdateAccouchements([newAcc, ...accouchements]);
     setAccPatient("");
     setAccPoidsEnfant("");
@@ -525,11 +582,17 @@ export default function TabMaternite({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Antenatal Care Form (CPN) */}
-        <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4">
+        <div ref={cpnFormRef} className={`bg-white border rounded-2xl p-6 shadow-xs space-y-4 ${editCpnId ? "border-amber-400 ring-2 ring-amber-300" : "border-stone-200"}`}>
           <h3 className="text-base font-serif font-bold text-stone-900 border-b border-stone-100 pb-3 flex items-center gap-2">
             <Heart className="w-5 h-5 text-primary-700" />
-            Nouvelle Consultation Prénatale (CPN)
+            {editCpnId ? "Correction d'une fiche CPN" : "Nouvelle Consultation Prénatale (CPN)"}
           </h3>
+          {editCpnId && (
+            <div className="text-xs bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+              <span>Vous modifiez une fiche déjà enregistrée. Corrigez puis cliquez sur « Enregistrer les corrections ».</span>
+              <button type="button" onClick={resetCpnForm} className="font-bold underline whitespace-nowrap">Annuler</button>
+            </div>
+          )}
 
           <div className="space-y-3">
             {/* 1. Identification */}
@@ -889,18 +952,24 @@ export default function TabMaternite({
               </p>
             </div>
 
-            <button type="button" onClick={handleAddCpn} className="w-full text-xs font-bold py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-all mt-2">
-              Enregistrer la consultation CPN
+            <button type="button" onClick={handleAddCpn} className={`w-full text-xs font-bold py-2 text-white rounded-lg transition-all mt-2 ${editCpnId ? "bg-amber-600 hover:bg-amber-700" : "bg-primary-600 hover:bg-primary-700"}`}>
+              {editCpnId ? "Enregistrer les corrections de la CPN" : "Enregistrer la consultation CPN"}
             </button>
           </div>
         </div>
 
         {/* Childbirth register Form */}
-        <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4 self-start">
+        <div ref={accFormRef} className={`bg-white border rounded-2xl p-6 shadow-xs space-y-4 self-start ${editAccId ? "border-amber-400 ring-2 ring-amber-300" : "border-stone-200"}`}>
           <h3 className="text-base font-serif font-bold text-stone-900 border-b border-stone-100 pb-3 flex items-center gap-2">
             <Heart className="w-5 h-5 text-pink-600" />
-            Registre d'Accouchement (Maternité)
+            {editAccId ? "Correction d'un accouchement" : "Registre d'Accouchement (Maternité)"}
           </h3>
+          {editAccId && (
+            <div className="text-xs bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+              <span>Vous modifiez un accouchement déjà enregistré.</span>
+              <button type="button" onClick={annulerAcc} className="font-bold underline whitespace-nowrap">Annuler</button>
+            </div>
+          )}
 
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-3">
@@ -963,8 +1032,8 @@ export default function TabMaternite({
               <textarea placeholder="RAS ou préciser complications..." value={accComplications} onChange={(e) => setAccComplications(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none h-16 resize-none" />
             </div>
 
-            <button type="button" onClick={handleAddAccouchement} className="w-full text-xs font-bold py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition-all mt-2">
-              Enregistrer la naissance
+            <button type="button" onClick={handleAddAccouchement} className={`w-full text-xs font-bold py-2 text-white rounded-lg transition-all mt-2 ${editAccId ? "bg-amber-600 hover:bg-amber-700" : "bg-pink-600 hover:bg-pink-700"}`}>
+              {editAccId ? "Enregistrer les corrections" : "Enregistrer la naissance"}
             </button>
           </div>
         </div>
@@ -1037,6 +1106,9 @@ export default function TabMaternite({
                         <div className="flex items-center justify-center gap-2">
                           <button type="button" onClick={() => setSelectedPatientDossier(c.patient)} className="text-primary-600 hover:text-primary-800 transition-all" title="Voir le dossier grossesse complet">
                             <FolderOpen className="w-4 h-4" />
+                          </button>
+                          <button type="button" onClick={() => chargerCpn(c)} className="text-amber-600 hover:text-amber-800 transition-all" title="Corriger cette fiche">
+                            <Pencil className="w-4 h-4" />
                           </button>
                           <button type="button" onClick={() => handleDeleteCpn(c.id)} className="text-stone-300 hover:text-danger-600 transition-all">
                             <Trash2 className="w-4 h-4" />
@@ -1119,9 +1191,14 @@ export default function TabMaternite({
                         )}
                       </td>
                       <td className="p-3 text-center">
-                        <button type="button" onClick={() => handleDeleteAcc(a.id)} className="text-stone-300 hover:text-danger-600 transition-all p-1">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          <button type="button" onClick={() => chargerAcc(a)} className="text-amber-600 hover:text-amber-800 transition-all p-1" title="Corriger cet accouchement">
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button type="button" onClick={() => handleDeleteAcc(a.id)} className="text-stone-300 hover:text-danger-600 transition-all p-1">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
