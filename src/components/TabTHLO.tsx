@@ -18,9 +18,10 @@ import { Consultation, ExamenLabo, FichePediatrique, Hospitalisation } from "../
 import {
   MALADIES_THLO, TRANCHES_AGE, Compte, RapportTHLO, ConfigTHLO, CONFIG_THLO_DEFAUT, SemaineEpi,
   compterSemaine, semaineDe, semainePrecedente, decalerSemaine, libelleSemaine, valeursFinales, texteTHLO, somme, zero, dateLimite, isoDate,
-  CHAMPS_FICHE, ChampFiche, ficheAuto, ficheFinale, normaliserConfig,
+  CHAMPS_FICHE, ChampFiche, ficheAuto, ficheFinale, normaliserConfig, DossierTLOH, diagnosticVide,
 } from "../modules/thlo/thloData";
 import { formatWhatsAppNumber } from "../lib/whatsapp";
+import { logActivity } from "../lib/activityLogger";
 
 interface Props {
   consultations: Consultation[];
@@ -33,6 +34,10 @@ interface Props {
   onUpdateConfig: (c: ConfigTHLO) => void;
   theme?: "light" | "dark";
   agentNom?: string;
+  // Pour poser le diagnostic directement depuis la liste de contrôle.
+  onUpdateConsultations?: (c: Consultation[]) => void;
+  onUpdatePediatrie?: (p: FichePediatrique[]) => void;
+  onUpdateHospitalisations?: (h: Hospitalisation[]) => void;
 }
 
 type FiltreControle = "tous" | "compte" | "sans_diagnostic" | "hors_liste";
@@ -41,7 +46,41 @@ const dateFr = (iso?: string) => (iso ? new Date(iso.length === 10 ? iso + "T00:
 
 export default function TabTHLO({
   consultations, pediatrie, hospitalisations, examens = [], rapports, onUpdateRapports, config, onUpdateConfig, theme = "light", agentNom,
+  onUpdateConsultations, onUpdatePediatrie, onUpdateHospitalisations,
 }: Props) {
+  // --- Poser le diagnostic d'un dossier depuis la liste de contrôle ---
+  const [saisieDiag, setSaisieDiag] = useState<Record<string, string>>({});
+  const poserDiagnostic = (d: DossierTLOH, texte: string, classement?: "PS" | "PG") => {
+    const t = texte.trim();
+    if (!t && !classement) { alert("Écrivez le diagnostic (ou choisissez PS / PG)."); return; }
+    if (d.source === "Consultation" && onUpdateConsultations) {
+      onUpdateConsultations(consultations.map((c) => {
+        if (c.id !== d.id) return c;
+        const maj: Consultation = { ...c };
+        if (t) {
+          // Le diagnostic de présomption est rempli s'il est vide ; sinon on
+          // complète le diagnostic final, sans rien effacer.
+          if (diagnosticVide(c.diagnostic)) maj.diagnostic = t; else maj.diagnosticFinal = t;
+        }
+        if (classement) {
+          maj.classementPalu = classement;
+          if (!t && diagnosticVide(c.diagnostic)) maj.diagnostic = classement === "PG" ? "Paludisme grave" : "Paludisme simple";
+        }
+        return maj;
+      }));
+    } else if (d.source === "Pédiatrie" && onUpdatePediatrie) {
+      const v = t || (classement === "PG" ? "Paludisme grave" : "Paludisme simple");
+      onUpdatePediatrie(pediatrie.map((p) => (p.id === d.id ? { ...p, diagnostic: v } : p)));
+    } else if (d.source === "Hospitalisation" && onUpdateHospitalisations) {
+      const v = t || (classement === "PG" ? "Paludisme grave" : "Paludisme simple");
+      onUpdateHospitalisations(hospitalisations.map((h) => (h.id === d.id ? { ...h, diagnosticSortie: v } : h)));
+    } else {
+      return;
+    }
+    logActivity("Diagnostic posé depuis le TLOH", "autre", `${d.patient} (${d.source}, ${d.date}) : ${[t, classement].filter(Boolean).join(" · ")}`, agentNom);
+    setSaisieDiag((s) => { const n = { ...s }; delete n[d.source + d.id]; return n; });
+  };
+
   const isDark = theme === "dark";
   const cfg: ConfigTHLO = normaliserConfig(config);
   const muted = isDark ? "text-gray-400" : "text-gray-500";
@@ -485,6 +524,23 @@ export default function TabTHLO({
                 }`}>
                   {d.etat === "compte" ? `Compté : ${d.maladies.join(", ")}` : d.etat === "sans_diagnostic" ? "Sans diagnostic" : "Hors maladies surveillées"}
                 </span>
+                {d.etat === "sans_diagnostic" && !verrouille && (
+                  <div className="w-full flex flex-wrap items-center gap-1.5 mt-1">
+                    <input
+                      className={`flex-1 min-w-[180px] px-2 py-1 rounded border text-sm bg-transparent ${isDark ? "border-gray-600" : "border-gray-300 bg-white"}`}
+                      placeholder="Poser le diagnostic (ex : paludisme simple, typhoïde…)"
+                      value={saisieDiag[d.source + d.id] || ""}
+                      onChange={(e) => setSaisieDiag((s) => ({ ...s, [d.source + d.id]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") poserDiagnostic(d, saisieDiag[d.source + d.id] || ""); }}
+                    />
+                    <button type="button" onClick={() => poserDiagnostic(d, saisieDiag[d.source + d.id] || "")}
+                      className="px-2.5 py-1 rounded bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700">Enregistrer</button>
+                    <button type="button" title="Paludisme simple" onClick={() => poserDiagnostic(d, saisieDiag[d.source + d.id] || "", "PS")}
+                      className={`px-2 py-1 rounded border text-xs font-semibold ${isDark ? "border-gray-600" : "border-gray-300"}`}>PS</button>
+                    <button type="button" title="Paludisme grave" onClick={() => poserDiagnostic(d, saisieDiag[d.source + d.id] || "", "PG")}
+                      className="px-2 py-1 rounded border border-red-400 text-red-600 text-xs font-semibold">PG</button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

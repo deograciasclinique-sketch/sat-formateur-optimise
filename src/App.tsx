@@ -2280,6 +2280,9 @@ export default function App() {
               consultations={consultations}
               pediatrie={pediatrie}
               hospitalisations={hospitalisations}
+              onUpdateConsultations={handleUpdateConsultations}
+              onUpdatePediatrie={handleUpdatePediatrie}
+              onUpdateHospitalisations={handleUpdateHospitalisations}
               examens={laboExamens}
               rapports={thloRapports}
               onUpdateRapports={handleUpdateThloRapports}
