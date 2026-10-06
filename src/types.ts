@@ -208,6 +208,8 @@ export interface Absence {
 export interface Hospitalisation {
   id: string;
   patient: string;
+  // Âge en années, renseigné au besoin (ex. corrigé depuis le TLOH).
+  age?: number;
   contact: string;
   dateAdmission: string;
   heureAdmission: string;

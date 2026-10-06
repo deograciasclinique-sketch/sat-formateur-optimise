@@ -22,6 +22,7 @@ import {
 } from "../modules/thlo/thloData";
 import { formatWhatsAppNumber } from "../lib/whatsapp";
 import { logActivity } from "../lib/activityLogger";
+import type { CasTHLO } from "../modules/thlo/thloData";
 
 interface Props {
   consultations: Consultation[];
@@ -81,6 +82,65 @@ export default function TabTHLO({
     setSaisieDiag((s) => { const n = { ...s }; delete n[d.source + d.id]; return n; });
   };
 
+  // --- Corriger l'âge d'un cas (enregistré dans le dossier d'origine) ---
+  const [saisieAge, setSaisieAge] = useState<Record<string, { v: string; unite: "ans" | "mois" }>>({});
+  const corrigerAge = (d: CasTHLO) => {
+    const s = saisieAge[d.refId] || { v: "", unite: "ans" as const };
+    const n = parseFloat(s.v.replace(",", "."));
+    if (!(n > 0) || n > 120 * (s.unite === "mois" ? 12 : 1)) { alert("Indiquez un âge valable."); return; }
+    const ans = s.unite === "mois" ? n / 12 : n;
+    if (d.source === "Consultation" && onUpdateConsultations) {
+      // Toutes les visites de la semaine de ce patient sans âge sont corrigées.
+      const cible = consultations.find((c) => c.id === d.refId);
+      onUpdateConsultations(consultations.map((c) =>
+        c.id === d.refId || (cible && !(c.age > 0) && (c.codePatient ? c.codePatient === cible.codePatient : c.patient === cible.patient)) ? { ...c, age: Math.round(ans * 100) / 100 } : c
+      ));
+    } else if (d.source === "Pédiatrie" && onUpdatePediatrie) {
+      onUpdatePediatrie(pediatrie.map((p) => (p.id === d.refId ? { ...p, ageMois: Math.round(ans * 12) } : p)));
+    } else if (d.source.startsWith("Hospitalisation") && onUpdateHospitalisations) {
+      onUpdateHospitalisations(hospitalisations.map((h) => (h.id === d.refId ? { ...h, age: Math.round(ans * 100) / 100 } : h)));
+    } else return;
+    logActivity("Âge corrigé depuis le TLOH", "autre", `${d.patient} (${d.source}) : ${s.v} ${s.unite}`, agentNom);
+    setSaisieAge((x) => { const y = { ...x }; delete y[d.refId]; return y; });
+  };
+
+  // --- Retirer un cas compté en double (ou le rétablir) ---
+  const basculerExclusion = (d: CasTHLO, retirer: boolean) => {
+    if (!d.cle) return;
+    if (retirer && !window.confirm(`Retirer ce cas de ${d.patient} du TLOH (doublon) ?\nLe dossier du patient n'est pas modifié.`)) return;
+    const r = rapports.find((x) => x.id === semaine.id) || {
+      id: semaine.id, annee: semaine.annee, semaine: semaine.numero, debut: semaine.debut, fin: semaine.fin,
+      corrections: {}, observations: "", redigePar: "", statut: "Brouillon" as const,
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const ex = new Set(r.exclusions || []);
+    if (retirer) ex.add(d.cle); else ex.delete(d.cle);
+    const next = { ...r, exclusions: [...ex], updatedAt: new Date().toISOString() };
+    onUpdateRapports(rapports.some((x) => x.id === r.id) ? rapports.map((x) => (x.id === r.id ? next : x)) : [next, ...rapports]);
+    logActivity(retirer ? "Cas retiré du TLOH (doublon)" : "Cas rétabli dans le TLOH", "autre", `${d.patient} · ${d.maladieId} · ${d.date}`, agentNom);
+  };
+
+  const champAge = (d: CasTHLO) => {
+    const s = saisieAge[d.refId] || { v: "", unite: "ans" as const };
+    return (
+      <span className="inline-flex items-center gap-1">
+        <input
+          type="number" min={0} inputMode="decimal" placeholder="Âge"
+          value={s.v}
+          onChange={(e) => setSaisieAge((x) => ({ ...x, [d.refId]: { ...s, v: e.target.value } }))}
+          onKeyDown={(e) => { if (e.key === "Enter") corrigerAge(d); }}
+          className={`w-16 px-1.5 py-0.5 rounded border text-xs bg-transparent ${isDark ? "border-gray-600" : "border-gray-300 bg-white"}`}
+        />
+        <select value={s.unite} onChange={(e) => setSaisieAge((x) => ({ ...x, [d.refId]: { ...s, unite: e.target.value as "ans" | "mois" } }))}
+          className={`px-1 py-0.5 rounded border text-xs bg-transparent ${isDark ? "border-gray-600" : "border-gray-300 bg-white"}`}>
+          <option value="ans">ans</option>
+          <option value="mois">mois</option>
+        </select>
+        <button type="button" onClick={() => corrigerAge(d)} className="px-2 py-0.5 rounded bg-emerald-600 text-white text-xs font-semibold">OK</button>
+      </span>
+    );
+  };
+
   const isDark = theme === "dark";
   const cfg: ConfigTHLO = normaliserConfig(config);
   const muted = isDark ? "text-gray-400" : "text-gray-500";
@@ -105,11 +165,13 @@ export default function TabTHLO({
   const [showConfig, setShowConfig] = useState(!config?.district);
   const [cfgDraft, setCfgDraft] = useState<ConfigTHLO>(cfg);
 
-  const auto = useMemo(
-    () => compterSemaine(semaine, consultations, pediatrie, hospitalisations, examens),
-    [semaine, consultations, pediatrie, hospitalisations, examens]
-  );
   const rapport = rapports.find((r) => r.id === semaine.id);
+  const exclusions = rapport?.exclusions || [];
+  const auto = useMemo(
+    () => compterSemaine(semaine, consultations, pediatrie, hospitalisations, examens, exclusions),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [semaine, consultations, pediatrie, hospitalisations, examens, exclusions.join(",")]
+  );
   const verrouille = !!rapport && rapport.statut !== "Brouillon";
   const valeurs = valeursFinales(rapport, auto);
   const ficheA = ficheAuto(auto, valeurs);
@@ -548,9 +610,19 @@ export default function TabTHLO({
       )}
 
       {agesAVerifier > 0 && !verrouille && (
-        <p className="text-sm text-amber-600 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4" /> {agesAVerifier} cas sans âge renseigné (classés en « 15 ans et + ») : vérifiez-les dans le détail et corrigez la tranche d'âge si besoin.
-        </p>
+        <div className="rounded border border-amber-400 bg-amber-500/10 p-2 text-sm space-y-1.5">
+          <div className="text-amber-700 font-semibold flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4" /> {agesAVerifier} cas sans âge renseigné (classés en « 15 ans et + » en attendant) : saisissez l'âge ici.
+          </div>
+          {auto.details.filter((d) => d.ageInconnu).map((d) => (
+            <div key={d.cle || d.refId} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              <b>{d.patient}</b>
+              <span>{dateFr(d.date)}</span>
+              <span className={muted}>{d.source} · {MALADIES_THLO.find((m) => m.id === d.maladieId)?.nom}</span>
+              {champAge(d)}
+            </div>
+          ))}
+        </div>
       )}
 
       {/* Tableau */}
@@ -581,6 +653,7 @@ export default function TabTHLO({
             <tbody>
               {lignes.map((m) => {
                 const nbDetails = auto.details.filter((d) => d.maladieId === m.id).length;
+                const nbExclus = auto.exclus.filter((d) => d.maladieId === m.id).length;
                 const aCorrection = !verrouille && !!rapport?.corrections?.[m.id];
                 return (
                   <React.Fragment key={m.id}>
@@ -594,9 +667,9 @@ export default function TabTHLO({
                       {[0, 1, 2, 3].map((i) => cellule(m, "deces", i))}
                       <td className={`px-1 py-1 text-center font-bold ${somme(valeurs.deces[m.id]) ? "text-red-600" : ""}`}>{somme(valeurs.deces[m.id])}</td>
                       <td className="px-1 py-1 whitespace-nowrap text-right">
-                        {nbDetails > 0 && (
+                        {nbDetails + nbExclus > 0 && (
                           <button onClick={() => setDetailId(detailId === m.id ? null : m.id)} className="text-xs font-semibold text-emerald-600">
-                            {detailId === m.id ? "Masquer" : `Voir ${nbDetails} dossier${nbDetails > 1 ? "s" : ""}`}
+                            {detailId === m.id ? "Masquer" : `Voir ${nbDetails} dossier${nbDetails > 1 ? "s" : ""}${nbExclus ? ` (+${nbExclus} retiré${nbExclus > 1 ? "s" : ""})` : ""}`}
                           </button>
                         )}
                         {aCorrection && (
@@ -609,13 +682,32 @@ export default function TabTHLO({
                         <td colSpan={12} className="px-2 pb-2">
                           <div className={`rounded p-2 text-xs space-y-1 ${isDark ? "bg-gray-900" : "bg-gray-50"}`}>
                             {auto.details.filter((d) => d.maladieId === m.id).map((d) => (
-                              <div key={d.refId + (d.deces ? "d" : "")} className="flex flex-wrap gap-x-3">
+                              <div key={d.refId + (d.deces ? "d" : "")} className="flex flex-wrap items-center gap-x-3 gap-y-1">
                                 <b>{d.patient}</b>
                                 <span>{dateFr(d.date)}</span>
                                 <span>{d.source}</span>
                                 <span>{TRANCHES_AGE[d.tranche]}{d.ageInconnu ? " (âge non renseigné)" : ""}</span>
                                 <span className={muted}>« {d.texte} »</span>
                                 {d.deces && <span className="text-red-600 font-semibold">Décès</span>}
+                                {!verrouille && d.ageInconnu && champAge(d)}
+                                {!verrouille && (
+                                  <button type="button" onClick={() => basculerExclusion(d, true)} className="text-red-600 font-semibold underline">
+                                    Retirer (doublon)
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            {auto.exclus.filter((d) => d.maladieId === m.id).map((d) => (
+                              <div key={"x" + d.refId + (d.deces ? "d" : "")} className={`flex flex-wrap items-center gap-x-3 line-through ${muted}`}>
+                                <b>{d.patient}</b>
+                                <span>{dateFr(d.date)}</span>
+                                <span>{d.source}</span>
+                                <span className="no-underline">retiré du TLOH</span>
+                                {!verrouille && (
+                                  <button type="button" onClick={() => basculerExclusion(d, false)} className="text-emerald-600 font-semibold underline">
+                                    Rétablir
+                                  </button>
+                                )}
                               </div>
                             ))}
                           </div>

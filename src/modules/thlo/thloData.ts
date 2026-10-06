@@ -159,7 +159,12 @@ export interface CasTHLO {
   ageInconnu?: boolean;
   deces?: boolean;
   refId: string;
+  cle?: string;     // identifiant du cas, pour le retirer du TLOH (doublon)
+  exclu?: boolean;  // retiré à la main du TLOH
 }
+
+/** Identifiant d'un cas : maladie | dossier | cas ou décès. */
+export const cleCas = (maladieId: string, refId: string, deces?: boolean) => `${maladieId}|${refId}|${deces ? "d" : "c"}`;
 
 /** Une ligne de TDR (laboratoire) prise en compte dans le TLOH. */
 export interface TdrTLOH {
@@ -196,6 +201,7 @@ export interface ResultatAuto {
   nbDossiersAnalyses: number;
   sansDiagnostic: number; // consultations de la semaine encore sans diagnostic
   dossiers: DossierTLOH[];
+  exclus: CasTHLO[]; // cas retirés à la main (doublons)
   tdr: BlocTDR;
 }
 
@@ -220,7 +226,8 @@ export function compterSemaine(
   consultations: Consultation[],
   pediatrie: FichePediatrique[],
   hospitalisations: Hospitalisation[],
-  examens: ExamenLabo[] = []
+  examens: ExamenLabo[] = [],
+  exclusions: string[] = []
 ): ResultatAuto {
   const dansSemaine = (d?: string) => { const j = jourDe(d); return !!j && j >= semaine.debut && j <= semaine.fin; };
   const details: CasTHLO[] = [];
@@ -229,11 +236,32 @@ export function compterSemaine(
   let nb = 0;
   let sansDiag = 0;
 
-  const ajouter = (c: CasTHLO) => {
-    const k = `${c.maladieId}|${normNom(c.patient)}|${c.deces ? "d" : "c"}`;
-    if (dejaCompte.has(k)) return;
+  // Un même patient n'est compté qu'une fois par maladie et par semaine :
+  // reconnu par son code patient, sinon par son nom (ordre des mots ignoré :
+  // « KONE Awa » = « Awa Koné »).
+  const nomTrie = (n: string) => normNom(n).split(" ").filter(Boolean).sort().join(" ");
+  const codeParNom = new Map<string, string>();
+  consultations.forEach((c) => { if (c.codePatient) codeParNom.set(nomTrie(c.patient), c.codePatient); });
+  const idPatient = (nom: string, code?: string) => {
+    const k = code || codeParNom.get(nomTrie(nom));
+    return k ? `code:${k}` : `nom:${nomTrie(nom)}`;
+  };
+  const exclusSet = new Set(exclusions);
+  const codeDe = new Map<string, string>(); // refId -> code patient
+  const exclus: CasTHLO[] = [];
+  const ajouter = (c: CasTHLO, code?: string) => {
+    const cle = cleCas(c.maladieId, c.refId, c.deces);
+    if (exclusSet.has(cle)) { exclus.push({ ...c, cle, exclu: true }); return; }
+    const k = `${c.maladieId}|${idPatient(c.patient, code)}|${c.deces ? "d" : "c"}`;
+    if (dejaCompte.has(k)) {
+      // Déjà compté : on garde la fiche où l'âge est connu.
+      const i = details.findIndex((x) => x.cle && x.maladieId === c.maladieId && !!x.deces === !!c.deces && idPatient(x.patient, codeDe.get(x.refId)) === idPatient(c.patient, code));
+      if (i >= 0 && details[i].ageInconnu && !c.ageInconnu) details[i] = { ...c, cle };
+      return;
+    }
     dejaCompte.add(k);
-    details.push(c);
+    if (code) codeDe.set(c.refId, code);
+    details.push({ ...c, cle });
   };
 
   consultations.filter((c) => dansSemaine(c.date)).forEach((c) => {
@@ -263,7 +291,7 @@ export function compterSemaine(
         ageInconnu: !(c.age > 0), source: "Consultation",
         texte: c.classementPalu && (m.id === "palu_simple" || m.id === "palu_grave") ? `Classé ${c.classementPalu} par le médecin${texte ? ` · ${texte}` : ""}` : texte,
         refId: c.id,
-      })
+      }, c.codePatient)
     );
   });
 
@@ -288,15 +316,16 @@ export function compterSemaine(
     .forEach((h) => {
       const texte = [h.diagnosticSortie, h.motif].filter(Boolean).join(" · ");
       const mh = maladiesDansTexte(texte);
-      const cons = consultations.find((c) => normNom(c.patient) === normNom(h.patient) && c.age > 0);
+      const cons = consultations.find((c) => nomTrie(c.patient) === nomTrie(h.patient) && c.age > 0);
+      const ageH = h.age && h.age > 0 ? h.age : cons?.age;
       dossiers.push({
         id: h.id, patient: h.patient, date: jourDe(h.dateAdmission), source: "Hospitalisation", texte,
         maladies: mh.map((m) => m.nom), etat: mh.length ? "compte" : !texte.trim() ? "sans_diagnostic" : "hors_liste",
       });
       mh.forEach((m) =>
         ajouter({
-          maladieId: m.id, patient: h.patient, date: jourDe(h.dateAdmission), tranche: trancheAge(cons?.age),
-          ageInconnu: !cons, source: "Hospitalisation", texte, refId: h.id,
+          maladieId: m.id, patient: h.patient, date: jourDe(h.dateAdmission), tranche: trancheAge(ageH),
+          ageInconnu: !ageH, source: "Hospitalisation", texte, refId: h.id,
         })
       );
     });
@@ -306,11 +335,11 @@ export function compterSemaine(
     .filter((h) => h.statut === "Décès" && dansSemaine(h.dateSortie || h.dateAdmission))
     .forEach((h) => {
       const texte = [h.diagnosticSortie, h.motif].filter(Boolean).join(" · ");
-      const cons = consultations.find((c) => normNom(c.patient) === normNom(h.patient) && c.age > 0);
+      const cons = consultations.find((c) => nomTrie(c.patient) === nomTrie(h.patient) && c.age > 0);
       maladiesDansTexte(texte).forEach((m) =>
         ajouter({
-          maladieId: m.id, patient: h.patient, date: h.dateSortie || h.dateAdmission, tranche: trancheAge(cons?.age),
-          ageInconnu: !cons, source: "Hospitalisation (décès)", texte, refId: h.id, deces: true,
+          maladieId: m.id, patient: h.patient, date: h.dateSortie || h.dateAdmission, tranche: trancheAge(h.age && h.age > 0 ? h.age : cons?.age),
+          ageInconnu: !(h.age && h.age > 0) && !cons, source: "Hospitalisation (décès)", texte, refId: h.id, deces: true,
         })
       );
     });
@@ -324,7 +353,7 @@ export function compterSemaine(
   // Un décès est aussi un cas : si le patient décédé n'a pas été compté
   // comme cas (ex. arrivé directement en hospitalisation), on l'ajoute.
   details.filter((d) => d.deces).forEach((d) => {
-    const k = `${d.maladieId}|${normNom(d.patient)}|c`;
+    const k = `${d.maladieId}|${idPatient(d.patient)}|c`;
     if (!dejaCompte.has(k)) { dejaCompte.add(k); cas[d.maladieId][d.tranche]++; }
   });
 
@@ -353,29 +382,30 @@ export function compterSemaine(
   });
 
   const classes = new Set(
-    details.filter((d) => !d.deces && (d.maladieId === "palu_simple" || d.maladieId === "palu_grave")).map((d) => normNom(d.patient))
+    details.filter((d) => !d.deces && (d.maladieId === "palu_simple" || d.maladieId === "palu_grave")).map((d) => nomTrie(d.patient))
   );
   // Un patient classé PS/PG dans une consultation récente (cette semaine ou
   // la précédente) est considéré comme classé.
   const debutLarge = new Date(semaine.debut + "T00:00:00"); debutLarge.setDate(debutLarge.getDate() - 7);
   const dl = isoDate(debutLarge);
-  consultations.filter((c) => c.classementPalu && jourDe(c.date) >= dl && jourDe(c.date) <= semaine.fin).forEach((c) => classes.add(normNom(c.patient)));
+  consultations.filter((c) => c.classementPalu && jourDe(c.date) >= dl && jourDe(c.date) <= semaine.fin).forEach((c) => classes.add(nomTrie(c.patient)));
   const vus = new Set<string>();
   const paluNonClasses = palu.filter((t) => {
-    const k = normNom(t.patient);
+    const k = nomTrie(t.patient);
     if (t.resultat !== "Positif" || classes.has(k) || vus.has(k)) return false;
     vus.add(k);
     return true;
   });
 
   const suspects = new Map<string, string>();
-  dengue.forEach((t) => suspects.set(normNom(t.patient), t.patient));
-  details.filter((d) => d.maladieId === "dengue" && !d.deces).forEach((d) => suspects.set(normNom(d.patient), d.patient));
+  dengue.forEach((t) => suspects.set(nomTrie(t.patient), t.patient));
+  details.filter((d) => d.maladieId === "dengue" && !d.deces).forEach((d) => suspects.set(nomTrie(d.patient), d.patient));
   const probables = new Map<string, string>();
-  dengue.filter((t) => t.resultat === "Positif").forEach((t) => probables.set(normNom(t.patient), t.patient));
+  dengue.filter((t) => t.resultat === "Positif").forEach((t) => probables.set(nomTrie(t.patient), t.patient));
 
   return {
     cas, deces, details, nbDossiersAnalyses: nb, sansDiagnostic: sansDiag,
+    exclus,
     dossiers: dossiers.sort((a, b) => a.date.localeCompare(b.date) || a.patient.localeCompare(b.patient)),
     tdr: { palu, dengue, paluNonClasses, dengueSuspects: [...suspects.values()], dengueProbables: [...probables.values()] },
   };
@@ -450,6 +480,8 @@ export interface RapportTHLO {
   valeursFigees?: { cas: Record<string, Compte>; deces: Record<string, Compte> };
   // Fiche TLOH (TDR, PS/PG, dengue, autres) : corrections et valeurs figées.
   correctionsFiche?: Partial<Record<ChampFiche, number | null>>;
+  // Cas retirés à la main (doublons) : clés cleCas().
+  exclusions?: string[];
   ficheFigee?: Partial<Fiche>;
   observations: string;
   redigePar: string;
