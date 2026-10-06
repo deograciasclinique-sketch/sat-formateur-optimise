@@ -462,6 +462,7 @@ export default function SalleAccouchement({
     reanimation: false,
     gatpa: true,
     delivranceComplete: true,
+    heureDelivrance: "",
     perteSanguineMl: "",
     perinee: "Intact" as NonNullable<IssueAccouchement["perinee"]>,
     etatMere: "Bon état général",
@@ -486,6 +487,9 @@ export default function SalleAccouchement({
       alert("L'heure de l'accouchement est dans le futur : vérifiez-la.");
       return;
     }
+    if (issue.heureDelivrance && issue.heureDelivrance < issue.dateHeure.slice(11, 16)) {
+      if (!confirm(`L'heure de délivrance (${issue.heureDelivrance}) est avant l'heure de l'accouchement (${issue.dateHeure.slice(11, 16)}). Enregistrer quand même ?`)) return;
+    }
     const poids = num(issue.poidsEnfant);
     if (!poids) {
       alert("Veuillez renseigner le poids du nouveau-né (g).");
@@ -501,6 +505,7 @@ export default function SalleAccouchement({
       reanimation: issue.reanimation,
       gatpa: issue.gatpa,
       delivranceComplete: issue.delivranceComplete,
+      heureDelivrance: txt(issue.heureDelivrance),
       perteSanguineMl: num(issue.perteSanguineMl),
       perinee: issue.perinee,
       etatMere: txt(issue.etatMere),
@@ -520,6 +525,7 @@ export default function SalleAccouchement({
       patient: selected.patient,
       date: versInputLocal(d).slice(0, 10),
       heure: versInputLocal(d).slice(11, 16),
+      heureDelivrance: iss.heureDelivrance,
       mode: iss.mode === "Césarienne" ? "Césarienne" : "Voie basse naturelle",
       type: iss.mode,
       sexeEnfant: iss.sexeEnfant,
@@ -969,7 +975,8 @@ export default function SalleAccouchement({
             (selected.issue ? (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                 {[
-                  ["Date / heure", dateHeureCourte(selected.issue.dateHeure)],
+                  ["Date / heure de l'accouchement", dateHeureCourte(selected.issue.dateHeure)],
+                  ["Heure de la délivrance", selected.issue.heureDelivrance || "non notée"],
                   ["Mode", selected.issue.mode],
                   ["Sexe", selected.issue.sexeEnfant],
                   ["Poids", `${selected.issue.poidsEnfant} g`],
@@ -1042,6 +1049,11 @@ export default function SalleAccouchement({
                 <div className="flex flex-wrap gap-4 text-xs font-semibold text-stone-700">
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={issue.gatpa} onChange={(e) => setIssue({ ...issue, gatpa: e.target.checked })} /> GATPA réalisée</label>
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={issue.delivranceComplete} onChange={(e) => setIssue({ ...issue, delivranceComplete: e.target.checked })} /> Délivrance complète</label>
+                  <label className="flex items-center gap-1.5">
+                    Heure de la délivrance
+                    <input type="time" value={issue.heureDelivrance} onChange={(e) => setIssue({ ...issue, heureDelivrance: e.target.value })} className="px-2 py-1 rounded-lg border border-stone-200 text-xs" />
+                    <button type="button" onClick={() => setIssue({ ...issue, heureDelivrance: new Date().toTimeString().slice(0, 5) })} className="px-1.5 py-1 rounded-lg border border-pink-300 text-pink-700 text-2xs font-bold">Maint.</button>
+                  </label>
                   <label className="flex items-center gap-1.5"><input type="checkbox" checked={issue.reanimation} onChange={(e) => setIssue({ ...issue, reanimation: e.target.checked })} /> Réanimation néonatale</label>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

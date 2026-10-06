@@ -114,6 +114,7 @@ export default function TabMaternite({
   const [accDate, setAccDate] = useState(getTodayStr());
   const heureMaintenant = () => new Date().toTimeString().slice(0, 5);
   const [accHeure, setAccHeure] = useState(heureMaintenant());
+  const [accHeureDelivrance, setAccHeureDelivrance] = useState("");
   const [accMode, setAccMode] = useState<"Voie basse naturelle" | "Césarienne">("Voie basse naturelle");
   const [accSexeEnfant, setAccSexeEnfant] = useState<"Masculin" | "Féminin">("Masculin");
   const [accPoidsEnfant, setAccPoidsEnfant] = useState("");
@@ -273,14 +274,14 @@ export default function TabMaternite({
   };
   const chargerAcc = (a: Accouchement) => {
     setEditAccId(a.id);
-    setAccPatient(a.patient || a.patiente || ""); setAccDate(a.date || getTodayStr()); setAccHeure(a.heure && a.heure !== "—" ? a.heure : "");
+    setAccPatient(a.patient || a.patiente || ""); setAccDate(a.date || getTodayStr()); setAccHeure(a.heure && a.heure !== "—" ? a.heure : ""); setAccHeureDelivrance(a.heureDelivrance || "");
     setAccMode(a.mode); setAccSexeEnfant(a.sexeEnfant || a.sexe || "Masculin"); setAccPoidsEnfant(a.poidsEnfant ? String(a.poidsEnfant) : "");
     setAccEtatEnfant(a.etatEnfant || ""); setAccComplications(a.complications || ""); setAccSageFemme(a.sageFemmeId || "");
     setVue("cpn");
     setTimeout(() => accFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
   const annulerAcc = () => {
-    setEditAccId(null); setAccPatient(""); setAccPoidsEnfant(""); setAccComplications(""); setAccHeure(heureMaintenant());
+    setEditAccId(null); setAccPatient(""); setAccPoidsEnfant(""); setAccComplications(""); setAccHeure(heureMaintenant()); setAccHeureDelivrance("");
   };
 
   const handleAddCpn = () => {
@@ -361,6 +362,10 @@ export default function TabMaternite({
       alert("Veuillez renseigner l'heure de l'accouchement.");
       return;
     }
+    if (accHeureDelivrance && accHeureDelivrance < accHeure &&
+      !confirm(`L'heure de délivrance (${accHeureDelivrance}) est avant l'heure de l'accouchement (${accHeure}). Enregistrer quand même ?`)) {
+      return;
+    }
 
     const p = parseFloat(accPoidsEnfant) || 0;
 
@@ -371,6 +376,7 @@ export default function TabMaternite({
       patient: accPatient.trim(),
       date: accDate || getTodayStr(),
       heure: accHeure,
+      heureDelivrance: accHeureDelivrance || undefined,
       mode: accMode,
       sexeEnfant: accSexeEnfant,
       poidsEnfant: p,
@@ -388,6 +394,7 @@ export default function TabMaternite({
       return;
     }
     onUpdateAccouchements([newAcc, ...accouchements]);
+    setAccHeureDelivrance("");
     setAccPatient("");
     setAccPoidsEnfant("");
     setAccComplications("");
@@ -991,6 +998,19 @@ export default function TabMaternite({
               </div>
             </div>
 
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2 text-2xs text-stone-500 self-end pb-2">
+                Délivrance = sortie du placenta, après la naissance de l'enfant.
+              </div>
+              <div>
+                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Heure de délivrance</label>
+                <div className="flex gap-1">
+                  <input type="time" value={accHeureDelivrance} onChange={(e) => setAccHeureDelivrance(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-stone-50 focus:bg-white focus:outline-none" />
+                  <button type="button" onClick={() => setAccHeureDelivrance(heureMaintenant())} className="px-1.5 rounded-lg border border-pink-300 text-pink-700 text-2xs font-bold hover:bg-pink-50" title="Heure actuelle">Maint.</button>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Date d'accouchement</label>
@@ -1164,7 +1184,8 @@ export default function TabMaternite({
                     <tr key={a.id} className="hover:bg-stone-50/50">
                       <td className="p-3 font-mono text-stone-500 dark:text-stone-400">
                         <div>{new Date(a.date).toLocaleDateString("fr-FR")}</div>
-                        <div className="text-xs font-bold text-stone-500 dark:text-stone-400">{a.heure}</div>
+                        <div className="text-xs font-bold text-stone-500 dark:text-stone-400">Accouch. {a.heure}</div>
+                        {a.heureDelivrance && <div className="text-xs text-stone-500 dark:text-stone-400">Délivr. {a.heureDelivrance}</div>}
                       </td>
                       <td className="p-3 font-bold text-stone-800">{a.patient}</td>
                       <td className="p-3 font-semibold text-stone-700">

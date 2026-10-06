@@ -342,6 +342,8 @@ export interface Accouchement {
   patiente?: string;
   date: string;
   heure: string;
+  // Heure de la délivrance (sortie du placenta), HH:MM.
+  heureDelivrance?: string;
   type?: string;
   mode: "Voie basse naturelle" | "Césarienne";
   sexeEnfant: "Masculin" | "Féminin";
@@ -1034,6 +1036,8 @@ export interface SurveillancePostPartum {
 
 export interface IssueAccouchement {
   dateHeure: string;
+  /** Heure de la délivrance (sortie du placenta), HH:MM. */
+  heureDelivrance?: string;
   mode: "Voie basse naturelle" | "Voie basse instrumentale" | "Césarienne";
   sexeEnfant: "Masculin" | "Féminin";
   poidsEnfant: number;
