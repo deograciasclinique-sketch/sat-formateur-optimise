@@ -60,6 +60,7 @@ import { sendBrowserNotification } from "./lib/browserNotifications";
 // Import all 16 operational tab panels
 import TabQualite from "./components/TabQualite";
 import TabIndicateurs from "./components/TabIndicateurs";
+import TabBilanMensuel from "./components/TabBilanMensuel";
 import TabTHLO from "./components/TabTHLO";
 import { RapportTHLO, ConfigTHLO, CONFIG_THLO_DEFAUT, semainePrecedente, dateLimite, normaliserConfig, momentTransmission } from "./modules/thlo/thloData";
 import TabTaches from "./components/TabTaches";
@@ -125,14 +126,15 @@ import {
   Lock,
   Clock,
   Maximize,
-  Minimize
+  Minimize,
+  BarChart3
 } from "lucide-react";
 
 // Move static tab lists, helper maps, and configuration constants outside App to avoid recreating them on every single render
 const ALL_TABS = [
   "dashboard", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", 
   "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", 
-  "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings"
+  "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings", "bilan"
 ];
 
 const getTabLabel = (id: string): string => {
@@ -154,6 +156,7 @@ const getTabLabel = (id: string): string => {
     rh: "Ressources Humaines",
     thlo: "TLOH — Surveillance hebdo",
     indicateurs: "Indicateurs Épidémio",
+    bilan: "Bilan mensuel d'activité",
     qualite: "Démarche Qualité",
     documents: "Coffre-fort Documents",
     settings: "Paramètres des Seuils"
@@ -598,14 +601,14 @@ export default function App() {
         tabs: [
           "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
           "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
-          "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings",
+          "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings", "bilan",
         ],
       };
     }
 
     const tabs = ["taches"]; // tout le monde voit les tâches
     if (p.includes("medecin") || p.includes("pediatre") || p.includes("praticien")) {
-      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs", "thlo");
+      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs", "thlo", "bilan");
       return { reconnu: true, tabs };
     }
     if (p.includes("sage-femme") || p.includes("maternit")) {
@@ -648,7 +651,7 @@ export default function App() {
       return [
         "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
         "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
-        "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings",
+        "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings", "bilan",
       ];
     }
     return detectPosteAccess(currentUser.poste).tabs;
@@ -1515,7 +1518,8 @@ export default function App() {
       {
         title: "🏠 Vue d'ensemble",
         items: [
-          { id: "dashboard", label: "Dashboard Global", icon: LayoutDashboard }
+          { id: "dashboard", label: "Dashboard Global", icon: LayoutDashboard },
+          { id: "bilan", label: "Bilan mensuel d'activité", icon: BarChart3 }
         ]
       },
       {
@@ -2290,6 +2294,24 @@ export default function App() {
               onUpdateConfig={handleUpdateThloConfig}
               theme={theme}
               agentNom={currentUser?.nom}
+            />
+          )}
+
+          {activeTab === "bilan" && (
+            <TabBilanMensuel
+              consultations={consultations}
+              pediatrie={pediatrie}
+              cpns={materniteCpns}
+              accouchements={materniteAccouchements}
+              hospitalisations={hospitalisations}
+              urgences={urgences}
+              vaccinations={vaccinations}
+              examens={laboExamens}
+              soins={soins}
+              references={ficheReferences}
+              factures={factures}
+              depenses={depenses}
+              theme={theme}
             />
           )}
 
