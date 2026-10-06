@@ -469,8 +469,23 @@ export default function SalleAccouchement({
     notes: "",
   });
 
+  // L'heure proposée par défaut est celle du moment où l'on ouvre le dossier
+  // (et non celle de l'ouverture de la page, qui pouvait dater de plusieurs heures).
+  useEffect(() => {
+    setIssue((x) => ({ ...x, dateHeure: versInputLocal() }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
+
   const handleEnregistrerIssue = () => {
     if (!selected) return;
+    if (!issue.dateHeure || issue.dateHeure.length < 16) {
+      alert("Veuillez renseigner la date et l'heure de l'accouchement.");
+      return;
+    }
+    if (new Date(issue.dateHeure).getTime() > Date.now() + 5 * 60000) {
+      alert("L'heure de l'accouchement est dans le futur : vérifiez-la.");
+      return;
+    }
     const poids = num(issue.poidsEnfant);
     if (!poids) {
       alert("Veuillez renseigner le poids du nouveau-né (g).");
@@ -989,7 +1004,18 @@ export default function SalleAccouchement({
             ) : selected.statut === "En cours" ? (
               <div className="space-y-3">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <Champ label="Date / heure de naissance"><input type="datetime-local" value={issue.dateHeure} onChange={(e) => setIssue({ ...issue, dateHeure: e.target.value })} className={inputCls} /></Champ>
+                  <Champ label="Date de l'accouchement *">
+                    <input type="date" value={issue.dateHeure.slice(0, 10)} max={versInputLocal().slice(0, 10)}
+                      onChange={(e) => setIssue({ ...issue, dateHeure: `${e.target.value}T${issue.dateHeure.slice(11, 16) || "00:00"}` })} className={inputCls} />
+                  </Champ>
+                  <Champ label="Heure de l'accouchement *">
+                    <div className="flex gap-1.5">
+                      <input type="time" value={issue.dateHeure.slice(11, 16)}
+                        onChange={(e) => setIssue({ ...issue, dateHeure: `${issue.dateHeure.slice(0, 10) || versInputLocal().slice(0, 10)}T${e.target.value}` })} className={inputCls} />
+                      <button type="button" onClick={() => setIssue({ ...issue, dateHeure: versInputLocal() })}
+                        className="px-2 rounded-lg border border-pink-300 text-pink-700 text-xs font-bold whitespace-nowrap hover:bg-pink-50" title="Mettre la date et l'heure actuelles">Maintenant</button>
+                    </div>
+                  </Champ>
                   <Champ label="Mode">
                     <select value={issue.mode} onChange={(e) => setIssue({ ...issue, mode: e.target.value as any })} className={inputCls}>
                       <option>Voie basse naturelle</option>

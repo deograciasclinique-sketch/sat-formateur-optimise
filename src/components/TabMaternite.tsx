@@ -112,7 +112,8 @@ export default function TabMaternite({
   // Child-birth Form states
   const [accPatient, setAccPatient] = useState("");
   const [accDate, setAccDate] = useState(getTodayStr());
-  const [accHeure, setAccHeure] = useState("");
+  const heureMaintenant = () => new Date().toTimeString().slice(0, 5);
+  const [accHeure, setAccHeure] = useState(heureMaintenant());
   const [accMode, setAccMode] = useState<"Voie basse naturelle" | "Césarienne">("Voie basse naturelle");
   const [accSexeEnfant, setAccSexeEnfant] = useState<"Masculin" | "Féminin">("Masculin");
   const [accPoidsEnfant, setAccPoidsEnfant] = useState("");
@@ -279,7 +280,7 @@ export default function TabMaternite({
     setTimeout(() => accFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
   const annulerAcc = () => {
-    setEditAccId(null); setAccPatient(""); setAccPoidsEnfant(""); setAccComplications(""); setAccHeure("");
+    setEditAccId(null); setAccPatient(""); setAccPoidsEnfant(""); setAccComplications(""); setAccHeure(heureMaintenant());
   };
 
   const handleAddCpn = () => {
@@ -356,6 +357,10 @@ export default function TabMaternite({
       alert("Veuillez renseigner le nom de la accouchée et le poids de l'enfant né.");
       return;
     }
+    if (!accHeure) {
+      alert("Veuillez renseigner l'heure de l'accouchement.");
+      return;
+    }
 
     const p = parseFloat(accPoidsEnfant) || 0;
 
@@ -365,7 +370,7 @@ export default function TabMaternite({
       id: ancien?.id || generateUid(),
       patient: accPatient.trim(),
       date: accDate || getTodayStr(),
-      heure: accHeure || "—",
+      heure: accHeure,
       mode: accMode,
       sexeEnfant: accSexeEnfant,
       poidsEnfant: p,
@@ -978,8 +983,11 @@ export default function TabMaternite({
                 <input type="text" placeholder="Madame..." value={accPatient} onChange={(e) => setAccPatient(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none" />
               </div>
               <div>
-                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Heure de délivrance</label>
-                <input type="time" value={accHeure} onChange={(e) => setAccHeure(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-stone-50 focus:bg-white focus:outline-none" />
+                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Heure de l'accouchement *</label>
+                <div className="flex gap-1">
+                  <input type="time" value={accHeure} onChange={(e) => setAccHeure(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-stone-50 focus:bg-white focus:outline-none" />
+                  <button type="button" onClick={() => { setAccHeure(heureMaintenant()); setAccDate(getTodayStr()); }} className="px-1.5 rounded-lg border border-pink-300 text-pink-700 text-2xs font-bold hover:bg-pink-50" title="Date et heure actuelles">Maint.</button>
+                </div>
               </div>
             </div>
 
