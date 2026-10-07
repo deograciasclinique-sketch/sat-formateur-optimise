@@ -2,6 +2,8 @@ import "./domGuard";
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import DeviceActivationGate from './components/DeviceActivationGate';
+import { isPatientPortal } from './lib/firebase';
 import './index.css';
 
 // Enregistre le service worker requis pour que l'app soit "installable"
@@ -44,6 +46,8 @@ if ('serviceWorker' in navigator) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {/* Le portail patient public n'a pas besoin d'activation ; l'appli du
+        personnel, si (voir DeviceActivationGate). */}
+    {isPatientPortal ? <App /> : <DeviceActivationGate><App /></DeviceActivationGate>}
   </StrictMode>,
 );

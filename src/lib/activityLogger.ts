@@ -30,7 +30,7 @@ export function logActivity(
     let userName = explicitUser || "";
 
     if (!userName) {
-      const pin = localStorage.getItem("dg_current_user_pin") || "";
+      let pin = ""; try { pin = sessionStorage.getItem("dg_current_user_pin") || ""; } catch { /* ignore */ }
       if (pin === "0000") {
         userName = "Responsable du Service (Responsable)";
       } else if (pin) {

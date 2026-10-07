@@ -1,0 +1,67 @@
+rules_version = '2';
+
+// Règles de sécurité — Cabinet Privé de Soins DEO-GRACIAS
+//
+// • Personnel (appareil activé avec le compte du cabinet) : accès complet.
+// • Patients du portail public (connexion anonyme) : peuvent seulement
+//   - lire la liste des médecins actifs,
+//   - déposer une demande de RDV,
+//   - lire et annuler LEURS PROPRES demandes.
+//   Aucun accès aux consultations, dossiers, sauvegardes, etc.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isStaff() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function isOwnRequest() {
+      return isSignedIn() && resource.data.patientUid == request.auth.uid;
+    }
+
+    function isValidPatientRequest() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['type', 'source', 'medecinId', 'medecinNom', 'date', 'heure',
+                               'moment', 'patientNom', 'patientTel', 'motif', 'statut',
+                               'createdAt', 'patientUid'])
+        && d.patientUid == request.auth.uid
+        && d.statut == 'Demandé'
+        && d.heure == ''
+        && d.date is string && d.date.size() == 10
+        && d.patientNom is string && d.patientNom.size() > 0 && d.patientNom.size() <= 100
+        && d.patientTel is string && d.patientTel.size() <= 20
+        && d.motif is string && d.motif.size() <= 300;
+    }
+
+    // Médecins proposés aux patients
+    match /medecins/{medecinId} {
+      allow read: if isSignedIn();
+      allow write: if isStaff();
+    }
+
+    // Rendez-vous en ligne
+    match /rdv/{rdvId} {
+      allow read: if isStaff() || isOwnRequest();
+      allow create: if isStaff() || (isSignedIn() && isValidPatientRequest());
+      // Le patient peut seulement annuler sa propre demande encore en attente
+      allow update: if isStaff() || (
+        isOwnRequest()
+        && resource.data.statut == 'Demandé'
+        && request.resource.data.statut == 'Annulé'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['statut', 'annulePar', 'annuleLe'])
+      );
+      allow delete: if isStaff();
+    }
+
+    // Tout le reste (consultations, synchro, sauvegardes, personnel…) : personnel uniquement
+    match /{document=**} {
+      allow read, write: if isStaff();
+    }
+  }
+}

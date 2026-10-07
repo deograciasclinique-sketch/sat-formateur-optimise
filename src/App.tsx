@@ -86,6 +86,11 @@ import TabOnlineRDV from "./components/TabOnlineRDV";
 import TabDashboardGlobal from "./components/TabDashboardGlobal";
 import TabSettings from "./components/TabSettings";
 import TabPlanifFamiliale from "./components/TabPlanifFamiliale";
+import ResponsableCodeSetup from "./components/ResponsableCodeSetup";
+import {
+  getSessionPin, setSessionPin, clearSessionPin, recordActivity, getLastActivity,
+  isResponsableCode, hasCustomResponsableCode, startResponsableCodeSync
+} from "./lib/accessSession";
 
 import {
   ShieldAlert,
@@ -237,6 +242,10 @@ export default function App() {
   useEffect(() => {
     authReady.then(() => setAuthReadyState(true));
   }, []);
+  useEffect(() => {
+    if (!authReadyState) return;
+    return startResponsableCodeSync();
+  }, [authReadyState]);
   const [headerSearchQuery, setHeaderSearchQuery] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -480,20 +489,31 @@ export default function App() {
   };
 
   // PIN access control systems
+  // Session gardée en sessionStorage : fermer l'app = code redemandé à la
+  // réouverture ; session inactive > 5 min jamais restaurée (lib/accessSession).
   const [currentUserPin, setCurrentUserPin] = useState<string>(() => {
-    return (typeof window !== "undefined" && localStorage.getItem("dg_current_user_pin")) || "";
+    return typeof window !== "undefined" ? getSessionPin() : "";
   });
+
+  // Code personnel du responsable (remplace l'ancien « 0000 »)
+  const [responsableCodeIsCustom, setResponsableCodeIsCustom] = useState<boolean>(() => hasCustomResponsableCode());
+  useEffect(() => {
+    const onChange = () => setResponsableCodeIsCustom(hasCustomResponsableCode());
+    window.addEventListener("dg_responsable_code_changed", onChange);
+    return () => window.removeEventListener("dg_responsable_code_changed", onChange);
+  }, []);
 
   // Secure logout states
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [logoutPinInput, setLogoutPinInput] = useState("");
   const [logoutError, setLogoutError] = useState("");
 
-  const handleConfirmLogout = () => {
+  const handleConfirmLogout = async () => {
     const pin = logoutPinInput.trim();
-    if (pin === currentUserPin) {
+    const ok = currentUserPin === "0000" ? await isResponsableCode(pin) : pin === currentUserPin;
+    if (ok) {
       setCurrentUserPin("");
-      localStorage.removeItem("dg_current_user_pin");
+      clearSessionPin();
       setShowLogoutConfirm(false);
       setLogoutPinInput("");
       setLogoutError("");
@@ -522,7 +542,7 @@ export default function App() {
   useEffect(() => {
     if (currentUserPin && currentUserPin !== "0000" && !currentUser) {
       setCurrentUserPin("");
-      localStorage.removeItem("dg_current_user_pin");
+      clearSessionPin();
     }
   }, [currentUserPin, currentUser]);
 
@@ -533,12 +553,14 @@ export default function App() {
   useEffect(() => {
     if (!currentUserPin) return;
 
-    // Reset last activity and initial time left on mount or when user changes
-    lastActivityRef.current = Date.now();
+    // Reprend la dernière activité réelle (et non « maintenant ») : un simple
+    // rechargement de la page ne remet plus le compte à rebours à zéro.
+    lastActivityRef.current = getLastActivity();
     setTimeLeft(300);
 
     const handleActivity = () => {
       lastActivityRef.current = Date.now();
+      recordActivity(lastActivityRef.current);
     };
 
     // Listeners for user actions to detect activity
@@ -558,7 +580,7 @@ export default function App() {
 
       if (remainingSecs <= 0) {
         setCurrentUserPin("");
-        localStorage.removeItem("dg_current_user_pin");
+        clearSessionPin();
         showToast(
           "Session verrouillée",
           "Votre session a été verrouillée automatiquement après 5 minutes d'inactivité.",
@@ -683,7 +705,7 @@ export default function App() {
   const [showPin, setShowPin] = useState(false);
   const [loginError, setLoginError] = useState("");
 
-  const handleLoginSubmit = (e?: React.FormEvent) => {
+  const handleLoginSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const pin = pinInput.trim();
     if (!pin) {
@@ -691,19 +713,20 @@ export default function App() {
       return;
     }
 
-    if (pin === "0000") {
+    if (await isResponsableCode(pin)) {
       setCurrentUserPin("0000");
-      localStorage.setItem("dg_current_user_pin", "0000");
+      setSessionPin("0000");
       setPinInput("");
       setLoginError("");
       showToast("Bienvenue", "Connexion réussie en tant que Responsable du Service.", "success");
       return;
     }
 
-    const found = staff.find((s) => s.codeEntree === pin);
+    // « 0000 » n'est plus un code d'agent valide une fois le code responsable personnalisé
+    const found = pin === "0000" ? undefined : staff.find((s) => s.codeEntree === pin);
     if (found) {
       setCurrentUserPin(pin);
-      localStorage.setItem("dg_current_user_pin", pin);
+      setSessionPin(pin);
       setPinInput("");
       setLoginError("");
       showToast("Bienvenue", `Connexion réussie : ${found.nom} (${found.poste}).`, "success");
@@ -2807,6 +2830,17 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Le responsable doit remplacer le code par défaut « 0000 » */}
+      {currentUserPin === "0000" && !responsableCodeIsCustom && (
+        <ResponsableCodeSetup
+          staffCodes={staff.map((s) => s.codeEntree).filter(Boolean)}
+          onDone={() => {
+            setResponsableCodeIsCustom(true);
+            showToast("Code enregistré", "Votre code personnel de responsable est actif sur tous les appareils.", "success");
+          }}
+        />
+      )}
 
       {/* Secure Workstation Logout PIN Modal */}
       <AnimatePresence>

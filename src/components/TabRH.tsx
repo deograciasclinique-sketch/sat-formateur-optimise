@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { isResponsableCode } from "../lib/accessSession";
 import React, { useState } from "react";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { Staff, RhFiche, Conge, Absence, PinAuditLog } from "../types";
@@ -355,9 +356,9 @@ export default function TabRH({
     setSecurityError("");
   };
 
-  const handleConfirmSecurityAction = () => {
+  const handleConfirmSecurityAction = async () => {
     if (!securityConfirmModal) return;
-    if (adminPinInput !== "0000") {
+    if (!(await isResponsableCode(adminPinInput))) {
       setSecurityError("Code administrateur incorrect.");
       return;
     }
@@ -710,13 +711,13 @@ export default function TabRH({
                   } pour l'agent <strong className="text-stone-900">{staff.find(s => s.id === securityConfirmModal.staffId)?.nom}</strong>.
                 </p>
                 <p className="bg-warning-50 text-warning-800 border border-warning-200/50 p-2.5 rounded-lg font-medium">
-                  Cette action sensible nécessite l'authentification du <strong>Responsable du Service</strong>. Veuillez saisir le code d'accès administrateur (<strong>0000</strong>) pour confirmer.
+                  Cette action sensible nécessite l'authentification du <strong>Responsable du Service</strong>. Veuillez saisir le code d'accès du responsable pour confirmer.
                 </p>
               </div>
 
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold uppercase tracking-wide text-stone-500">
-                  Code Administrateur (0000)
+                  Code du responsable
                 </label>
                 <input
                   type="password"
@@ -1170,7 +1171,7 @@ export default function TabRH({
             <Lock className="w-8 h-8 text-stone-500 dark:text-stone-400 mx-auto" />
             <h4 className="text-xs font-semibold uppercase tracking-wide text-stone-700">Accès Administrateur Restreint</h4>
             <p className="text-xs text-stone-500 max-w-md mx-auto">
-              L'attribution, la modification et la révocation des codes d'accès individuels (PIN) sont strictement réservées au <strong>Responsable du Service</strong> (Code d'entrée par défaut : <code className="font-mono bg-stone-100 px-1 rounded-lg text-primary-600">0000</code>).
+              L'attribution, la modification et la révocation des codes d'accès individuels (PIN) sont strictement réservées au <strong>Responsable du Service</strong>.
             </p>
           </div>
         ) : (
@@ -1324,12 +1325,11 @@ export default function TabRH({
               onClick={() => {
                 const confirmClear = confirm("Voulez-vous réinitialiser le journal d'activité de sécurité ? Cette action nécessite le mot de passe administrateur.");
                 if (confirmClear) {
-                  const pass = prompt("Saisissez le code d'accès responsable (0000) pour valider :");
-                  if (pass === "0000") {
-                    setPinAuditLogs([]);
-                  } else {
-                    alert("Code incorrect. Réinitialisation annulée.");
-                  }
+                  const pass = prompt("Saisissez le code d'accès du responsable pour valider :");
+                  isResponsableCode(pass || "").then((ok) => {
+                    if (ok) setPinAuditLogs([]);
+                    else alert("Code incorrect. Réinitialisation annulée.");
+                  });
                 }
               }}
               className="text-stone-500 dark:text-stone-400 hover:text-stone-600 text-xs flex items-center gap-1 font-semibold transition-colors"

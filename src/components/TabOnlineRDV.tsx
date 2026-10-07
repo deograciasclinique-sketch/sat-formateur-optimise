@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { db } from "../lib/firebase";
+import { db, authReady } from "../lib/firebase";
+import { formatWhatsAppNumber } from "../lib/whatsapp";
 import { 
   Smartphone, 
   Calendar, 
@@ -37,19 +38,19 @@ export default function TabOnlineRDV() {
     try {
       const saved = localStorage.getItem("dg_clinic_profile");
       return saved ? JSON.parse(saved) : {
-        name: "Cabinet Médical DEO-GRACIAS",
-        slogan: "Excellence & Dévouement au Service de votre Santé",
-        address: "Bobo-Dioulasso, Secteur 15, Rue de l'Hôpital",
-        phone: "+226 20 97 12 34",
+        name: "Cabinet Privé de Soins DEO-GRACIAS",
+        slogan: "Nous vous soignons, Dieu vous guérit",
+        address: "Yéguéré, 363 Rue de l'Habitat",
+        phone: "44 92 01 62 / 76 40 43 27",
         email: "deograciasclinique@gmail.com",
         stampText: "CACHET & SIGNATURE DEO-GRACIAS"
       };
     } catch {
       return {
-        name: "Cabinet Médical DEO-GRACIAS",
-        slogan: "Excellence & Dévouement au Service de votre Santé",
-        address: "Bobo-Dioulasso, Secteur 15, Rue de l'Hôpital",
-        phone: "+226 20 97 12 34",
+        name: "Cabinet Privé de Soins DEO-GRACIAS",
+        slogan: "Nous vous soignons, Dieu vous guérit",
+        address: "Yéguéré, 363 Rue de l'Habitat",
+        phone: "44 92 01 62 / 76 40 43 27",
         email: "deograciasclinique@gmail.com",
         stampText: "CACHET & SIGNATURE DEO-GRACIAS"
       };
@@ -78,7 +79,9 @@ export default function TabOnlineRDV() {
 
   // Secretariat states
   const [secPin, setSecPin] = useState("");
-  const [isSecAuthorized, setIsSecAuthorized] = useState(false);
+  // L'accès est désormais protégé par l'activation de l'appareil + le PIN de
+  // l'agent : l'ancien code commun « 1234 » n'est plus demandé ici.
+  const [isSecAuthorized, setIsSecAuthorized] = useState(true);
   const [secNewMedNom, setSecNewMedNom] = useState("");
   const [secNewMedSpec, setSecNewMedSpec] = useState("");
   const [secBulkMeds, setSecBulkMeds] = useState("");
@@ -94,7 +97,7 @@ export default function TabOnlineRDV() {
 
   // Doctor states
   const [medPin, setMedPin] = useState("");
-  const [isMedAuthorized, setIsMedAuthorized] = useState(false);
+  const [isMedAuthorized, setIsMedAuthorized] = useState(true);
   const [selectedMedId, setSelectedMedId] = useState("");
   const [medRdvs, setMedRdvs] = useState<any[]>([]);
 
@@ -102,7 +105,7 @@ export default function TabOnlineRDV() {
   useEffect(() => {
     if (db) {
       setFirebaseConnected(true);
-      fetchDoctors();
+      authReady.then(() => { fetchDoctors(); fetchDoctorsAdmin(); });
     }
   }, []);
 
@@ -238,23 +241,83 @@ export default function TabOnlineRDV() {
     if (secPin === "1234") {
       setIsSecAuthorized(true);
       fetchDoctorsAdmin();
-      fetchSecretariatRdvs();
     } else {
       alert("Code PIN Secrétariat incorrect ! (Le code par défaut est 1234)");
     }
   };
 
+  // Liste du secrétariat en TEMPS RÉEL : une demande envoyée depuis le
+  // portail patient apparaît immédiatement, sans cliquer sur « Rafraîchir ».
+  const [newRequestFlash, setNewRequestFlash] = useState(0);
+  const knownRdvIdsRef = React.useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!db || !isSecAuthorized) return;
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+    authReady.then(() => {
+      if (cancelled || !db) return;
+      unsubscribe = db.collection("rdv").onSnapshot(
+        (snap) => {
+          const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+            .sort((a: any, b: any) => (a.date + (a.heure || "")).localeCompare(b.date + (b.heure || "")));
+          // Signal sonore/visuel pour les nouvelles demandes reçues pendant que l'écran est ouvert
+          if (knownRdvIdsRef.current) {
+            const nouvelles = list.filter((r: any) => !knownRdvIdsRef.current!.has(r.id) && r.statut === "Demandé");
+            if (nouvelles.length > 0) {
+              setNewRequestFlash(nouvelles.length);
+              try {
+                const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                const o = ctx.createOscillator(); o.frequency.value = 880; o.connect(ctx.destination);
+                o.start(); o.stop(ctx.currentTime + 0.25);
+              } catch { /* pas de son disponible */ }
+            }
+          }
+          knownRdvIdsRef.current = new Set(list.map((r: any) => r.id));
+          setAllRdvs(list);
+        },
+        (err) => console.error("Error listening secretariat rdvs:", err)
+      );
+    });
+    return () => { cancelled = true; unsubscribe?.(); };
+  }, [isSecAuthorized]);
+  // Conservé pour le bouton « Rafraîchir » (la liste est déjà en temps réel)
   const fetchSecretariatRdvs = async () => {
     if (!db) return;
     try {
-      let query = db.collection("rdv");
-      const snap = await query.get();
-      const list = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
-        .sort((a: any, b: any) => (a.date + a.heure).localeCompare(b.date + b.heure));
-      setAllRdvs(list);
+      const snap = await db.collection("rdv").get();
+      setAllRdvs(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+        .sort((a: any, b: any) => (a.date + (a.heure || "")).localeCompare(b.date + (b.heure || ""))));
     } catch (err) {
       console.error("Error loading secretariat rdvs:", err);
     }
+  };
+
+  // Confirmation d'une demande : le secrétariat fixe l'heure après avoir appelé le patient
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [confirmHeure, setConfirmHeure] = useState("");
+  const handleConfirmWithTime = async (r: any) => {
+    if (!db) return;
+    if (!confirmHeure) {
+      alert("Indiquez l'heure du rendez-vous avant de confirmer.");
+      return;
+    }
+    try {
+      await db.collection("rdv").doc(r.id).update({ statut: "Confirmé", heure: confirmHeure, confirmeLe: Date.now() });
+      setConfirmingId(null);
+      setConfirmHeure("");
+    } catch (err) {
+      console.error("Error confirming rdv:", err);
+      alert("Confirmation impossible. Vérifiez la connexion internet.");
+    }
+  };
+  const buildWhatsAppLink = (r: any, confirme: boolean) => {
+    const num = formatWhatsAppNumber(r.patientTel || "");
+    if (!num) return null;
+    const dateTxt = new Date(r.date + "T12:00:00").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+    const msg = confirme && r.heure
+      ? `Bonjour ${r.patientNom}, votre rendez-vous au ${profile.name} est confirmé pour le ${dateTxt} à ${r.heure}. Merci de venir 15 min en avance. ${profile.phone}`
+      : `Bonjour ${r.patientNom}, nous avons bien reçu votre demande de rendez-vous au ${profile.name} pour le ${dateTxt}. À quelle heure êtes-vous disponible ?`;
+    return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
   };
 
   const handleAddDoctor = async () => {
@@ -322,9 +385,7 @@ export default function TabOnlineRDV() {
   const handleUpdateOnlineRdvStatus = async (id: string, statut: "Confirmé" | "Annulé" | "Terminé") => {
     if (!db) return;
     try {
-      await db.collection("rdv").doc(id).update({ statut });
-      alert(`Statut du rendez-vous mis à jour : ${statut}`);
-      fetchSecretariatRdvs();
+      await db.collection("rdv").doc(id).update(statut === "Annulé" ? { statut, annulePar: "secretariat", annuleLe: Date.now() } : { statut });
       if (selectedMedId) loadDoctorRdvs();
     } catch (err) {
       console.error("Error updating online rdv status:", err);
@@ -357,7 +418,6 @@ export default function TabOnlineRDV() {
       setSecRdvManualMotif("");
       setSecRdvManualHeure("");
       alert("Rendez-vous direct enregistré et confirmé !");
-      fetchSecretariatRdvs();
     } catch (err) {
       console.error("Error booking manual rdv:", err);
     }
@@ -665,7 +725,7 @@ export default function TabOnlineRDV() {
                                   <div className="font-bold text-stone-800">{new Date(r.date).toLocaleDateString("fr-FR")}</div>
                                   <div className="text-xs text-warning-800">{r.heure}</div>
                                 </td>
-                                <td className="p-2.5 font-semibold text-stone-600">{r.medecinNom.split("(")[0]}</td>
+                                <td className="p-2.5 font-semibold text-stone-600">{r.medecinNom ? r.medecinNom.split("(")[0] : <span className="italic text-stone-400">Peu importe</span>}</td>
                                 <td className="p-2.5 text-center">
                                   <span
                                     className={`inline-block text-2xs font-semibold px-2 py-0.5 rounded-full ${
@@ -815,6 +875,16 @@ export default function TabOnlineRDV() {
                     <h3 className="text-sm font-serif font-bold text-stone-900 flex items-center gap-2">
                       <ShieldCheck className="w-4 h-4 text-primary-700" />
                       Tous les Rendez-vous en Ligne
+                      {allRdvs.filter((r) => r.statut === "Demandé").length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => { setSecFiltreStatut("Demandé"); setSecFiltreDate(""); setNewRequestFlash(0); }}
+                          className={`ml-2 text-2xs font-bold px-2 py-0.5 rounded-full bg-warning-500 text-stone-950 ${newRequestFlash ? "animate-pulse" : ""}`}
+                          title="Afficher les demandes à traiter"
+                        >
+                          {allRdvs.filter((r) => r.statut === "Demandé").length} à traiter
+                        </button>
+                      )}
                     </h3>
                     
                     <div className="flex gap-2">
@@ -868,14 +938,24 @@ export default function TabOnlineRDV() {
                           filteredSecRdvs.map((r) => (
                             <tr key={r.id} className="hover:bg-stone-50/50">
                               <td className="p-3 font-mono">
-                                <div className="font-bold text-stone-800">{new Date(r.date).toLocaleDateString("fr-FR")}</div>
-                                <div className="text-xs text-warning-800">{r.heure}</div>
+                                <div className="font-bold text-stone-800">{new Date(r.date + "T12:00:00").toLocaleDateString("fr-FR")}</div>
+                                {r.heure
+                                  ? <div className="text-xs text-warning-800">{r.heure}</div>
+                                  : <div className="text-2xs text-stone-500 italic">{r.moment ? `Préf. : ${r.moment}` : "Heure à fixer"}</div>}
+                                {r.source === "portail_patient" && <div className="text-2xs text-primary-700 font-semibold mt-0.5">📱 Demande en ligne</div>}
                               </td>
                               <td className="p-3 font-bold text-stone-800">
                                 <div>{r.patientNom}</div>
-                                {r.patientTel && <div className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">{r.patientTel}</div>}
+                                {r.patientTel && (
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <a href={`tel:+226${String(r.patientTel).replace(/\D/g, "").slice(-8)}`} className="text-xs text-primary-700 hover:underline font-semibold" title="Appeler">📞 {r.patientTel}</a>
+                                    {buildWhatsAppLink(r, r.statut === "Confirmé") && (
+                                      <a href={buildWhatsAppLink(r, r.statut === "Confirmé")!} target="_blank" rel="noreferrer" className="text-2xs text-success-700 hover:underline font-semibold" title="Envoyer un message WhatsApp">WhatsApp</a>
+                                    )}
+                                  </div>
+                                )}
                               </td>
-                              <td className="p-3 font-medium text-stone-600">{r.medecinNom.split("(")[0]}</td>
+                              <td className="p-3 font-medium text-stone-600">{r.medecinNom ? r.medecinNom.split("(")[0] : <span className="italic text-stone-400">Peu importe</span>}</td>
                               <td className="p-3 text-stone-500 italic max-w-[140px] truncate" title={r.motif}>{r.motif || "—"}</td>
                               <td className="p-3 text-center">
                                 <span
@@ -894,14 +974,30 @@ export default function TabOnlineRDV() {
                               </td>
                               <td className="p-3 text-center">
                                 <div className="flex justify-center gap-1.5">
-                                  {r.statut === "Demandé" && (
+                                  {r.statut === "Demandé" && confirmingId === r.id && (
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="time"
+                                        value={confirmHeure}
+                                        onChange={(e) => setConfirmHeure(e.target.value)}
+                                        className="text-xs border border-stone-300 rounded-lg px-1.5 py-0.5"
+                                        autoFocus
+                                      />
+                                      <button type="button" onClick={() => handleConfirmWithTime(r)} className="px-2 py-1 rounded-lg bg-primary-600 hover:bg-primary-700 text-white font-semibold text-2xs">OK</button>
+                                      <button type="button" onClick={() => setConfirmingId(null)} className="px-1.5 py-1 rounded-lg text-stone-500 hover:bg-stone-100 text-2xs">✕</button>
+                                    </div>
+                                  )}
+                                  {r.statut === "Demandé" && confirmingId !== r.id && (
                                     <button
                                       type="button"
-                                      onClick={() => handleUpdateOnlineRdvStatus(r.id, "Confirmé")}
+                                      onClick={() => { setConfirmingId(r.id); setConfirmHeure(r.heure || (r.moment === "Après-midi" ? "15:00" : "08:00")); }}
                                       className="px-2 py-1 rounded-lg bg-primary-600 hover:bg-primary-700 text-white font-semibold text-2xs tracking-wide"
                                     >
-                                      Valider
+                                      Confirmer
                                     </button>
+                                  )}
+                                  {r.statut === "Annulé" && r.annulePar === "patient" && (
+                                    <span className="text-2xs italic text-stone-400">par le patient</span>
                                   )}
                                   {r.statut !== "Annulé" && (
                                     <button

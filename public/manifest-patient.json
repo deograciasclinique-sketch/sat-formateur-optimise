@@ -2,7 +2,7 @@
   "id": "/?mode=patient",
   "name": "DEO GRACIAS - Prise de RDV",
   "short_name": "RDV DEO GRACIAS",
-  "description": "Prenez rendez-vous en ligne au Cabinet Médical DEO-GRACIAS",
+  "description": "Demandez un rendez-vous au Cabinet Privé de Soins DEO-GRACIAS (Yéguéré)",
   "start_url": "/?mode=patient",
   "scope": "/",
   "display": "standalone",
