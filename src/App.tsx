@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { SelfHealingErrorBoundary, useSystemWatchdog } from "./components/SelfHealingEngine";
-import { subscribeToCloudKey, pushToCloudKey } from "./lib/liveSync";
+import { subscribeToCloudKey, pushMergedToCloudKey, mergeThreeWay } from "./lib/liveSync";
 import { useCloudSyncedState } from "./lib/useCloudSyncedState";
 import PatientMobilePortal from "./components/PatientMobilePortal";
 import {
@@ -428,6 +428,8 @@ export default function App() {
   // afin de ne renvoyer que ce qui a réellement changé (et d'éviter les boucles avec les
   // mises à jour reçues depuis un autre appareil).
   const lastCloudSyncedRef = React.useRef<Record<string, any>>({});
+  // Évite deux envois simultanés de la même clé (un envoi fusionné peut durer plus d'un cycle).
+  const pushInFlightRef = React.useRef<Record<string, boolean>>({});
 
   // Threshold settings state — synchronisé cloud en temps réel
   const [medTypeThresholds, setMedTypeThresholds] = useCloudSyncedState<Record<string, number>>("dg_med_type_thresholds", {
@@ -1120,14 +1122,22 @@ export default function App() {
         if (!Array.isArray(remoteData) && typeof remoteData !== "number") return;
 
         const remoteJson = JSON.stringify(remoteData);
-        const localValue = lastSavedRef.current[key];
+        // Valeur ACTUELLE à l'écran (peut contenir une saisie pas encore envoyée).
+        const localValue = latestDataRef.current[key] !== undefined ? latestDataRef.current[key] : lastSavedRef.current[key];
         if (localValue !== undefined && JSON.stringify(localValue) === remoteJson) {
+          lastCloudSyncedRef.current[key] = localValue;
           return; // Aucune vraie différence, on ignore.
         }
 
-        setter(remoteData);
-        safeSet(key, remoteData);
-        lastSavedRef.current[key] = remoteData;
+        // On FUSIONNE au lieu de remplacer : un patient tout juste enregistré
+        // sur ce poste (pas encore envoyé) n'est plus effacé par la liste
+        // reçue d'un autre poste. S'il reste des changements locaux, le
+        // prochain cycle d'envoi les poussera (base = version distante).
+        const merged = mergeThreeWay(lastCloudSyncedRef.current[key], localValue, remoteData);
+        setter(merged);
+        safeSet(key, merged);
+        latestDataRef.current = { ...latestDataRef.current, [key]: merged };
+        lastSavedRef.current[key] = merged;
         lastCloudSyncedRef.current[key] = remoteData;
       });
       unsubscribers.push(unsubscribe);
@@ -1307,14 +1317,33 @@ export default function App() {
           // Envoie (ou renvoie) vers le cloud tant que ce n'est pas confirmé
           // comme synchronisé — indépendamment de la sauvegarde locale, pour
           // que les envois précédemment échoués soient bien retentés.
-          if (liveSyncSetters.current[key] && db && authReadyState && state !== lastCloudSyncedRef.current[key]) {
-            pushToCloudKey(key, state)
-              .then(() => {
-                lastCloudSyncedRef.current[key] = state;
+          if (liveSyncSetters.current[key] && db && authReadyState && state !== lastCloudSyncedRef.current[key] && !pushInFlightRef.current[key]) {
+            pushInFlightRef.current[key] = true;
+            // Envoi FUSIONNÉ : on relit le cloud dans une transaction et on
+            // fusionne fiche par fiche, pour ne jamais effacer ce qu'un autre
+            // poste vient d'enregistrer (et inversement).
+            pushMergedToCloudKey(key, state, lastCloudSyncedRef.current[key])
+              .then((merged: any) => {
+                const stillSame = latestDataRef.current[key] === state;
+                if (stillSame && JSON.stringify(merged) !== JSON.stringify(state)) {
+                  // Le cloud contenait des fiches d'autres postes : on les affiche ici aussi.
+                  liveSyncSetters.current[key](merged);
+                  safeSet(key, merged);
+                  latestDataRef.current = { ...latestDataRef.current, [key]: merged };
+                  lastSavedRef.current[key] = merged;
+                  lastCloudSyncedRef.current[key] = merged;
+                } else {
+                  // Si l'agent a encore modifié pendant l'envoi, on garde la
+                  // version fusionnée comme base : le prochain cycle renverra la suite.
+                  lastCloudSyncedRef.current[key] = stillSame ? state : merged;
+                }
+              })
+              .finally(() => {
+                pushInFlightRef.current[key] = false;
               })
               .catch((err: any) => {
                 // Échec (ex: hors-ligne, donnée trop volumineuse) : on retentera
-                // au prochain cycle (15s) puisque lastCloudSyncedRef n'a pas été
+                // au prochain cycle (3 s) puisque lastCloudSyncedRef n'a pas été
                 // mis à jour. On journalise désormais l'erreur pour pouvoir
                 // diagnostiquer une cause persistante (avant, elle était invisible).
                 console.error(`[auto-save] Échec de l'envoi cloud de "${key}":`, err);
@@ -1327,7 +1356,7 @@ export default function App() {
       } finally {
         setTimeout(() => setIsSaving(false), 800);
       }
-    }, 15000); // Sauvegarde locale + synchro cloud toutes les 15 secondes
+    }, 3000); // Sauvegarde locale + synchro cloud toutes les 3 secondes (avant : 15 s, ce qui laissait le temps à un autre poste d'écraser la saisie)
 
     return () => clearInterval(interval);
   }, [isLoaded, authReadyState]);
