@@ -702,6 +702,16 @@ export default function App() {
     }
   }, [currentUser, allowedTabs, activeTab]);
 
+  // Bouton retour d'Android (APK) : revient à l'onglet principal avant de proposer de quitter.
+  useEffect(() => {
+    const retour = (e: Event) => {
+      const principal = allowedTabs[0] || "dashboard";
+      if (activeTab !== principal) { e.preventDefault(); setActiveTab(principal); window.scrollTo({ top: 0 }); }
+    };
+    window.addEventListener("dg-retour", retour);
+    return () => window.removeEventListener("dg-retour", retour);
+  }, [activeTab, allowedTabs]);
+
   // PIN Login States
   const [pinInput, setPinInput] = useState("");
   const [showPin, setShowPin] = useState(false);

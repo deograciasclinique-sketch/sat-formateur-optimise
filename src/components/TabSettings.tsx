@@ -11,6 +11,7 @@ import { Medicament, ClinicProfile } from "../types";
 import { jsPDF } from "jspdf";
 
 import { AIHealingDiagnosticsPanel } from "./SelfHealingEngine";
+import CarteApplicationAndroid from "./CarteApplicationAndroid";
 import { encryptData, decryptData } from "../lib/cryptoBackup";
 import { db } from "../lib/firebase";
 import { subscribeToCloudKey, pushToCloudKey } from "../lib/liveSync";
@@ -956,6 +957,7 @@ export default function TabSettings({
 
   return (
     <div className="space-y-6">
+      <CarteApplicationAndroid />
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white dark:bg-stone-900/60 border border-stone-200 dark:border-stone-800 p-6 rounded-2xl shadow-xs">
         <div className="flex items-center gap-3">

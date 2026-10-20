@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">DEO GRACIAS Santé</string>
+    <string name="title_activity_main">DEO GRACIAS Santé</string>
+    <string name="package_name">bf.deogracias.sante</string>
+    <string name="custom_url_scheme">bf.deogracias.sante</string>
+</resources>

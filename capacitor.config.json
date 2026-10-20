@@ -1,0 +1,23 @@
+{
+  "appId": "bf.deogracias.sante",
+  "appName": "DEO GRACIAS Santé",
+  "webDir": "dist",
+  "loggingBehavior": "none",
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "server": { "androidScheme": "https", "cleartext": false },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "launchAutoHide": true,
+      "backgroundColor": "#FFFFFF",
+      "showSpinner": false,
+      "androidScaleType": "CENTER_INSIDE"
+    },
+    "LocalNotifications": {
+      "iconColor": "#0F766E"
+    }
+  }
+}

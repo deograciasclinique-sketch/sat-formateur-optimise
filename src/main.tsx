@@ -1,4 +1,6 @@
 import "./domGuard";
+// Doit être chargé en premier : adapte l'application au téléphone quand elle tourne dans l'APK Android.
+import { NATIF } from "./lib/natif";
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
@@ -11,7 +13,8 @@ import './index.css';
 // réseau-prioritaire : toute nouvelle version publiée est détectée et
 // appliquée automatiquement, sans que l'utilisateur reste bloqué sur une
 // ancienne version en cache.
-if ('serviceWorker' in navigator) {
+// (Dans l'APK Android, les fichiers sont déjà dans l'application : pas de service worker.)
+if ('serviceWorker' in navigator && !NATIF) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').then((registration) => {
       // Vérifie s'il existe une mise à jour dès le chargement, puis
