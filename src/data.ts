@@ -68,8 +68,20 @@ ARTICLE 5 : GERANCE & DIRECTION
 La gérance et la direction médicale générale de l'établissement sont assurées par le Dr. Deogracias en sa qualité d'associé gérant fondateur.`
 };
 
+// Ancien logo d'exemple (« Aspen Care ») qui n'appartient pas au cabinet : remplacé partout par le logo de l'application.
+const LOGO_ETRANGER = /deogracias_clinic_logo_1784451713796|aspen/i;
+export function nettoyerProfil<T extends { logoUrl?: string }>(p: T): T {
+  if (p && typeof p.logoUrl === "string" && LOGO_ETRANGER.test(p.logoUrl)) return { ...p, logoUrl: DEFAULT_CLINIC_PROFILE.logoUrl };
+  return p;
+}
+// Au démarrage : corrige aussi la copie gardée sur l'appareil (lue directement par certains écrans d'impression).
+try {
+  const brut = localStorage.getItem("dg_clinic_profile");
+  if (brut && LOGO_ETRANGER.test(brut)) localStorage.setItem("dg_clinic_profile", JSON.stringify(nettoyerProfil(JSON.parse(brut))));
+} catch { /* stockage indisponible */ }
+
 export const getClinicProfile = (): ClinicProfile => {
-  return safeGet<ClinicProfile>("dg_clinic_profile", DEFAULT_CLINIC_PROFILE);
+  return nettoyerProfil(safeGet<ClinicProfile>("dg_clinic_profile", DEFAULT_CLINIC_PROFILE));
 };
 
 

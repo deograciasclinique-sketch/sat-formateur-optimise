@@ -12,6 +12,7 @@ import { jsPDF } from "jspdf";
 
 import { AIHealingDiagnosticsPanel } from "./SelfHealingEngine";
 import CarteApplicationAndroid from "./CarteApplicationAndroid";
+import { DEFAULT_CLINIC_PROFILE, nettoyerProfil } from "../data";
 import { encryptData, decryptData } from "../lib/cryptoBackup";
 import { db } from "../lib/firebase";
 import { subscribeToCloudKey, pushToCloudKey } from "../lib/liveSync";
@@ -248,8 +249,9 @@ export default function TabSettings({
   // Synchronisation temps réel du profil (nom, logo, coordonnées...) entre appareils
   useEffect(() => {
     if (!db) return;
-    const unsubscribe = subscribeToCloudKey("dg_clinic_profile", (remoteProfile) => {
-      if (!remoteProfile || typeof remoteProfile !== "object") return;
+    const unsubscribe = subscribeToCloudKey("dg_clinic_profile", (recu) => {
+      if (!recu || typeof recu !== "object") return;
+      const remoteProfile = nettoyerProfil(recu as ClinicProfile);
       const localJson = JSON.stringify(profile);
       const remoteJson = JSON.stringify(remoteProfile);
       if (localJson === remoteJson) return;
@@ -2073,7 +2075,7 @@ export default function TabSettings({
                     {/* Reset Button */}
                     <button
                       type="button"
-                      onClick={() => setProfile({ ...profile, logoUrl: "/src/assets/images/deogracias_clinic_logo_1784451713796.jpg" })}
+                      onClick={() => setProfile({ ...profile, logoUrl: DEFAULT_CLINIC_PROFILE.logoUrl })}
                       className="px-4 py-2 bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-stone-200 dark:border-stone-700"
                     >
                       Logo par défaut
