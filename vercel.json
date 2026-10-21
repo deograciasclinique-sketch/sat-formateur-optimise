@@ -59,6 +59,11 @@
       "source": "/android",
       "destination": "https://github.com/deograciasclinique-sketch/sat-formateur-optimise/releases/latest/download/DEO-GRACIAS-Sante.apk",
       "permanent": false
+    },
+    {
+      "source": "/demo",
+      "destination": "https://github.com/deograciasclinique-sketch/sat-formateur-optimise/releases/latest/download/Sante-Integre-Demo.apk",
+      "permanent": false
     }
   ]
 }
