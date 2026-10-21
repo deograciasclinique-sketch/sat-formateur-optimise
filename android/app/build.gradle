@@ -28,6 +28,16 @@ android {
                 keyPassword System.getenv("DG_KEYSTORE_PASSWORD")
             }
         }
+        // édition démo : clé à part (nom neutre), même mot de passe
+        dgdemo {
+            def ks = System.getenv("DG_DEMO_KEYSTORE_FILE")
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv("DG_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("DG_KEY_ALIAS") ?: "dg"
+                keyPassword System.getenv("DG_KEYSTORE_PASSWORD")
+            }
+        }
     }
     // Deux éditions à partir du même code :
     //  • cabinet : l'application réelle du Cabinet DEO-GRACIAS (APK privé) ;
@@ -37,10 +47,12 @@ android {
         cabinet {
             dimension "edition"
             applicationId "bf.deogracias.sante"
+            if (System.getenv("DG_KEYSTORE_FILE")) signingConfig signingConfigs.dg
         }
         demo {
             dimension "edition"
             applicationId "bf.santeintegre.app"
+            if (System.getenv("DG_DEMO_KEYSTORE_FILE")) signingConfig signingConfigs.dgdemo
         }
     }
     lint {
@@ -49,7 +61,6 @@ android {
     }
     buildTypes {
         release {
-            if (System.getenv("DG_KEYSTORE_FILE")) signingConfig signingConfigs.dg
             debuggable false
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

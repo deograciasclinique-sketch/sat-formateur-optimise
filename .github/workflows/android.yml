@@ -44,12 +44,14 @@ jobs:
         run: |
           if [ -n "$DG_KEYSTORE_PASSWORD" ]; then
             echo "DG_KEYSTORE_FILE=$PWD/android/app/dg.keystore" >> "$GITHUB_ENV"
+            echo "DG_DEMO_KEYSTORE_FILE=$PWD/android/app/dg-demo.keystore" >> "$GITHUB_ENV"
             echo "DG_KEYSTORE_PASSWORD=$DG_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
             echo "publier=oui" >> "$GITHUB_OUTPUT"
           else
             echo "::warning::Secret DG_KEYSTORE_PASSWORD absent : APK de TEST seulement (non publié)."
             keytool -genkeypair -keystore "$RUNNER_TEMP/test.keystore" -storetype PKCS12 -alias dg -keyalg RSA -keysize 2048 -validity 30 -storepass testtest -keypass testtest -dname "CN=Test" >/dev/null
             echo "DG_KEYSTORE_FILE=$RUNNER_TEMP/test.keystore" >> "$GITHUB_ENV"
+            echo "DG_DEMO_KEYSTORE_FILE=$RUNNER_TEMP/test.keystore" >> "$GITHUB_ENV"
             echo "DG_KEYSTORE_PASSWORD=testtest" >> "$GITHUB_ENV"
             echo "publier=non" >> "$GITHUB_OUTPUT"
           fi

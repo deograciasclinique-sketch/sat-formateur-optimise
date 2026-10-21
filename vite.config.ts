@@ -1,6 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import fs from 'fs';
 import {defineConfig} from 'vite';
 
 // Édition démo (VITE_EDITION=demo) : le nom du cabinet est remplacé partout dans les écrans et
@@ -29,6 +30,18 @@ const editionDemo = {
     let out = code;
     for (const [re, rep] of REMPLACEMENTS) out = out.replace(re, rep);
     return out === code ? null : { code: out, map: null };
+  },
+  // fichiers de « public/ » (copiés tels quels) : nettoyés aussi dans l'édition démo
+  closeBundle() {
+    if (!DEMO) return;
+    for (const f of ['manifest.json', 'manifest-patient.json', 'sw.js']) {
+      const p = path.resolve(__dirname, 'dist', f);
+      if (!fs.existsSync(p)) continue;
+      let t = fs.readFileSync(p, 'utf8');
+      if (f === 'manifest.json') t = t.replace(/"name":\s*"[^"]*"/, '"name": "Système de Santé Intégré 2.2 — Démo"').replace(/"short_name":\s*"[^"]*"/, '"short_name": "Santé Intégré"');
+      for (const [re, rep] of REMPLACEMENTS) t = t.replace(re, rep);
+      fs.writeFileSync(p, t);
+    }
   },
   transformIndexHtml(html: string) {
     if (!DEMO) return html;
