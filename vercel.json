@@ -48,5 +48,17 @@
         }
       ]
     }
+  ],
+  "redirects": [
+    {
+      "source": "/apk",
+      "destination": "https://github.com/deograciasclinique-sketch/sat-formateur-optimise/releases/latest/download/DEO-GRACIAS-Sante.apk",
+      "permanent": false
+    },
+    {
+      "source": "/android",
+      "destination": "https://github.com/deograciasclinique-sketch/sat-formateur-optimise/releases/latest/download/DEO-GRACIAS-Sante.apk",
+      "permanent": false
+    }
   ]
 }
