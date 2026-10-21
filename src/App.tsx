@@ -87,6 +87,7 @@ import TabDashboardGlobal from "./components/TabDashboardGlobal";
 import TabSettings from "./components/TabSettings";
 import TabPlanifFamiliale from "./components/TabPlanifFamiliale";
 import ResponsableCodeSetup from "./components/ResponsableCodeSetup";
+import { DEMO, DEMO_AGENTS, NOM_PRODUIT, lienAchat, reinitialiserDemo } from "./lib/edition";
 import {
   getSessionPin, setSessionPin, clearSessionPin, recordActivity, getLastActivity,
   isResponsableCode, hasCustomResponsableCode, startResponsableCodeSync
@@ -1765,6 +1766,20 @@ export default function App() {
             </div>
           </div>
 
+          {DEMO && (
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 rounded-2xl p-4 text-sm text-stone-700 dark:text-stone-300 space-y-2">
+              <p className="font-bold text-amber-800 dark:text-amber-300">🎓 Démonstration de {NOM_PRODUIT}</p>
+              <p className="text-xs">Toutes les données sont <b>fictives</b> et restent sur cet appareil. Entrez un code pour découvrir chaque poste :</p>
+              <div className="grid grid-cols-2 gap-1.5 text-xs">
+                <button type="button" onClick={() => setPinInput("0000")} className="text-left bg-white dark:bg-stone-900 border border-amber-200 dark:border-amber-900 rounded-lg px-2 py-1.5 cursor-pointer"><b className="font-mono">0000</b> · Responsable (tout)</button>
+                {DEMO_AGENTS.map((a) => (
+                  <button key={a.id} type="button" onClick={() => setPinInput(a.codeEntree || "")} className="text-left bg-white dark:bg-stone-900 border border-amber-200 dark:border-amber-900 rounded-lg px-2 py-1.5 cursor-pointer"><b className="font-mono">{a.codeEntree}</b> · {a.poste.replace(" (Secrétariat)", "")}</button>
+                ))}
+              </div>
+              <a href={lienAchat()} target="_blank" rel="noopener noreferrer" className="block text-center bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl py-2.5 no-underline">Acheter la version complète pour ma clinique</a>
+            </div>
+          )}
+
           {/* Quick Help Tip */}
           <div className="bg-stone-50 dark:bg-stone-950/40 border border-stone-200 dark:border-stone-850 rounded-2xl p-4 text-sm text-stone-500 dark:text-stone-400 space-y-2 leading-relaxed">
             <p className="font-bold text-stone-700 dark:text-stone-300 flex items-center gap-1">
@@ -2310,6 +2325,14 @@ export default function App() {
 
         {/* Panel render staging viewarea */}
         <main className="flex-1 overflow-y-auto p-6 max-w-7xl w-full mx-auto">
+          {DEMO && (
+            <div role="status" className="mb-4 flex flex-wrap items-center gap-2 rounded-2xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-4 py-2.5 text-xs text-amber-900 dark:text-amber-200">
+              <span className="font-bold">🎓 Version de démonstration</span>
+              <span className="flex-1 min-w-[180px]">Données fictives, gardées sur cet appareil. Assistants IA et synchronisation entre appareils : version complète.</span>
+              <button type="button" onClick={() => { if (confirm("Effacer toutes les saisies et revenir aux patients de démonstration ?")) reinitialiserDemo(); }} className="rounded-lg border border-amber-300 dark:border-amber-800 px-2.5 py-1.5 font-bold cursor-pointer bg-white/70 dark:bg-stone-900">Réinitialiser</button>
+              <a href={lienAchat()} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-emerald-600 px-3 py-1.5 font-bold text-white no-underline">Acheter</a>
+            </div>
+          )}
           {tlohRappel && allowedTabs.includes("thlo") && activeTab !== "thlo" && (
             <div className={`mb-4 px-4 py-3 rounded-xl text-sm font-semibold flex flex-wrap items-center justify-between gap-2 border-2 ${tlohRappel.enRetard ? "bg-red-50 border-red-400 text-red-800" : "bg-amber-50 border-amber-400 text-amber-900"}`}>
               <span>
@@ -2871,7 +2894,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Le responsable doit remplacer le code par défaut « 0000 » */}
-      {currentUserPin === "0000" && !responsableCodeIsCustom && (
+      {!DEMO && currentUserPin === "0000" && !responsableCodeIsCustom && (
         <ResponsableCodeSetup
           staffCodes={staff.map((s) => s.codeEntree).filter(Boolean)}
           onDone={() => {

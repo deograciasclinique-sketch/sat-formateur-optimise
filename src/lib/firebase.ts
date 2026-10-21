@@ -2,7 +2,8 @@ import firebase from "firebase/compat/app";
 import "firebase/compat/firestore";
 import "firebase/compat/auth";
 
-const firebaseConfig = {
+// (Édition démo : la configuration du cabinet n'est même pas incluse dans l'application.)
+const firebaseConfig = import.meta.env.VITE_EDITION === "demo" ? ({} as Record<string, string>) : {
   apiKey: "AIzaSyBSuvK7ZrKR5FoDXVtDSbR64vsa8nk3uks",
   authDomain: "deo-gracias-rdv-5d815.firebaseapp.com",
   projectId: "deo-gracias-rdv-5d815",
@@ -11,13 +12,16 @@ const firebaseConfig = {
   appId: "1:149855015298:web:e410d46341ee418942ff9b"
 };
 
+import { DEMO } from "./edition";
+
 let db: firebase.firestore.Firestore | null = null;
 
+// Édition démo : aucune connexion à la base du cabinet (db reste vide, tout reste sur l'appareil).
 try {
-  if (!firebase.apps.length) {
+  if (!DEMO && !firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
   }
-  db = firebase.firestore();
+  if (!DEMO) db = firebase.firestore();
   // Certains réseaux (pare-feu, antivirus, proxy du cabinet) coupent
   // silencieusement les connexions longue durée qu'utilise Firestore par
   // défaut pour le temps réel — les écritures et la lecture au chargement
@@ -25,7 +29,7 @@ try {
   // en direct depuis un autre appareil n'arrivent jamais tant que la page
   // n'est pas rechargée. Ce réglage détecte automatiquement ce cas et
   // bascule sur un mode de connexion ("long polling") plus compatible.
-  db.settings({ experimentalAutoDetectLongPolling: true, useFetchStreams: false });
+  if (db) db.settings({ experimentalAutoDetectLongPolling: true, useFetchStreams: false });
 } catch (error) {
   console.error("Firebase initialization failed:", error);
 }

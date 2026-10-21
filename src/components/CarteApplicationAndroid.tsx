@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Smartphone, RefreshCw, Send, Share2, ShieldCheck, Download } from "lucide-react";
+import { DEMO, NOM_PRODUIT } from "../lib/edition";
 import { NATIF, APK_LINK, versionInstallee, chercherMiseAJour, envoyerApk, envoyerLienApk, ecranProtege, protegerEcran, DG } from "../lib/natif";
 
 /** Paramètres → Application Android : version, mise à jour, envoi de l'APK, confidentialité de l'écran. */
@@ -30,7 +31,7 @@ export default function CarteApplicationAndroid() {
       <div className="flex items-center gap-3">
         <img src="/app-icon-192-v2.png" alt="" className="w-12 h-12 rounded-xl border border-stone-200" />
         <div className="flex-1 min-w-0">
-          <h3 className="text-base font-serif font-bold text-stone-900 dark:text-stone-100">Application Android</h3>
+          <h3 className="text-base font-serif font-bold text-stone-900 dark:text-stone-100">{DEMO ? `${NOM_PRODUIT} · démonstration` : "Application Android"}</h3>
           <p className="text-xs text-stone-500 font-semibold">{NATIF ? `Application officielle signée · version ${v ? v.version : "…"}` : "Vous utilisez la version web (navigateur)"}</p>
         </div>
         <ShieldCheck className="w-5 h-5 text-emerald-600" aria-label="Application officielle" />
@@ -38,7 +39,7 @@ export default function CarteApplicationAndroid() {
 
       {NATIF ? (
         <div className="mt-4 space-y-2">
-          {maj ? (
+          {DEMO ? null : maj ? (
             <button type="button" className={`${btn} w-full bg-primary-600 hover:bg-primary-700 text-white`} onClick={() => { dire("Téléchargement… puis ouvrez le fichier pour installer"); DG.openUrl({ url: maj.url }).catch(() => {}); }}>
               <RefreshCw className="w-4 h-4" /> Installer la version {maj.version}
             </button>

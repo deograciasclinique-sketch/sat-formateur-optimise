@@ -14,7 +14,8 @@ public class MainActivity extends BridgeActivity {
         // Confidentialité médicale : pas de capture d'écran et écran masqué dans les applications récentes
         // (désactivable par le responsable dans Paramètres → Application Android).
         SharedPreferences p = getSharedPreferences("CapacitorStorage", MODE_PRIVATE);
-        if (!"0".equals(p.getString("dg-ecran-protege", "1"))) {
+        String defaut = getResources().getBoolean(R.bool.ecran_protege_defaut) ? "1" : "0";
+        if (!"0".equals(p.getString("dg-ecran-protege", defaut))) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         }
     }

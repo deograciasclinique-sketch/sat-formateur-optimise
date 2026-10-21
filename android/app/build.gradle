@@ -29,6 +29,20 @@ android {
             }
         }
     }
+    // Deux éditions à partir du même code :
+    //  • cabinet : l'application réelle du Cabinet DEO-GRACIAS (APK privé) ;
+    //  • demo    : « Santé Intégré 2.2 », démonstration commerciale pour Google Play (aucune donnée du cabinet).
+    flavorDimensions "edition"
+    productFlavors {
+        cabinet {
+            dimension "edition"
+            applicationId "bf.deogracias.sante"
+        }
+        demo {
+            dimension "edition"
+            applicationId "bf.santeintegre.app"
+        }
+    }
     lint {
         checkReleaseBuilds false
         abortOnError false

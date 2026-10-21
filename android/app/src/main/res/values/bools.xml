@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Confidentialité médicale : captures d'écran bloquées par défaut (édition cabinet) -->
+    <bool name="ecran_protege_defaut">true</bool>
+</resources>

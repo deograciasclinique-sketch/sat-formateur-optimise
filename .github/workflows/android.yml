@@ -1,8 +1,10 @@
 name: Construire l'APK DEO GRACIAS Santé
 
-# À chaque mise à jour du code sur « main », GitHub construit l'application Android
-# (version finale, signée) et la publie dans « Releases » : lien de téléchargement fixe
-# https://github.com/deograciasclinique-sketch/sat-formateur-optimise/releases/latest/download/DEO-GRACIAS-Sante.apk
+# À chaque mise à jour du code sur « main », GitHub construit les deux éditions Android (signées) :
+#  • DEO-GRACIAS-Sante.apk    : l'application privée du cabinet (lien court sat-formateur-main.vercel.app/apk) ;
+#  • Sante-Integre-Demo.apk   : la démonstration commerciale « Santé Intégré 2.2 » (essai direct sur un téléphone) ;
+#  • Sante-Integre-Demo.aab   : la même démonstration, au format demandé par Google Play.
+# Tout est publié dans « Releases ».
 on:
   push:
     branches: [main]
@@ -33,47 +35,66 @@ jobs:
       - name: Installer les dépendances
         run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 
-      - name: Préparer l'application
-        run: |
-          npx vite build
-          npx cap sync android
-
       # La clé de signature (android/app/dg.keystore) est verrouillée par un mot de passe
       # gardé uniquement dans le secret GitHub DG_KEYSTORE_PASSWORD.
-      - name: Construire l'APK signé
-        id: apk
-        working-directory: android
+      - name: Préparer la signature
+        id: cle
         env:
           DG_KEYSTORE_PASSWORD: ${{ secrets.DG_KEYSTORE_PASSWORD }}
         run: |
-          chmod +x gradlew
           if [ -n "$DG_KEYSTORE_PASSWORD" ]; then
-            export DG_KEYSTORE_FILE="$PWD/app/dg.keystore" DG_KEY_ALIAS=dg
+            echo "DG_KEYSTORE_FILE=$PWD/android/app/dg.keystore" >> "$GITHUB_ENV"
+            echo "DG_KEYSTORE_PASSWORD=$DG_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
             echo "publier=oui" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Secret DG_KEYSTORE_PASSWORD absent : APK de TEST seulement (non publié). Ajoutez le secret dans Settings → Secrets and variables → Actions."
+            echo "::warning::Secret DG_KEYSTORE_PASSWORD absent : APK de TEST seulement (non publié)."
             keytool -genkeypair -keystore "$RUNNER_TEMP/test.keystore" -storetype PKCS12 -alias dg -keyalg RSA -keysize 2048 -validity 30 -storepass testtest -keypass testtest -dname "CN=Test" >/dev/null
-            export DG_KEYSTORE_FILE="$RUNNER_TEMP/test.keystore" DG_KEYSTORE_PASSWORD=testtest DG_KEY_ALIAS=dg
+            echo "DG_KEYSTORE_FILE=$RUNNER_TEMP/test.keystore" >> "$GITHUB_ENV"
+            echo "DG_KEYSTORE_PASSWORD=testtest" >> "$GITHUB_ENV"
             echo "publier=non" >> "$GITHUB_OUTPUT"
           fi
-          ./gradlew assembleRelease --no-daemon -Pvc=${{ github.run_number }}
-          cp app/build/outputs/apk/release/app-release.apk ../DEO-GRACIAS-Sante.apk
-          ls -la ../DEO-GRACIAS-Sante.apk
+          echo "DG_KEY_ALIAS=dg" >> "$GITHUB_ENV"
+          chmod +x android/gradlew
+
+      - name: Édition cabinet (application privée)
+        run: |
+          npx vite build
+          npx cap sync android
+          cd android && ./gradlew assembleCabinetRelease --no-daemon -Pvc=${{ github.run_number }}
+          cp app/build/outputs/apk/cabinet/release/app-cabinet-release.apk ../DEO-GRACIAS-Sante.apk
+
+      - name: Édition démo (Santé Intégré 2.2 — Google Play)
+        env:
+          VITE_EDITION: demo
+        run: |
+          npx vite build --emptyOutDir
+          npx cap copy android
+          cd android && ./gradlew assembleDemoRelease bundleDemoRelease --no-daemon -Pvc=${{ github.run_number }}
+          cp app/build/outputs/apk/demo/release/app-demo-release.apk ../Sante-Integre-Demo.apk
+          cp app/build/outputs/bundle/demoRelease/app-demo-release.aab ../Sante-Integre-Demo.aab
+          ls -la ../*.apk ../*.aab
 
       - uses: actions/upload-artifact@v4
         with:
-          name: DEO-GRACIAS-Sante.apk
-          path: DEO-GRACIAS-Sante.apk
+          name: applications-android
+          path: |
+            DEO-GRACIAS-Sante.apk
+            Sante-Integre-Demo.apk
+            Sante-Integre-Demo.aab
 
-      - name: Publier la version (lien de téléchargement)
-        if: steps.apk.outputs.publier == 'oui'
+      - name: Publier la version (liens de téléchargement)
+        if: steps.cle.outputs.publier == 'oui'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.${{ github.run_number }}
           name: DEO GRACIAS Santé v1.${{ github.run_number }}
           body: |
-            Application Android officielle du Cabinet Privé de Soins DEO-GRACIAS (personnel du cabinet).
-            Téléchargez **DEO-GRACIAS-Sante.apk** sur le téléphone, ouvrez-le, autorisez « installer des applications inconnues », puis Installer.
+            • **DEO-GRACIAS-Sante.apk** — application Android officielle du Cabinet Privé de Soins DEO-GRACIAS (personnel du cabinet).
+            • **Sante-Integre-Demo.apk** — démonstration « Santé Intégré 2.2 » (données fictives, aucune donnée du cabinet).
+            • **Sante-Integre-Demo.aab** — la démonstration au format Google Play.
             Les nouvelles versions s'installent par-dessus l'ancienne, sans perte de données.
-          files: DEO-GRACIAS-Sante.apk
+          files: |
+            DEO-GRACIAS-Sante.apk
+            Sante-Integre-Demo.apk
+            Sante-Integre-Demo.aab
           make_latest: true

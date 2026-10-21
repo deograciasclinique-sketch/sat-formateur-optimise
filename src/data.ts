@@ -33,7 +33,9 @@ import {
   ClinicProfile
 } from "./types";
 
-export const DEFAULT_CLINIC_PROFILE: ClinicProfile = {
+import { DEMO, DEMO_PROFIL, DEMO_AGENTS, donneesDemo } from "./lib/edition";
+
+const PROFIL_CABINET: ClinicProfile = {
   name: "Cabinet Médical DEO-GRACIAS",
   slogan: "Excellence & Dévouement au Service de votre Santé",
   address: "Bobo-Dioulasso, Secteur 15, Rue de l'Hôpital",
@@ -152,11 +154,13 @@ export const QUALITY_CRITERIA: QualityCriterion[] = [
 ];
 
 // INITIAL SEED DATA
-const defaultStaff: Staff[] = [];
+const defaultStaff: Staff[] = DEMO ? DEMO_AGENTS : [];
 
 const defaultMedicaments: Medicament[] = [];
 
 const defaultAssureurs: Assureur[] = [];
+// Édition démo : clinique fictive (aucune donnée réelle du cabinet).
+export const DEFAULT_CLINIC_PROFILE: ClinicProfile = DEMO ? { ...PROFIL_CABINET, ...DEMO_PROFIL } as ClinicProfile : PROFIL_CABINET;
 
 const defaultAdhesions: AdhesionPatient[] = [];
 
@@ -200,6 +204,7 @@ export const seedLocalStorage = (force = false): void => {
     }
   };
 
+  if (DEMO) Object.entries(donneesDemo()).forEach(([k, v]) => checkAndSeed(k, v));
   checkAndSeed("dg_staff", defaultStaff);
   checkAndSeed("dg_pharma_stock", defaultMedicaments);
   checkAndSeed("dg_pharma_mouvements", []);

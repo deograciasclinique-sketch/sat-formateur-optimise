@@ -149,6 +149,7 @@ public class NatifPlugin extends Plugin {
         String nom = nettoyer(call.getString("name", "document"));
         String mime = call.getString("mime", "application/octet-stream");
         String data = call.getString("base64", "");
+        String dossier = nettoyer(call.getString("folder", "DEO GRACIAS"));
         try {
             byte[] bytes = Base64.decode(data, Base64.DEFAULT);
             Uri uri;
@@ -157,12 +158,12 @@ public class NatifPlugin extends Plugin {
                 ContentValues v = new ContentValues();
                 v.put(MediaStore.MediaColumns.DISPLAY_NAME, nom);
                 v.put(MediaStore.MediaColumns.MIME_TYPE, mime);
-                v.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/DEO GRACIAS");
+                v.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + dossier);
                 uri = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
                 if (uri == null) throw new Exception("dossier Téléchargements indisponible");
                 try (OutputStream out = cr.openOutputStream(uri)) { out.write(bytes); }
             } else {
-                File dir = new File(getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "DEO GRACIAS");
+                File dir = new File(getContext().getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), dossier);
                 if (!dir.exists()) dir.mkdirs();
                 File f = new File(dir, nom);
                 try (OutputStream out = new FileOutputStream(f)) { out.write(bytes); }

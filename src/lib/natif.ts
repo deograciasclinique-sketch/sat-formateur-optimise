@@ -18,6 +18,7 @@ import { Capacitor, registerPlugin, CapacitorHttp } from "@capacitor/core";
 import { App as CapApp } from "@capacitor/app";
 import { StatusBar, Style } from "@capacitor/status-bar";
 import { LocalNotifications } from "@capacitor/local-notifications";
+import { DEMO } from "./edition";
 
 export const NATIF: boolean = Capacitor.isNativePlatform();
 export const SERVEUR = "https://sat-formateur-main.vercel.app";
@@ -30,7 +31,7 @@ type Natif = {
   setSecure(o: { on: boolean }): Promise<void>;
   printHtml(o: { html: string; title?: string }): Promise<void>;
   printPage(o: { title?: string }): Promise<void>;
-  saveFile(o: { name: string; base64: string; mime: string }): Promise<{ uri: string; name: string }>;
+  saveFile(o: { name: string; base64: string; mime: string; folder?: string }): Promise<{ uri: string; name: string }>;
   openFile(o: { uri: string; mime: string }): Promise<void>;
   shareFile(o: { name: string; base64: string; mime: string; text?: string }): Promise<void>;
   shareText(o: { text: string }): Promise<void>;
@@ -38,6 +39,7 @@ type Natif = {
   dictee(o: { lang?: string; prompt?: string }): Promise<{ text: string }>;
 };
 export const DG = registerPlugin<Natif>("DGNatif");
+const DOSSIER = DEMO ? "Santé Intégré" : "DEO GRACIAS";
 
 /* ---------------- petits utilitaires ---------------- */
 function bulle(msg: string, ms = 2800) {
@@ -62,8 +64,8 @@ function mimeDe(nom: string, b?: Blob) {
 export async function enregistrerFichier(nom: string, b: Blob) {
   const mime = mimeDe(nom, b);
   try {
-    const r = await DG.saveFile({ name: nom, base64: await blobEnBase64(b), mime });
-    bulle(`✓ Enregistré dans Téléchargements › DEO GRACIAS : ${r.name}`, 3500);
+    const r = await DG.saveFile({ name: nom, base64: await blobEnBase64(b), mime, folder: DOSSIER });
+    bulle(`✓ Enregistré dans Téléchargements › ${DOSSIER} : ${r.name}`, 3500);
     if (/pdf|image/.test(mime)) DG.openFile({ uri: r.uri, mime }).catch(() => {});
   } catch (e: any) {
     bulle("Enregistrement impossible : " + (e?.message || "erreur"));
@@ -161,6 +163,9 @@ function installer() {
   // Appels aux assistants IA : vers le serveur en ligne (sans blocage CORS, par la couche native).
   window.fetch = async (input: any, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url || "";
+    if (/^\/api\//.test(url) && DEMO) {
+      return new Response(JSON.stringify({ error: "Les assistants IA sont disponibles dans la version complète.", message: "Les assistants IA sont disponibles dans la version complète." }), { status: 403, headers: { "content-type": "application/json" } });
+    }
     if (/^\/api\//.test(url)) {
       const headers: Record<string, string> = {};
       new Headers(init?.headers || {}).forEach((v, k) => { headers[k] = v; });
@@ -284,7 +289,8 @@ function installer() {
   }).catch(() => {});
 
   // Recherche de mise à jour au démarrage
-  setTimeout(() => { chercherMiseAJour().then((m) => m && bandeauMiseAJour(m)); }, 5000);
+  // (édition démo : mises à jour par Google Play)
+  if (!DEMO) setTimeout(() => { chercherMiseAJour().then((m) => m && bandeauMiseAJour(m)); }, 5000);
 }
 
 /* ---------------- version et mises à jour ---------------- */
@@ -298,7 +304,7 @@ export async function chercherMiseAJour(): Promise<{ version: string; url: strin
     if (!r.ok) return null;
     const rel = await r.json();
     const derniere = Number(String(rel.tag_name || "").split(".").pop()) || 0;
-    const asset = (rel.assets || []).find((a: any) => /\.apk$/i.test(a.name));
+    const asset = (rel.assets || []).find((a: any) => a.name === "DEO-GRACIAS-Sante.apk");
     if (asset && derniere > (Number(cur && cur.build) || 0)) return { version: rel.tag_name, url: asset.browser_download_url };
   } catch { /* hors ligne */ }
   return null;
@@ -319,9 +325,10 @@ function bandeauMiseAJour(m: { version: string; url: string }) {
 
 /* ---------------- partage de l'application ---------------- */
 const MODE_EMPLOI = "Pour installer : ouvrir le fichier, autoriser « installer des applications inconnues », puis Installer.";
-export function envoyerApk() { return DG.shareApk({ text: "📲 Application DEO GRACIAS Santé (personnel du cabinet).\n" + MODE_EMPLOI }); }
+const PRESENTATION = DEMO ? "📲 Système de Santé Intégré 2.2 — démonstration pour les cliniques." : "📲 Application DEO GRACIAS Santé (personnel du cabinet).";
+export function envoyerApk() { return DG.shareApk({ text: PRESENTATION + "\n" + MODE_EMPLOI }); }
 export function envoyerLienApk() {
-  const text = "📲 Application DEO GRACIAS Santé (personnel du cabinet).\nTélécharger pour Android : " + APK_LINK + "\n" + MODE_EMPLOI;
+  const text = DEMO ? PRESENTATION + "\nDisponible sur Google Play : « Système de Santé Intégré »." : PRESENTATION + "\nTélécharger pour Android : " + APK_LINK + "\n" + MODE_EMPLOI;
   if (NATIF) return DG.shareText({ text });
   window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
   return Promise.resolve();

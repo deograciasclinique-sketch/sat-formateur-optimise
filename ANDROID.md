@@ -20,3 +20,17 @@ Ne jamais perdre ce mot de passe : sans lui, plus de mise à jour qui s'installe
 - APK final non débogable, sans sauvegarde des données vers Google, connexions chiffrées seulement.
 
 Le site web (Vercel) et le portail patient continuent de fonctionner comme avant.
+
+## Deux éditions à partir du même code
+| | Édition **cabinet** | Édition **démo** (vente) |
+|---|---|---|
+| Nom sur le téléphone | DEO GRACIAS Santé | Santé Intégré 2.2 |
+| Identifiant Android | `bf.deogracias.sante` | `bf.santeintegre.app` |
+| Données | base du cabinet (activation + PIN) | **aucune base en ligne** : patients fictifs, gardés sur l'appareil |
+| Assistants IA | oui | non (version complète) |
+| Distribution | APK privé (`sat-formateur-main.vercel.app/apk`) | Google Play (`Sante-Integre-Demo.aab`) |
+
+- Construire la démo web : `VITE_EDITION=demo npx vite build` (le nom du cabinet est remplacé partout, voir `vite.config.ts`;
+  la configuration Firebase du cabinet n'est pas incluse). Réglages de la démo : `src/lib/edition.ts`
+  (clinique fictive, agents et PIN, patients, contact commercial du bouton « Acheter »).
+- Android : saveurs `cabinet` et `demo` (`android/app/build.gradle`), ressources propres à la démo dans `android/app/src/demo/res`.

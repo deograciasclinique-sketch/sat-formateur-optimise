@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Démonstration : données fictives, captures d'écran autorisées (présentations, Google Play) -->
+    <bool name="ecran_protege_defaut">false</bool>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Santé Intégré 2.2</string>
+    <string name="title_activity_main">Santé Intégré 2.2</string>
+    <string name="package_name">bf.santeintegre.app</string>
+    <string name="custom_url_scheme">bf.santeintegre.app</string>
+</resources>
