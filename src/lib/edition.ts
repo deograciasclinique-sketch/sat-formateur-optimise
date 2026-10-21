@@ -9,12 +9,59 @@
  *      - clinique fictive, agents et patients fictifs déjà saisis ;
  *      - assistants IA désactivés (réservés à la version complète) ;
  *      - bandeau « Version de démonstration · Acheter ».
+ *  • « commercial » (VITE_EDITION=commercial) : l'application vendue « Santé Intégré 2.2 » (Google Play).
+ *    Au premier lancement, la personne choisit :
+ *      - « Essayer la démonstration » → mode démo ci-dessus ;
+ *      - « Se connecter à ma clinique » → mode CLINIQUE (SaaS) : la clinique cliente se connecte
+ *        avec son compte ; ses données vont dans SON espace de la base commerciale
+ *        (cliniques/<id>/…), jamais visible des autres cliniques ; accès coupé par le serveur
+ *        quand l'abonnement est expiré ou suspendu (voir firestore.commercial.rules).
  *  Le nom du cabinet dans les écrans et les impressions est remplacé à la construction
- *  (voir vite.config.ts).
+ *  (voir vite.config.ts) pour les éditions demo et commercial.
  */
 import type { ClinicProfile, Staff, Medicament, Consultation, RendezVous } from "../types";
 
-export const DEMO: boolean = import.meta.env.VITE_EDITION === "demo";
+export const BUILD: "cabinet" | "demo" | "commercial" =
+  import.meta.env.VITE_EDITION === "demo" ? "demo" : import.meta.env.VITE_EDITION === "commercial" ? "commercial" : "cabinet";
+/** Éditions vendues (sans le nom du cabinet DEO-GRACIAS). */
+export const COMMERCIAL: boolean = BUILD !== "cabinet";
+
+const CLE_MODE = "si-mode";
+function lireMode(): "demo" | "clinique" | null {
+  if (BUILD === "demo") return "demo";
+  if (BUILD !== "commercial") return null;
+  try { const m = localStorage.getItem(CLE_MODE); return m === "demo" || m === "clinique" ? m : null; } catch { return null; }
+}
+/** Mode de l'application commerciale (null = pas encore choisi : écran d'accueil). */
+export const MODE = lireMode();
+export const DEMO: boolean = MODE === "demo";
+/** Mode clinique cliente (abonnement, base commerciale). */
+export const SAAS: boolean = MODE === "clinique";
+
+/** Change de mode : efface d'abord les données de l'autre mode gardées sur l'appareil. */
+export function choisirMode(m: "demo" | "clinique" | null) {
+  try {
+    Object.keys(localStorage).filter((k) => k.startsWith("dg_") || k.startsWith("deogracias") || k.startsWith("si-")).forEach((k) => localStorage.removeItem(k));
+    if (m) localStorage.setItem(CLE_MODE, m);
+  } catch { /* stockage indisponible */ }
+  location.reload();
+}
+
+/**
+ * Base de données COMMERCIALE (projet Firebase « sat formateur commercial ») : les cliniques clientes.
+ * À remplir avec la configuration web du projet (console Firebase → Paramètres du projet → Vos applications).
+ */
+export const CONFIG_COMMERCIALE: Record<string, string> | null = {
+  apiKey: "AIzaSyCNhKIJZaUt1gSjVXtdhtCJk-blfFDb8QM",
+  authDomain: "sat-formateur-commercial.firebaseapp.com",
+  projectId: "sat-formateur-commercial",
+  storageBucket: "sat-formateur-commercial.firebasestorage.app",
+  messagingSenderId: "924791333676",
+  appId: "1:924791333676:web:3dd8b614e54a0d53560289",
+};
+
+/** Administrateur du SaaS : seul cet e-mail ouvre la console de gestion des cliniques. */
+export const ADMIN_EMAILS: string[] = ["deograciasclinique@gmail.com"];
 export const NOM_PRODUIT = "Système de Santé Intégré 2.2";
 
 /** Contact commercial affiché dans la démo (bouton « Acheter la version complète »). */
@@ -124,6 +171,14 @@ export function reinitialiserDemo() {
     Object.keys(localStorage).filter((k) => k.startsWith("dg_") || k.startsWith("deogracias")).forEach((k) => localStorage.removeItem(k));
   } catch { /* stockage indisponible */ }
   location.reload();
+}
+
+/** Profil de départ d'une clinique cliente (son nom vient de son compte). */
+export function profilClinique(nom: string): Partial<ClinicProfile> {
+  return {
+    ...DEMO_PROFIL, name: nom || "Ma clinique", slogan: "", address: "", phone: "", email: "", nif: "", rccm: "",
+    ownerName: "", capital: "", bylawsText: "",
+  };
 }
 
 export function lienAchat(): string {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Smartphone, RefreshCw, Send, Share2, ShieldCheck, Download } from "lucide-react";
-import { DEMO, NOM_PRODUIT } from "../lib/edition";
+import { COMMERCIAL as DEMO, NOM_PRODUIT } from "../lib/edition";
 import { NATIF, APK_LINK, versionInstallee, chercherMiseAJour, envoyerApk, envoyerLienApk, ecranProtege, protegerEcran, DG } from "../lib/natif";
 
 /** Paramètres → Application Android : version, mise à jour, envoi de l'APK, confidentialité de l'écran. */

@@ -12,6 +12,8 @@
 import React, { useEffect, useState } from "react";
 import { activateDevice, onDeviceActivationChange } from "../lib/firebase";
 import { Loader2, ShieldCheck, Lock } from "lucide-react";
+import { SAAS, choisirMode } from "../lib/edition";
+const LIEU = SAAS ? "de la clinique" : "du cabinet";
 
 export default function DeviceActivationGate({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<"checking" | "activated" | "needs_activation">("checking");
@@ -34,7 +36,7 @@ export default function DeviceActivationGate({ children }: { children: React.Rea
     e.preventDefault();
     setError(null);
     if (!email.trim() || !password) {
-      setError("Saisissez l'e-mail et le mot de passe du cabinet.");
+      setError(`Saisissez l'e-mail et le mot de passe ${LIEU}.`);
       return;
     }
     setBusy(true);
@@ -66,7 +68,7 @@ export default function DeviceActivationGate({ children }: { children: React.Rea
           <img src="/app-icon-192-v2.png" alt="" className="w-16 h-16 mx-auto rounded-xl" />
           <h1 className="text-base font-serif font-bold text-stone-900">Activation de cet appareil</h1>
           <p className="text-xs text-stone-500">
-            À faire une seule fois sur chaque appareil du cabinet. Ensuite, chaque agent se connecte avec son code PIN habituel.
+            À faire une seule fois sur chaque appareil {LIEU}. Ensuite, chaque agent se connecte avec son code PIN habituel.
           </p>
         </div>
 
@@ -75,12 +77,12 @@ export default function DeviceActivationGate({ children }: { children: React.Rea
         )}
 
         <div className="space-y-1">
-          <label className="text-xs font-bold text-stone-600">E-mail du cabinet</label>
+          <label className="text-xs font-bold text-stone-600">E-mail {LIEU}</label>
           <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)}
             className="w-full p-3 bg-stone-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
         </div>
         <div className="space-y-1">
-          <label className="text-xs font-bold text-stone-600">Mot de passe du cabinet</label>
+          <label className="text-xs font-bold text-stone-600">Mot de passe {LIEU}</label>
           <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)}
             className="w-full p-3 bg-stone-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
         </div>
@@ -92,8 +94,9 @@ export default function DeviceActivationGate({ children }: { children: React.Rea
         </button>
 
         <p className="text-[11px] text-stone-400 text-center flex items-center justify-center gap-1">
-          <Lock className="w-3 h-3" /> Accès réservé au personnel du cabinet DEO-GRACIAS
+          <Lock className="w-3 h-3" /> {SAAS ? "Accès réservé aux cliniques abonnées" : "Accès réservé au personnel du cabinet DEO-GRACIAS"}
         </p>
+        {SAAS && <button type="button" onClick={() => choisirMode(null)} className="w-full text-xs font-bold text-stone-500 py-1 cursor-pointer">← Retour (démonstration)</button>}
       </form>
     </div>
   );

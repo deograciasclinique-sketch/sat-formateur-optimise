@@ -33,7 +33,7 @@ import {
   ClinicProfile
 } from "./types";
 
-import { DEMO, DEMO_PROFIL, DEMO_AGENTS, donneesDemo } from "./lib/edition";
+import { DEMO, SAAS, DEMO_PROFIL, DEMO_AGENTS, donneesDemo, profilClinique } from "./lib/edition";
 
 const PROFIL_CABINET: ClinicProfile = {
   name: "Cabinet Médical DEO-GRACIAS",
@@ -160,7 +160,7 @@ const defaultMedicaments: Medicament[] = [];
 
 const defaultAssureurs: Assureur[] = [];
 // Édition démo : clinique fictive (aucune donnée réelle du cabinet).
-export const DEFAULT_CLINIC_PROFILE: ClinicProfile = DEMO ? { ...PROFIL_CABINET, ...DEMO_PROFIL } as ClinicProfile : PROFIL_CABINET;
+export const DEFAULT_CLINIC_PROFILE: ClinicProfile = DEMO ? { ...PROFIL_CABINET, ...DEMO_PROFIL } as ClinicProfile : SAAS ? { ...PROFIL_CABINET, ...DEMO_PROFIL, ...profilClinique("") } as ClinicProfile : PROFIL_CABINET;
 
 const defaultAdhesions: AdhesionPatient[] = [];
 

@@ -18,7 +18,7 @@ import { Capacitor, registerPlugin, CapacitorHttp } from "@capacitor/core";
 import { App as CapApp } from "@capacitor/app";
 import { StatusBar, Style } from "@capacitor/status-bar";
 import { LocalNotifications } from "@capacitor/local-notifications";
-import { DEMO } from "./edition";
+import { DEMO, COMMERCIAL } from "./edition";
 
 export const NATIF: boolean = Capacitor.isNativePlatform();
 export const SERVEUR = "https://sat-formateur-main.vercel.app";
@@ -39,7 +39,7 @@ type Natif = {
   dictee(o: { lang?: string; prompt?: string }): Promise<{ text: string }>;
 };
 export const DG = registerPlugin<Natif>("DGNatif");
-const DOSSIER = DEMO ? "Santé Intégré" : "DEO GRACIAS";
+const DOSSIER = COMMERCIAL ? "Santé Intégré" : "DEO GRACIAS";
 
 /* ---------------- petits utilitaires ---------------- */
 function bulle(msg: string, ms = 2800) {
@@ -163,8 +163,8 @@ function installer() {
   // Appels aux assistants IA : vers le serveur en ligne (sans blocage CORS, par la couche native).
   window.fetch = async (input: any, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url || "";
-    if (/^\/api\//.test(url) && DEMO) {
-      return new Response(JSON.stringify({ error: "Les assistants IA sont disponibles dans la version complète.", message: "Les assistants IA sont disponibles dans la version complète." }), { status: 403, headers: { "content-type": "application/json" } });
+    if (/^\/api\//.test(url) && COMMERCIAL) {
+      return new Response(JSON.stringify({ error: DEMO ? "Les assistants IA sont disponibles dans la version complète." : "Les assistants IA arrivent prochainement dans votre abonnement.", message: DEMO ? "Les assistants IA sont disponibles dans la version complète." : "Les assistants IA arrivent prochainement dans votre abonnement." }), { status: 403, headers: { "content-type": "application/json" } });
     }
     if (/^\/api\//.test(url)) {
       const headers: Record<string, string> = {};
@@ -290,7 +290,7 @@ function installer() {
 
   // Recherche de mise à jour au démarrage
   // (édition démo : mises à jour par Google Play)
-  if (!DEMO) setTimeout(() => { chercherMiseAJour().then((m) => m && bandeauMiseAJour(m)); }, 5000);
+  if (!COMMERCIAL) setTimeout(() => { chercherMiseAJour().then((m) => m && bandeauMiseAJour(m)); }, 5000);
 }
 
 /* ---------------- version et mises à jour ---------------- */
@@ -325,10 +325,10 @@ function bandeauMiseAJour(m: { version: string; url: string }) {
 
 /* ---------------- partage de l'application ---------------- */
 const MODE_EMPLOI = "Pour installer : ouvrir le fichier, autoriser « installer des applications inconnues », puis Installer.";
-const PRESENTATION = DEMO ? "📲 Système de Santé Intégré 2.2 — démonstration pour les cliniques." : "📲 Application DEO GRACIAS Santé (personnel du cabinet).";
+const PRESENTATION = COMMERCIAL ? "📲 Système de Santé Intégré 2.2 — démonstration pour les cliniques." : "📲 Application DEO GRACIAS Santé (personnel du cabinet).";
 export function envoyerApk() { return DG.shareApk({ text: PRESENTATION + "\n" + MODE_EMPLOI }); }
 export function envoyerLienApk() {
-  const text = DEMO ? PRESENTATION + "\nDisponible sur Google Play : « Système de Santé Intégré »." : PRESENTATION + "\nTélécharger pour Android : " + APK_LINK + "\n" + MODE_EMPLOI;
+  const text = COMMERCIAL ? PRESENTATION + "\nDisponible sur Google Play : « Système de Santé Intégré »." : PRESENTATION + "\nTélécharger pour Android : " + APK_LINK + "\n" + MODE_EMPLOI;
   if (NATIF) return DG.shareText({ text });
   window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
   return Promise.resolve();

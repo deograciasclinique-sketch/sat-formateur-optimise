@@ -1,7 +1,9 @@
 import "./domGuard";
 // Doit être chargé en premier : adapte l'application au téléphone quand elle tourne dans l'APK Android.
 import { NATIF } from "./lib/natif";
-import { DEMO } from "./lib/edition";
+import { DEMO, SAAS, COMMERCIAL, MODE, CONFIG_COMMERCIALE } from "./lib/edition";
+import ChoixMode from "./components/ChoixMode";
+import AbonnementGate from "./components/AbonnementGate";
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
@@ -52,6 +54,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {/* Le portail patient public n'a pas besoin d'activation ; l'appli du
         personnel, si (voir DeviceActivationGate). */}
-    {isPatientPortal || DEMO ? <App /> : <DeviceActivationGate><App /></DeviceActivationGate>}
+    {COMMERCIAL && (MODE === null || (SAAS && !CONFIG_COMMERCIALE)) ? <ChoixMode />
+      : isPatientPortal || DEMO ? <App />
+      : SAAS ? <DeviceActivationGate><AbonnementGate><App /></AbonnementGate></DeviceActivationGate>
+      : <DeviceActivationGate><App /></DeviceActivationGate>}
   </StrictMode>,
 );

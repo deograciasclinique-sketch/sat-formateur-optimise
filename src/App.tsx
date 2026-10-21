@@ -87,7 +87,7 @@ import TabDashboardGlobal from "./components/TabDashboardGlobal";
 import TabSettings from "./components/TabSettings";
 import TabPlanifFamiliale from "./components/TabPlanifFamiliale";
 import ResponsableCodeSetup from "./components/ResponsableCodeSetup";
-import { DEMO, DEMO_AGENTS, NOM_PRODUIT, lienAchat, reinitialiserDemo } from "./lib/edition";
+import { DEMO, DEMO_AGENTS, NOM_PRODUIT, lienAchat, reinitialiserDemo, COMMERCIAL, BUILD, choisirMode } from "./lib/edition";
 import {
   getSessionPin, setSessionPin, clearSessionPin, recordActivity, getLastActivity,
   isResponsableCode, hasCustomResponsableCode, startResponsableCodeSync
@@ -2331,6 +2331,7 @@ export default function App() {
               <span className="flex-1 min-w-[180px]">Données fictives, gardées sur cet appareil. Assistants IA et synchronisation entre appareils : version complète.</span>
               <button type="button" onClick={() => { if (confirm("Effacer toutes les saisies et revenir aux patients de démonstration ?")) reinitialiserDemo(); }} className="rounded-lg border border-amber-300 dark:border-amber-800 px-2.5 py-1.5 font-bold cursor-pointer bg-white/70 dark:bg-stone-900">Réinitialiser</button>
               <a href={lienAchat()} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-emerald-600 px-3 py-1.5 font-bold text-white no-underline">Acheter</a>
+              {COMMERCIAL && BUILD === "commercial" && <button type="button" onClick={() => choisirMode(null)} className="rounded-lg border border-amber-300 dark:border-amber-800 px-2.5 py-1.5 font-bold cursor-pointer bg-white/70 dark:bg-stone-900">Quitter la démo</button>}
             </div>
           )}
           {tlohRappel && allowedTabs.includes("thlo") && activeTab !== "thlo" && (

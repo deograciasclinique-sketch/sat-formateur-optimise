@@ -1,0 +1,47 @@
+rules_version = '2';
+// Règles du projet Firebase « sat formateur commercial » (SaaS Santé Intégré 2.2).
+// À coller dans Firebase → Firestore Database → Règles, puis « Publier ».
+// Administrateur : deograciasclinique@gmail.com (modifiable ici et dans src/lib/edition.ts).
+// Créez d'abord VOUS-MÊME ce compte (Authentication → Ajouter un utilisateur) pour que personne d'autre ne le prenne.
+//
+//  • comptes/{email}         : abonnement de chaque clinique (lu par la clinique, écrit par l'admin seul)
+//  • cliniques_index/{id}    : liste des cliniques pour la console (admin seul)
+//  • cliniques/{id}/**       : données médicales de la clinique — UNIQUEMENT son propre compte,
+//                              et seulement si l'abonnement est actif et non expiré.
+//                              L'administrateur n'y a PAS accès.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function connecte() { return request.auth != null && request.auth.token.email != null; }
+    function monEmail() { return request.auth.token.email.lower(); }
+    function estAdmin() {
+      return connecte() && monEmail() in ['deograciasclinique@gmail.com'];
+    }
+    function monCompte() { return get(/databases/$(database)/documents/comptes/$(monEmail())).data; }
+    function abonne(c) {
+      return connecte()
+        && exists(/databases/$(database)/documents/comptes/$(monEmail()))
+        && monCompte().clinique == c
+        && monCompte().actif == true
+        && monCompte().finAbonnement > request.time;
+    }
+
+    match /comptes/{email} {
+      allow read: if connecte() && (monEmail() == email || estAdmin());
+      allow write: if estAdmin();
+    }
+
+    match /cliniques_index/{id} {
+      allow read, write: if estAdmin();
+    }
+
+    match /cliniques/{c}/{chemin=**} {
+      allow read, write: if abonne(c);
+    }
+
+    // Tout le reste est fermé.
+    match /{autre=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -6,7 +6,8 @@ import {defineConfig} from 'vite';
 
 // Édition démo (VITE_EDITION=demo) : le nom du cabinet est remplacé partout dans les écrans et
 // les impressions par une clinique fictive. L'édition « cabinet » n'est pas modifiée.
-const DEMO = process.env.VITE_EDITION === 'demo';
+// L'édition commerciale (VITE_EDITION=commercial : démo + espace clinique) est nettoyée de la même façon.
+const DEMO = process.env.VITE_EDITION === 'demo' || process.env.VITE_EDITION === 'commercial';
 const REMPLACEMENTS: [RegExp, string][] = [
   [/Cabinet Privé de Soins DEO[ -]GRACIAS/g, 'Clinique Démo Santé'],
   [/Cabinet Médical (DEO[ -]GRACIAS|Deo[ -]Gracias)/g, 'Clinique Démo Santé'],
@@ -19,6 +20,8 @@ const REMPLACEMENTS: [RegExp, string][] = [
   [/Dr\. Deogracias/g, 'Dr. Démo'],
   [/deograciasclinique@gmail\.com/g, 'contact@clinique-demo.bf'],
   [/acheteur@deogracias\.com/g, 'acheteur@clinique.bf'],
+  [/cabinet-deogracias-/g, 'clinique-'],
+  [/deogracias_sauvegarde_/g, 'sauvegarde_'],
   [/DEO[ -]GRACIAS/g, 'DÉMO'],
   [/Deo[ -]Gracias/g, 'Démo'],
 ];
@@ -38,14 +41,14 @@ const editionDemo = {
       const p = path.resolve(__dirname, 'dist', f);
       if (!fs.existsSync(p)) continue;
       let t = fs.readFileSync(p, 'utf8');
-      if (f === 'manifest.json') t = t.replace(/"name":\s*"[^"]*"/, '"name": "Système de Santé Intégré 2.2 — Démo"').replace(/"short_name":\s*"[^"]*"/, '"short_name": "Santé Intégré"');
+      if (f === 'manifest.json') t = t.replace(/"name":\s*"[^"]*"/, '"name": "Système de Santé Intégré 2.2"').replace(/"short_name":\s*"[^"]*"/, '"short_name": "Santé Intégré"');
       for (const [re, rep] of REMPLACEMENTS) t = t.replace(re, rep);
       fs.writeFileSync(p, t);
     }
   },
   transformIndexHtml(html: string) {
     if (!DEMO) return html;
-    let out = html.replace(/<title>[^<]*<\/title>/, '<title>Système de Santé Intégré 2.2 — Démo</title>');
+    let out = html.replace(/<title>[^<]*<\/title>/, '<title>Système de Santé Intégré 2.2</title>');
     for (const [re, rep] of REMPLACEMENTS) out = out.replace(re, rep);
     return out;
   },

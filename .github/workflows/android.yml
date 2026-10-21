@@ -67,7 +67,7 @@ jobs:
 
       - name: Édition démo (Santé Intégré 2.2 — Google Play)
         env:
-          VITE_EDITION: demo
+          VITE_EDITION: commercial
         run: |
           npx vite build --emptyOutDir
           npx cap copy android
