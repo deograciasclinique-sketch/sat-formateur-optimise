@@ -4,10 +4,11 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import AntecedentsEditeur, { ANTECEDENTS_VIDES, antecedentsRenseignes, resumeAntecedents } from "./AntecedentsPatient";
 import { jsPDF } from "jspdf";
 import { logActivity } from "../lib/activityLogger";
 import { interpreterDengue, dengueComplet } from "../modules/thlo/tdr";
-import { Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
+import { AntecedentsPatient, Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
@@ -172,6 +173,19 @@ export default function TabConsultation({
   // Clinical states
   const [consPlainte, setConsPlainte] = useState("");
   const [consExamen, setConsExamen] = useState("");
+  const [consAntecedents, setConsAntecedents] = useState<AntecedentsPatient>(ANTECEDENTS_VIDES);
+  // Dernière visite du même patient (nom ou téléphone) où les antécédents ont été notés.
+  const antecedentsPrecedents = useMemo(() => {
+    const nom = consPatient.trim().toLowerCase().replace(/\s+/g, " ");
+    const tel = consContact.replace(/\D/g, "");
+    if (nom.length < 3 && tel.length < 8) return null;
+    const c = [...consultations]
+      .filter((x) => x.antecedentsPatient && x.id !== pendingSource?.id && (
+        (nom.length >= 3 && x.patient.trim().toLowerCase().replace(/\s+/g, " ") === nom) ||
+        (tel.length >= 8 && (x.contact || "").replace(/\D/g, "") === tel)))
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+    return c ? { date: c.date, antecedents: c.antecedentsPatient! } : null;
+  }, [consultations, consPatient, consContact, pendingSource]);
   const [consDiagnostic, setConsDiagnostic] = useState("");
   // Maladie à Déclaration Obligatoire détectée via l'Assistant Épidémiologique
   // (registre MDO Burkina Faso / SIMR), en attente de génération du bordereau.
@@ -310,6 +324,9 @@ export default function TabConsultation({
   );
 
   const handlePrescrireExamen = () => {
+    if (!antecedentsRenseignes(consAntecedents) && !confirm("Les antécédents du patient ne sont pas encore renseignés.\nIls aident à mieux orienter le diagnostic avant les examens biologiques.\n\nPrescrire quand même ?")) {
+      return;
+    }
     if (!consPatient) {
       alert("Veuillez d'abord renseigner le nom du patient avant de prescrire un examen.");
       return;
@@ -483,7 +500,7 @@ export default function TabConsultation({
             pouls: vPouls,
             glycemie: vGlycemie
           },
-          notes: consExamen,
+          notes: [resumeAntecedents(consAntecedents) && `Antécédents :\n${resumeAntecedents(consAntecedents)}`, consExamen].filter(Boolean).join("\n\n"),
           age: consAge,
           sexe: consSexe
         }),
@@ -672,6 +689,7 @@ export default function TabConsultation({
     setVGlycemie("");
     setConsPlainte("");
     setConsExamen("");
+    setConsAntecedents(ANTECEDENTS_VIDES);
     setConsDiagnostic("");
     setDetectedMDO(null);
     setConsDiagnosticFinal("");
@@ -713,6 +731,7 @@ export default function TabConsultation({
     setVGlycemie(c.vitals?.glycemie ? String(c.vitals.glycemie) : "");
     setConsPlainte(c.plainte || "");
     setConsExamen(c.examenPhysique || "");
+    setConsAntecedents(c.antecedentsPatient ? { ...ANTECEDENTS_VIDES, ...c.antecedentsPatient } : ANTECEDENTS_VIDES);
     setConsDiagnostic(c.diagnostic || "");
     setConsDiagnosticFinal(c.diagnosticFinal || "");
     setConsCAT(c.conduiteATenir || []);
@@ -888,6 +907,7 @@ export default function TabConsultation({
         imc: savedImc
       },
       plainte: consPlainte.trim(),
+      antecedentsPatient: antecedentsRenseignes(consAntecedents) ? consAntecedents : undefined,
       examenPhysique: consExamen.trim(),
       diagnostic: consDiagnostic.trim(),
       diagnosticFinal: consDiagnosticFinal.trim() || undefined,
@@ -1402,6 +1422,7 @@ export default function TabConsultation({
     // Clinical Details
     drawSectionHeader("3. Description Clinique & Examen");
     drawTextBlock("MOTIF DE CONSULTATION / PLAINTES :", cons.plainte);
+    if (antecedentsRenseignes(cons.antecedentsPatient)) drawTextBlock("ANTÉCÉDENTS DU PATIENT :", resumeAntecedents(cons.antecedentsPatient));
     drawTextBlock("EXAMEN PHYSIQUE CLINIQUE :", cons.examenPhysique || "Non spécifié");
 
     // Conclusions
@@ -2106,6 +2127,14 @@ export default function TabConsultation({
                 className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none h-16 resize-none"
               />
             </div>
+
+            <AntecedentsEditeur
+              valeur={consAntecedents}
+              onChange={setConsAntecedents}
+              feminin={consSexe === "Féminin"}
+              precedent={antecedentsPrecedents}
+              onReprendre={() => antecedentsPrecedents && setConsAntecedents({ ...ANTECEDENTS_VIDES, ...antecedentsPrecedents.antecedents })}
+            />
 
             <div>
               <div className="flex items-center justify-between mb-1">
@@ -3269,6 +3298,14 @@ export default function TabConsultation({
 
                 {/* Clinical Notes Section */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {antecedentsRenseignes(selectedConsultation.antecedentsPatient) && (
+                    <div className="md:col-span-2">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-violet-800 border-b pb-1 mb-2">Antécédents du patient</h3>
+                      <p className={`text-xs p-3 rounded-xl border whitespace-pre-line ${theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-violet-50 border-violet-100 text-stone-700"}`}>
+                        {resumeAntecedents(selectedConsultation.antecedentsPatient)}
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800 border-b pb-1 mb-2">3. Motif de Consultation / Plaintes</h3>
                     {isEditingDetail ? (

@@ -33,6 +33,20 @@ export interface Incident {
   mesures: string;
 }
 
+/** Antécédents recueillis à l'interrogatoire (consultation générale). */
+export interface AntecedentsPatient {
+  medicaux: string[];
+  medicauxAutres: string;
+  chirurgicaux: string;
+  gynecoObstetricaux: string;
+  familiaux: string[];
+  familiauxAutres: string;
+  allergies: string;
+  traitements: string;
+  modeDeVie: string[];
+  vaccination: string;
+}
+
 export interface Staff {
   id: string;
   nom: string;
@@ -776,6 +790,7 @@ export interface Consultation {
     imc?: number;
   };
   plainte: string;
+  antecedentsPatient?: AntecedentsPatient;
   examenPhysique?: string;
   diagnostic: string;
   diagnosticFinal?: string;
