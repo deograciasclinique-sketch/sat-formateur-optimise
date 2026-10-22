@@ -166,7 +166,7 @@ export default function TabFacturation({
     };
     onUpdateFactures([newFacture, ...factures]);
     onUpdateConsultations(
-      consultations.map((c) => (c.id === cons.id ? { ...c, statut: "Attente exécution actes" } : c))
+      consultations.map((c) => (c.id === cons.id ? { ...c, statut: c.soinsExecutes ? "Terminée" : "Attente exécution actes" } : c))
     );
   };
   // Load dynamic clinic profile from LocalStorage safely

@@ -820,6 +820,9 @@ export interface Consultation {
   referenceService?: string;
   // Consignes du médecin pour la salle infirmière (décision « Renvoi en salle infirmière »).
   consignesInfirmier?: string;
+  // Soins déjà exécutés en salle infirmière alors que les actes restaient à payer (urgence) :
+  // le dossier reste dans la file de paiement du secrétariat, puis passe en « Terminée ».
+  soinsExecutes?: boolean;
   // Renseigné automatiquement quand la décision crée un dossier lié
   // (hospitalisation ou urgences), pour tracer le lien entre les deux dossiers.
   linkedHospitalisationId?: string;

@@ -89,7 +89,7 @@ export default function TabInfirmier({
   const isDark = theme === "dark";
 
   // --- Rendez-vous et dossiers patients ---------------------------------
-  const [vueInf, setVueInf] = useState<"attente" | "soins" | "rdv" | "dossiers">("attente");
+  const [vueInf, setVueInf] = useState<"attente" | "decisions" | "soins" | "rdv" | "dossiers">("attente");
   // Formulaire « Enregistrer un soin » : pré-rempli éventuellement, et
   // consultation à clôturer une fois le soin noté (depuis « Soins à exécuter »).
   const [formSoin, setFormSoin] = useState<null | { pre: PreRemplissageSoin | null; terminerConsultationId?: string }>(null);
@@ -250,14 +250,22 @@ export default function TabInfirmier({
   // Dossiers dont les actes prescrits ont été payés au secrétariat : les
   // soins à faire dans la salle infirmier (hors examens labo, gérés dans
   // l'onglet Laboratoire) sont exécutés ici.
+  // + patients renvoyés en salle infirmière par le médecin, visibles TOUT DE SUITE
+  // (même si les actes ne sont pas encore payés au secrétariat).
   const actesAExecuter = useMemo(
-    () => consultations.filter((c) => c.statut === "Attente exécution actes"),
+    () => consultations
+      .filter((c) => !c.soinsExecutes && (c.statut === "Attente exécution actes" || (c.statut === "Attente paiement actes" && c.decision === "Renvoi en salle infirmière")))
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")),
     [consultations]
   );
+  const [decisionOuverte, setDecisionOuverte] = useState<string | null>(null);
 
+  // Fin des soins : « Terminée », sauf si les actes restent à payer (le dossier reste alors au secrétariat).
+  const terminerApresSoins = (cons: Consultation): Consultation =>
+    cons.statut === "Attente paiement actes" ? { ...cons, soinsExecutes: true } : { ...cons, statut: "Terminée" };
   const handleMarquerSoinsExecutes = (c: Consultation) => {
     onUpdateConsultations(
-      consultations.map((cons) => (cons.id === c.id ? { ...cons, statut: "Terminée" } : cons))
+      consultations.map((cons) => (cons.id === c.id ? terminerApresSoins(cons) : cons))
     );
   };
 
@@ -298,7 +306,7 @@ export default function TabInfirmier({
     }
     if (formSoin?.terminerConsultationId) {
       const id = formSoin.terminerConsultationId;
-      onUpdateConsultations(consultations.map((cons) => (cons.id === id ? { ...cons, statut: "Terminée" } : cons)));
+      onUpdateConsultations(consultations.map((cons) => (cons.id === id ? terminerApresSoins(cons) : cons)));
     }
     setFormSoin(null);
   };
@@ -563,6 +571,7 @@ export default function TabInfirmier({
 
   const ongletsInf: [typeof vueInf, string, React.ReactNode][] = [
     ["attente", `Patients en attente (${enAttente.length})`, <Activity key="a" className="w-4 h-4" />],
+    ["decisions", `Décisions du médecin (${actesAExecuter.length})`, <Stethoscope key="m" className="w-4 h-4" />],
     ["soins", (() => { const n = prisesAFaireAujourdhui(plansSoins, soins); return n ? `Salle des soins (${n} à faire)` : "Salle des soins"; })(), <Syringe key="s" className="w-4 h-4" />],
     ["rdv", `Rendez-vous du jour (${rdvsDuJour.length})`, <CalendarDays key="r" className="w-4 h-4" />],
     ["dossiers", "Dossiers patients", <FolderOpen key="d" className="w-4 h-4" />],
@@ -601,6 +610,113 @@ export default function TabInfirmier({
               }
             }}
           />
+        </div>
+      )}
+
+      {vueInf === "decisions" && (
+        <div className="p-4 space-y-3 max-w-5xl">
+          <h2 className="text-lg font-bold flex items-center gap-2">
+            <Stethoscope className="w-5 h-5" /> Patients renvoyés par le médecin — décisions à exécuter
+          </h2>
+          {actesAExecuter.length === 0 && (
+            <p className={`text-sm ${isDark ? "text-gray-500" : "text-gray-400"}`}>Aucun patient renvoyé en salle infirmière pour le moment.</p>
+          )}
+          {actesAExecuter.map((c) => {
+            const nonPaye = c.statut === "Attente paiement actes";
+            const medecin = staff.find((x) => x.id === c.medecinId)?.nom;
+            const ouvert = decisionOuverte === c.id;
+            const v = c.vitals;
+            const carte = isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white";
+            const bloc = isDark ? "bg-gray-900/60 border-gray-700" : "bg-gray-50 border-gray-200";
+            return (
+              <div key={c.id} className={`rounded-lg border ${carte} ${nonPaye ? "border-l-4 border-l-amber-500" : "border-l-4 border-l-emerald-500"}`}>
+                <div className="flex flex-wrap items-start justify-between gap-3 p-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold">
+                      {c.codePatient && <span className="font-mono text-emerald-600 mr-1.5">{c.codePatient}</span>}{c.patient}
+                      <span className={`ml-2 text-xs font-normal ${isDark ? "text-gray-400" : "text-gray-500"}`}>{c.age ? `${c.age} ans` : ""}{c.sexe ? ` · ${c.sexe}` : ""}{c.contact ? ` · 📞 ${c.contact}` : ""}</span>
+                    </div>
+                    <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                      Décision : <b>{c.decision || "Soins prescrits"}</b>{medecin ? ` · par ${medecin}` : ""}{c.telephoneMedecin ? ` (📞 ${c.telephoneMedecin})` : ""}
+                    </div>
+                    <span className={`inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded ${nonPaye ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
+                      {nonPaye ? "⚠ Actes pas encore payés au secrétariat" : "✓ Prêt à exécuter"}
+                    </span>
+                    {c.consignesInfirmier && (
+                      <div className="mt-2 text-sm rounded border border-amber-300 bg-amber-50 text-amber-900 px-2 py-1.5">
+                        <b>Consignes du médecin :</b> {c.consignesInfirmier}
+                      </div>
+                    )}
+                    {catASoinsInfirmiers(c.conduiteATenir) && (
+                      <div className="mt-1 text-emerald-700 dark:text-emerald-400">
+                        <ConduiteATenirListe items={c.conduiteATenir} seulementType={TYPES_INFIRMIER} compact />
+                      </div>
+                    )}
+                    {(c.ordonnance || []).length > 0 && (
+                      <div className="mt-1 text-xs">
+                        <b>Ordonnance à exécuter :</b>
+                        <ul className="list-disc pl-5">
+                          {c.ordonnance.map((l) => <li key={l.id}>{l.medicamentNom}{l.posologie ? ` — ${l.posologie}` : ""}{l.duree ? ` (${l.duree})` : ""}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-col items-end gap-1 flex-none">
+                    <button
+                      onClick={() => {
+                        if (nonPaye && !window.confirm(`Les actes de ${c.patient} ne sont pas encore payés au secrétariat.\nExécuter quand même (urgence) ?`)) return;
+                        ouvrirSoinDepuisConsultation(c);
+                      }}
+                      className="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm font-medium flex items-center gap-1.5 hover:bg-emerald-700"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Exécuter et noter les soins
+                    </button>
+                    <button onClick={() => setDecisionOuverte(ouvert ? null : c.id)} className="text-xs font-semibold text-blue-600 underline">
+                      {ouvert ? "Masquer le dossier" : "Voir le dossier complet"}
+                    </button>
+                    <button
+                      onClick={() => { if (window.confirm(`Terminer le dossier de ${c.patient} sans noter le soin dans la Salle des soins ?`)) handleMarquerSoinsExecutes(c); }}
+                      className={`text-xs underline ${isDark ? "text-gray-400" : "text-gray-500"}`}
+                    >
+                      Terminer sans noter
+                    </button>
+                  </div>
+                </div>
+                {ouvert && (
+                  <div className={`border-t ${isDark ? "border-gray-700" : "border-gray-200"} p-3 grid sm:grid-cols-2 gap-2 text-xs`}>
+                    <div className={`rounded border p-2 ${bloc}`}>
+                      <b>Constantes</b>
+                      <div>T° {v?.temperature || "—"} °C · TA {v?.tensionArterielle || "—"} · Pouls {v?.pouls || "—"} · Poids {v?.poids || "—"} kg{v?.glycemie ? ` · Glycémie ${v.glycemie} g/L` : ""}</div>
+                    </div>
+                    <div className={`rounded border p-2 ${bloc}`}>
+                      <b>Motif / plaintes</b>
+                      <div>{c.plainte || "—"}</div>
+                    </div>
+                    <div className={`rounded border p-2 ${bloc}`}>
+                      <b>Diagnostic</b>
+                      <div>{c.diagnosticFinal || c.diagnostic || "—"}</div>
+                    </div>
+                    <div className={`rounded border p-2 ${bloc}`}>
+                      <b>Examen clinique</b>
+                      <div>{c.examenPhysique || "—"}</div>
+                    </div>
+                    {c.antecedentsPatient && (
+                      <div className={`rounded border p-2 sm:col-span-2 ${bloc}`}>
+                        <b>Antécédents / allergies</b>
+                        <div>{[c.antecedentsPatient.allergies && `Allergies : ${c.antecedentsPatient.allergies}`, (c.antecedentsPatient.medicaux || []).join(", "), c.antecedentsPatient.traitements && `Traitements : ${c.antecedentsPatient.traitements}`].filter(Boolean).join(" · ") || "—"}</div>
+                      </div>
+                    )}
+                    {(c.conduiteATenir || []).length > 0 && (
+                      <div className={`rounded border p-2 sm:col-span-2 ${bloc}`}>
+                        <b>Conduite à tenir complète</b>
+                        <ConduiteATenirListe items={c.conduiteATenir} compact />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -1170,64 +1286,6 @@ export default function TabInfirmier({
         )}
       </div>
 
-      {/* Actes payés en attente d'exécution (soins prescrits par le médecin,
-          hors examens labo qui se gèrent dans l'onglet Laboratoire). */}
-      {actesAExecuter.length > 0 && (
-        <div className="md:col-span-3 space-y-2 pt-4 border-t border-dashed">
-          <h2 className="text-lg font-bold flex items-center gap-2">
-            <Syringe className="w-5 h-5" /> Soins à exécuter (décisions du médecin)
-          </h2>
-          <div className="space-y-2">
-            {actesAExecuter.map((c) => (
-              <div
-                key={c.id}
-                className={`flex items-center justify-between px-3 py-2 rounded border ${
-                  isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"
-                }`}
-              >
-                <div>
-                  <div className="font-medium">{c.codePatient && <span className="font-mono text-emerald-600 mr-1.5">{c.codePatient}</span>}{c.patient}</div>
-                  <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
-                    {(c.ordonnance || []).length > 0
-                      ? `${c.ordonnance.length} ligne(s) d'ordonnance à exécuter`
-                      : catASoinsInfirmiers(c.conduiteATenir)
-                      ? "Injectables / soins prescrits dans la conduite à tenir"
-                      : c.consignesInfirmier
-                      ? "Renvoyé par le médecin pour exécution"
-                      : "Aucun soin à exécuter (voir Laboratoire pour les examens)"}
-                    {c.contact ? ` · 📞 ${c.contact}` : ""}
-                  </div>
-                  {c.decision === "Renvoi en salle infirmière" && (
-                    <div className="mt-1 text-xs rounded border border-amber-300 bg-amber-50 text-amber-900 px-2 py-1">
-                      <b>Consignes du médecin :</b> {c.consignesInfirmier || "voir la conduite à tenir et l'ordonnance"}
-                      {c.diagnostic ? <span className="block text-amber-800">Diagnostic : {c.diagnosticFinal || c.diagnostic}</span> : null}
-                    </div>
-                  )}
-                  {catASoinsInfirmiers(c.conduiteATenir) && (
-                    <div className="mt-1 text-emerald-700 dark:text-emerald-400">
-                      <ConduiteATenirListe items={c.conduiteATenir} seulementType={TYPES_INFIRMIER} compact />
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-col items-end gap-1 flex-none">
-                  <button
-                    onClick={() => ouvrirSoinDepuisConsultation(c)}
-                    className="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm font-medium flex items-center gap-1.5 hover:bg-emerald-700"
-                  >
-                    <CheckCircle2 className="w-4 h-4" /> Noter les soins et terminer
-                  </button>
-                  <button
-                    onClick={() => { if (window.confirm(`Terminer le dossier de ${c.patient} sans noter le soin dans la Salle des soins ?`)) handleMarquerSoinsExecutes(c); }}
-                    className={`text-xs underline ${isDark ? "text-gray-400" : "text-gray-500"}`}
-                  >
-                    Terminer sans noter
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
       )}
     </div>

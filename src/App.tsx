@@ -1025,6 +1025,18 @@ export default function App() {
         showToast(`${info.icone} ${info.titre}`, `${c.patient} vient d'être envoyé(e).`, "info");
         sendBrowserNotification(`${info.icone} ${info.titre}`, `${c.patient} vient d'être envoyé(e).`, `patient-${c.id}`);
       });
+
+      // Dossier existant renvoyé en salle infirmière par le médecin (ou actes payés à exécuter).
+      const avant = new Map(prevConsultations.map((c) => [c.id, c.statut]));
+      consultations.forEach((c) => {
+        if (!avant.has(c.id) || avant.get(c.id) === c.statut) return;
+        const renvoi = c.decision === "Renvoi en salle infirmière" && c.statut === "Attente paiement actes";
+        if (!renvoi && c.statut !== "Attente exécution actes") return;
+        const titre = renvoi ? "💉 Patient renvoyé en salle infirmière" : "💉 Soins à exécuter (actes payés)";
+        const texte = `${c.patient} — ${c.consignesInfirmier || "voir la décision du médecin"}`;
+        showToast(titre, texte, "info");
+        sendBrowserNotification(titre, texte, `soins-${c.id}-${c.statut}`);
+      });
     }
 
     prevConsultationsRef.current = consultations;
