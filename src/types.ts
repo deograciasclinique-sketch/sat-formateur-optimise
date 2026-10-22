@@ -721,6 +721,7 @@ export type StatutConsultation =
   | "Attente prise en charge maternité" // orienté par le secrétariat vers la maternité (CPN, etc.)
   | "Attente prise en charge laboratoire" // orienté par le secrétariat directement vers le labo
   | "Attente consultation médecin"    // constantes prises, en attente du médecin
+  | "Consultation en cours"           // consultation commencée, laissée ouverte (résultats attendus) — à clore plus tard
   | "Transféré vers un autre service" // l'infirmier/la sage-femme oriente le patient ailleurs qu'au médecin
   | "Attente paiement actes"          // prescription faite, actes à payer au secrétariat
   | "Attente exécution actes"         // actes payés, en attente d'exécution (soins/labo)
@@ -794,6 +795,13 @@ export interface Consultation {
   };
   plainte: string;
   antecedentsPatient?: AntecedentsPatient;
+  // Consultation laissée en cours (statut « Consultation en cours ») : qui l'a ouverte, quand,
+  // et dernière mise à jour (un collègue peut la compléter et la clore).
+  enCoursDepuis?: string;
+  enCoursPar?: string;
+  derniereMajPar?: string;
+  derniereMajLe?: string;
+  clotureePar?: string;
   examenPhysique?: string;
   diagnostic: string;
   diagnosticFinal?: string;

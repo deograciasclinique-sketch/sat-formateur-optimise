@@ -700,6 +700,12 @@ export default function TabConsultation({
     () => consultations.filter((c) => c.statut === "Attente consultation médecin"),
     [consultations]
   );
+  // Consultations commencées et laissées ouvertes (en attente de résultats), toutes équipes confondues.
+  const consultationsEnCours = useMemo(
+    () => consultations.filter((c) => c.statut === "Consultation en cours")
+      .sort((a, b) => (a.enCoursDepuis || a.createdAt || "").localeCompare(b.enCoursDepuis || b.createdAt || "")),
+    [consultations]
+  );
 
   const resetConsultationForm = () => {
     setConsPatient("");
@@ -774,6 +780,12 @@ export default function TabConsultation({
     setConsDecision((c.decision as any) || "Retour à domicile");
     setConsConsignesInf(c.consignesInfirmier || "");
     setConsReferenceService(c.referenceService || "");
+    if (c.statut === "Consultation en cours") {
+      setTempPhotos(c.photos || []);
+      setTempLabResults(c.labResults || []);
+      if (c.medecinId) setConsMedecin(c.medecinId);
+      if (c.telephoneMedecin) { telMedecinAuto.current = ""; setConsTelMedecin(c.telephoneMedecin); }
+    }
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -887,17 +899,22 @@ export default function TabConsultation({
     setIsDictating(field);
   };
 
-  const handleSaveConsultation = () => {
-    if (!consPatient.trim() || !consPlainte.trim() || !consDiagnostic.trim()) {
+  const handleSaveConsultation = (enCours: boolean | React.MouseEvent = false) => {
+    const laisserEnCours = enCours === true;
+    if (laisserEnCours && !consPatient.trim()) {
+      alert("Renseignez au moins le nom du patient pour laisser la consultation en cours.");
+      return;
+    }
+    if (!laisserEnCours && (!consPatient.trim() || !consPlainte.trim() || !consDiagnostic.trim())) {
       alert("Veuillez renseigner le nom du patient, le motif de consultation, et le diagnostic de présomption.");
       return;
     }
-    if (!consContact.trim() || !consTelMedecin.trim()) {
+    if (!laisserEnCours && (!consContact.trim() || !consTelMedecin.trim())) {
       alert("Veuillez renseigner les deux numéros : le téléphone du patient (secrétariat) et le téléphone du praticien consultant.");
       return;
     }
 
-    if (tempLabResults.length > 0 && !consDiagnosticFinal.trim()) {
+    if (!laisserEnCours && tempLabResults.length > 0 && !consDiagnosticFinal.trim()) {
       alert("Des résultats de laboratoire sont liés à cette consultation : veuillez renseigner le diagnostic de certitude / final avant d'enregistrer.");
       return;
     }
@@ -969,6 +986,32 @@ export default function TabConsultation({
         ? (presLines.length > 0 || catASoinsInfirmiers(consCAT) ? "Attente paiement actes" : "Attente exécution actes")
         : pendingSource ? (presLines.length > 0 || catASoinsInfirmiers(consCAT) ? "Attente paiement actes" : "Terminée") : undefined,
     };
+    const maintenantIso = new Date().toISOString();
+    const nomAgent = currentUser?.nom || "Agent";
+    const etaitEnCours = pendingSource?.statut === "Consultation en cours";
+    if (etaitEnCours || laisserEnCours) {
+      newCons.enCoursDepuis = pendingSource?.enCoursDepuis || maintenantIso;
+      newCons.enCoursPar = pendingSource?.enCoursPar || nomAgent;
+      newCons.derniereMajPar = nomAgent;
+      newCons.derniereMajLe = maintenantIso;
+    }
+
+    // Consultation laissée en cours : enregistrée telle quelle (sans clôture, sans décision ni sortie
+    // de stock) ; le consultant ou un collègue la reprendra pour la compléter et la clore.
+    if (laisserEnCours) {
+      newCons.statut = "Consultation en cours";
+      const existe = consultations.some((c) => c.id === newCons.id);
+      onUpdateConsultations(existe ? consultations.map((c) => (c.id === newCons.id ? newCons : c)) : [newCons, ...consultations]);
+      resetConsultationForm();
+      alert(`Consultation de ${newCons.patient} laissée EN COURS.\nElle reste dans « Consultations en cours » : vous ou un collègue pourrez la reprendre pour ajouter les résultats et la clore.`);
+      return;
+    }
+    if (etaitEnCours) {
+      newCons.clotureePar = nomAgent;
+      // Dossier ouvert directement en consultation (sans passage infirmier) : statut de clôture habituel.
+      if (!pendingSource?.praticienId && newCons.statut === "Terminée") newCons.statut = undefined;
+    }
+
     if (consDecision === "Renvoi en salle infirmière" && !consConsignesInf.trim() && !catASoinsInfirmiers(consCAT) && presLines.length === 0) {
       alert("Indiquez les consignes pour la salle infirmière (ce qu'il faut exécuter).");
       return;
@@ -1710,6 +1753,46 @@ export default function TabConsultation({
         </div>
       )}
 
+      {consultationsEnCours.length > 0 && (
+        <div className="bg-info-50 border border-info-200 rounded-2xl p-4 shadow-xs space-y-2">
+          <h3 className="text-sm font-bold text-info-800 flex items-center gap-2">
+            <Clock className="w-4 h-4" /> Consultations en cours — à compléter puis clore ({consultationsEnCours.length})
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {consultationsEnCours.map((c) => {
+              const depuis = c.enCoursDepuis || c.createdAt;
+              const heures = depuis ? Math.floor((Date.now() - new Date(depuis).getTime()) / 3600000) : 0;
+              const examensPatient = laboExamens.filter((e) => e.patient.trim().toLowerCase() === c.patient.trim().toLowerCase() && (e.dateDemande || "") >= (c.date || ""));
+              const prets = examensPatient.filter((e) => e.statut === "Prêt" || e.statut === "Validé" || e.statut === "Résultat disponible").length;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => handleReprendreDossierInfirmier(c)}
+                  className={`text-left px-3 py-2 rounded-xl border transition ${pendingSource?.id === c.id ? "border-info-500 bg-info-100" : "border-info-200 bg-white hover:bg-info-50"}`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-sm text-stone-900">{c.codePatient && <span className="font-mono text-emerald-600 mr-1.5">{c.codePatient}</span>}{c.patient}</span>
+                    <span className={`text-2xs font-bold px-2 py-0.5 rounded-full ${heures >= 8 ? "bg-danger-100 text-danger-700" : "bg-info-100 text-info-700"}`}>
+                      {heures < 1 ? "< 1 h" : `${heures} h`}
+                    </span>
+                  </div>
+                  <div className="text-xs text-stone-500 truncate">{c.plainte || "Motif non saisi"}{c.diagnostic ? ` · ${c.diagnostic}` : ""}</div>
+                  <div className="text-2xs text-stone-500 mt-0.5">
+                    Ouverte {depuis ? `à ${new Date(depuis).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}{depuis && new Date(depuis).toDateString() !== new Date().toDateString() ? ` le ${new Date(depuis).toLocaleDateString("fr-FR")}` : ""} par {c.enCoursPar || "—"}
+                    {c.derniereMajPar && c.derniereMajLe && c.derniereMajLe !== c.enCoursDepuis ? ` · modifiée par ${c.derniereMajPar} à ${new Date(c.derniereMajLe).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+                  </div>
+                  {examensPatient.length > 0 && (
+                    <div className={`text-2xs font-bold mt-0.5 ${prets === examensPatient.length ? "text-success-700" : "text-warning-700"}`}>
+                      🧪 Laboratoire : {prets}/{examensPatient.length} résultat(s) prêt(s){prets === examensPatient.length ? " — prête à clore" : ""}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {enAttenteMedecin.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-xs space-y-2">
           <h3 className="text-sm font-bold text-amber-800 flex items-center gap-2">
@@ -1746,7 +1829,9 @@ export default function TabConsultation({
 
           {pendingSource && (
             <div className="bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between">
-              <span>Vous complétez le dossier transféré de {pendingSource.patient} (constantes déjà prises).</span>
+              <span>{pendingSource.statut === "Consultation en cours"
+                ? `Consultation en cours de ${pendingSource.patient} (ouverte par ${pendingSource.enCoursPar || "—"}) : complétez-la puis « Valider », ou laissez-la encore en cours.`
+                : `Vous complétez le dossier transféré de ${pendingSource.patient} (constantes déjà prises).`}</span>
               <button
                 type="button"
                 onClick={handleAnnulerReprise}
@@ -2865,7 +2950,14 @@ export default function TabConsultation({
               onClick={handleSaveConsultation}
               className="w-full text-xs font-bold py-2 bg-success-600 hover:bg-success-700 text-white rounded-lg transition-all flex items-center justify-center gap-1.5 shadow-xs"
             >
-              <CheckCircle className="w-4 h-4 text-success-300" /> Valider l'Examen & Sauvegarder la Fiche
+              <CheckCircle className="w-4 h-4 text-success-300" /> {pendingSource?.statut === "Consultation en cours" ? "Clore la consultation (valider & sauvegarder)" : "Valider l'Examen & Sauvegarder la Fiche"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSaveConsultation(true)}
+              className="w-full text-xs font-bold py-2 bg-white hover:bg-info-50 text-info-700 border border-info-300 rounded-lg transition-all flex items-center justify-center gap-1.5"
+            >
+              <Clock className="w-4 h-4" /> Laisser en cours (compléter plus tard, par moi ou un collègue)
             </button>
           </div>
         </div>
