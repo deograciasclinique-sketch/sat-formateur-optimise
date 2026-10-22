@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { SelecteurBilans, bilansAPrescrire, totalBilans, type ChoixBilans } from "./BilansLabo";
+import { EXAMENS, acteCorrespondant, normaliser } from "../lib/bilans";
 import AntecedentsEditeur, { ANTECEDENTS_VIDES, antecedentsRenseignes, resumeAntecedents } from "./AntecedentsPatient";
 import { jsPDF } from "jspdf";
 import { logActivity } from "../lib/activityLogger";
@@ -304,11 +305,20 @@ export default function TabConsultation({
   const [consPrescriptionAutre, setConsPrescriptionAutre] = useState("");
   const [consPrescriptionUrgent, setConsPrescriptionUrgent] = useState(false);
 
+  // Examens seuls : ceux de la grille tarifaire + les examens connus des bilans (tarif indicatif).
+  const examensSeuls = useMemo(() => {
+    const liste: { cle: string; nom: string; prix: number; indicatif: boolean }[] =
+      examensCatalogue.map((a) => ({ cle: "a:" + a.id, nom: a.nom, prix: a.prix, indicatif: false }));
+    Object.entries(EXAMENS).forEach(([cle, ex]) => {
+      if (!acteCorrespondant(cle, examensCatalogue)) liste.push({ cle: "e:" + cle, nom: ex.nom, prix: ex.prix, indicatif: true });
+    });
+    return liste.sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
+  }, [examensCatalogue]);
   const filteredExamensCatalogue = useMemo(() => {
-    const q = examenSearchQuery.toLowerCase().trim();
-    if (!q) return examensCatalogue;
-    return examensCatalogue.filter((a) => a.nom.toLowerCase().includes(q));
-  }, [examensCatalogue, examenSearchQuery]);
+    const q = normaliser(examenSearchQuery);
+    if (!q) return [];
+    return examensSeuls.filter((a) => normaliser(a.nom).includes(q) || (a.cle.startsWith("e:") && (EXAMENS[a.cle.slice(2)].alias || []).some((x) => x.includes(q)))).slice(0, 8);
+  }, [examensSeuls, examenSearchQuery]);
 
   const toggleExamenSelection = (id: string) => {
     setSelectedExamenIds((prev) =>
@@ -319,10 +329,10 @@ export default function TabConsultation({
   const totalExamensSelectionnes = useMemo(
     () =>
       selectedExamenIds.reduce((sum, id) => {
-        const acte = examensCatalogue.find((a) => a.id === id);
-        return sum + (acte?.prix || 0);
+        const ex = examensSeuls.find((a) => a.cle === id);
+        return sum + (ex?.prix || 0);
       }, 0) + totalBilans(bilansChoisis, examensCatalogue),
-    [selectedExamenIds, examensCatalogue, bilansChoisis]
+    [selectedExamenIds, examensSeuls, examensCatalogue, bilansChoisis]
   );
 
   const handlePrescrireExamen = () => {
@@ -333,7 +343,7 @@ export default function TabConsultation({
       alert("Veuillez d'abord renseigner le nom du patient avant de prescrire un examen.");
       return;
     }
-    const examensChoisis = examensCatalogue.filter((a) => selectedExamenIds.includes(a.id));
+    const examensChoisis = examensSeuls.filter((a) => selectedExamenIds.includes(a.cle));
     const bilans = bilansAPrescrire(bilansChoisis, examensCatalogue);
     if (examensChoisis.length === 0 && bilans.length === 0 && !consPrescriptionAutre.trim()) {
       alert("Veuillez sélectionner au moins un bilan ou un examen dans la liste (ou en préciser un hors liste).");
@@ -2359,45 +2369,45 @@ export default function TabConsultation({
 
               <SelecteurBilans choix={bilansChoisis} onChange={setBilansChoisis} catalogue={examensCatalogue} />
 
-              {examensCatalogue.length === 0 ? (
-                <p className="text-2xs text-warning-700 bg-warning-50 border border-warning-200 rounded-lg px-3 py-2">
-                  Aucun examen tarifé n'est encore renseigné. Le responsable doit d'abord les ajouter dans l'onglet
-                  "Actes & Tarifs" (catégorie "Laboratoire") pour qu'ils apparaissent ici avec leur prix.
-                </p>
-              ) : (
-                <>
-                  <input
-                    type="text"
-                    placeholder="Rechercher un examen (NFS, Glycémie, Goutte épaisse...)"
-                    value={examenSearchQuery}
-                    onChange={(e) => setExamenSearchQuery(e.target.value)}
-                    className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
-                  />
-                  <div className="max-h-44 overflow-y-auto border border-stone-200 rounded-lg divide-y divide-stone-100 bg-white">
+              <div className="space-y-1.5">
+                <input
+                  type="text"
+                  placeholder="Ajouter un examen seul (NFS, Glycémie, Goutte épaisse…)"
+                  value={examenSearchQuery}
+                  onChange={(e) => setExamenSearchQuery(e.target.value)}
+                  className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary-500"
+                />
+                {examenSearchQuery.trim() && (
+                  <div className="border border-stone-200 rounded-lg divide-y divide-stone-100 bg-white">
                     {filteredExamensCatalogue.length === 0 ? (
-                      <p className="text-2xs text-stone-400 italic p-3 text-center">Aucun examen ne correspond à la recherche.</p>
+                      <p className="text-2xs text-stone-400 italic p-2 text-center">Aucun examen trouvé — utilisez « Autre examen hors liste ».</p>
                     ) : (
                       filteredExamensCatalogue.map((a) => (
-                        <label
-                          key={a.id}
-                          className="flex items-center justify-between gap-2 px-3 py-2 cursor-pointer hover:bg-primary-50/50 text-xs"
-                        >
-                          <span className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={selectedExamenIds.includes(a.id)}
-                              onChange={() => toggleExamenSelection(a.id)}
-                              className="accent-primary-600 w-3.5 h-3.5"
-                            />
-                            <span className="font-semibold text-stone-700">{a.nom}</span>
-                          </span>
-                          <span className="font-mono font-bold text-stone-600 shrink-0">{a.prix.toLocaleString("fr-FR")} F</span>
-                        </label>
+                        <button key={a.cle} type="button"
+                          onClick={() => { if (!selectedExamenIds.includes(a.cle)) toggleExamenSelection(a.cle); setExamenSearchQuery(""); }}
+                          className="w-full flex items-center justify-between gap-2 px-3 py-1.5 text-xs text-left cursor-pointer hover:bg-primary-50/50">
+                          <span className="font-semibold text-stone-700">+ {a.nom}</span>
+                          <span className="font-mono text-stone-600 shrink-0">{a.prix.toLocaleString("fr-FR")} F{a.indicatif ? " *" : ""}</span>
+                        </button>
                       ))
                     )}
                   </div>
-                </>
-              )}
+                )}
+                {selectedExamenIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {selectedExamenIds.map((id) => {
+                      const a = examensSeuls.find((x) => x.cle === id);
+                      if (!a) return null;
+                      return (
+                        <span key={id} className="inline-flex items-center gap-1 text-2xs font-bold bg-white border border-primary-300 text-primary-800 rounded-full pl-2 pr-1 py-0.5">
+                          {a.nom} · {a.prix.toLocaleString("fr-FR")} F{a.indicatif ? " *" : ""}
+                          <button type="button" onClick={() => toggleExamenSelection(id)} className="w-4 h-4 rounded-full hover:bg-primary-100 cursor-pointer" aria-label="Retirer">×</button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               <input
                 type="text"
