@@ -100,6 +100,8 @@ export default function TabConsultation({
   const [consAge, setConsAge] = useState("");
   const [consSexe, setConsSexe] = useState("Masculin");
     const [consContact, setConsContact] = useState("");
+    // Téléphone du praticien consultant (pré-rempli depuis sa fiche du personnel).
+    const [consTelMedecin, setConsTelMedecin] = useState("");
   const [consProfession, setConsProfession] = useState("");
   const [consFemmeEnceinte, setConsFemmeEnceinte] = useState(false);
   const [consCommune, setConsCommune] = useState("");
@@ -126,6 +128,14 @@ export default function TabConsultation({
       setConsMedecin(currentUser.id);
     }
   }, [currentUser, consMedecin]);
+
+  // Le numéro du praticien suit le praticien choisi (modifiable à la main ensuite).
+  const telMedecinAuto = React.useRef("");
+  useEffect(() => {
+    const tel = staff.find((s) => s.id === consMedecin)?.contact || "";
+    setConsTelMedecin((actuel) => (!actuel || actuel === telMedecinAuto.current ? tel : actuel));
+    telMedecinAuto.current = tel;
+  }, [consMedecin, staff]);
 
   // Vitals states
   const [vTemp, setVTemp] = useState("");
@@ -644,6 +654,8 @@ export default function TabConsultation({
     setConsDate(getTodayStr());
     setConsAge("");
     setConsContact("");
+    telMedecinAuto.current = "";
+    setConsTelMedecin(staff.find((s) => s.id === (currentUser?.id || ""))?.contact || "");
     setConsProfession("");
     setConsFemmeEnceinte(false);
     setConsCommune("");
@@ -732,6 +744,7 @@ export default function TabConsultation({
 
   const handleContinuerDossier = (c: Consultation) => {
     setConsPatient(c.patient);
+    if (c.telephoneMedecin) { telMedecinAuto.current = ""; setConsTelMedecin(c.telephoneMedecin); }
     setConsAge(c.age ? c.age.toString() : "");
     setConsSexe(c.sexe);
     setConsContact(c.contact || "");
@@ -825,6 +838,10 @@ export default function TabConsultation({
       alert("Veuillez renseigner le nom du patient, le motif de consultation, et le diagnostic de présomption.");
       return;
     }
+    if (!consContact.trim() || !consTelMedecin.trim()) {
+      alert("Veuillez renseigner les deux numéros : le téléphone du patient (secrétariat) et le téléphone du praticien consultant.");
+      return;
+    }
 
     if (tempLabResults.length > 0 && !consDiagnosticFinal.trim()) {
       alert("Des résultats de laboratoire sont liés à cette consultation : veuillez renseigner le diagnostic de certitude / final avant d'enregistrer.");
@@ -848,6 +865,7 @@ export default function TabConsultation({
       profession: consProfession.trim(),
       femmeEnceinte: consSexe === "Féminin" ? consFemmeEnceinte : false,
       contact: consContact.trim(),
+      telephoneMedecin: consTelMedecin.trim(),
       commune: consCommune.trim(),
       villageSecteur: consVillageSecteur.trim(),
       zoneResidence: consZoneResidence,
@@ -1322,8 +1340,9 @@ export default function TabConsultation({
 
     const infoGrid = [
       { k: "Nom complet :", v: cons.patient, k2: "Date d'Examen :", v2: new Date(cons.date).toLocaleDateString("fr-FR") },
-      { k: "Âge / Sexe :", v: `${cons.age} Ans / ${cons.sexe}`, k2: "Téléphone :", v2: cons.contact || "—" },
-      { k: "Médecin Référent :", v: doctorName, k2: "Dossier N° :", v2: `CONS-${cons.id.slice(0, 8).toUpperCase()}` }
+      { k: "Âge / Sexe :", v: `${cons.age} Ans / ${cons.sexe}`, k2: "Tél. patient :", v2: cons.contact || "—" },
+      { k: "Médecin Référent :", v: doctorName, k2: "Tél. praticien :", v2: cons.telephoneMedecin || staff.find((s) => s.id === cons.medecinId)?.contact || "—" },
+      { k: "Dossier N° :", v: `CONS-${cons.id.slice(0, 8).toUpperCase()}`, k2: "", v2: "" }
     ];
 
     doc.setFontSize(9);
@@ -1938,15 +1957,27 @@ export default function TabConsultation({
                 </select>
               </div>
               <div>
-                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Téléphone</label>
+                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Tél. du praticien *</label>
                 <input
                   type="tel"
                   placeholder="+226..."
-                  value={consContact}
-                  onChange={(e) => setConsContact(e.target.value)}
+                  value={consTelMedecin}
+                  onChange={(e) => setConsTelMedecin(e.target.value)}
                   className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
                 />
               </div>
+            </div>
+
+            <div>
+              <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Téléphone du patient (7) — renseigné au secrétariat *</label>
+              <input
+                type="tel"
+                placeholder="+226..."
+                value={consContact}
+                onChange={(e) => setConsContact(e.target.value)}
+                className={`w-full text-xs border rounded-lg px-3 py-2 focus:bg-white focus:outline-none ${consContact.trim() ? "border-stone-200 bg-stone-50" : "border-amber-400 bg-amber-50"}`}
+              />
+              {!consContact.trim() && <p className="text-2xs text-amber-700 mt-0.5">Numéro absent : à demander au patient ou au secrétariat.</p>}
             </div>
 
             {/* Vitals sub-panel */}
@@ -3160,6 +3191,10 @@ export default function TabConsultation({
                     <div>
                       <span className="text-stone-450 font-semibold uppercase text-xs">Mode d'entrée (9) :</span>
                       <p className={`font-bold mt-0.5 ${theme === "dark" ? "text-stone-300" : "text-stone-700"}`}>{selectedConsultation.modeEntree || "—"}</p>
+                    </div>
+                    <div>
+                      <span className="text-stone-450 font-semibold uppercase text-xs">Tél. du praticien :</span>
+                      <p className={`font-mono font-bold mt-0.5 ${theme === "dark" ? "text-stone-300" : "text-stone-700"}`}>{selectedConsultation.telephoneMedecin || staff.find((s) => s.id === selectedConsultation.medecinId)?.contact || "—"}</p>
                     </div>
                     <div>
                       <span className="text-stone-450 font-semibold uppercase text-xs">Ancien consultant (15) :</span>

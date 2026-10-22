@@ -749,6 +749,8 @@ export interface Consultation {
   telephonePraticien?: string;
   date: string;
   medecinId?: string;
+  // Téléphone du praticien consultant (médecin de la consultation générale).
+  telephoneMedecin?: string;
   // Statut du dossier dans le circuit secrétariat -> infirmier -> médecin ->
   // secrétariat -> soins/labo. Absent = ancien dossier créé avant cette
   // fonctionnalité (traité comme "Terminée" à l'affichage).
