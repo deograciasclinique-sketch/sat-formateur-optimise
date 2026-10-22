@@ -310,6 +310,9 @@ export interface ExamenLabo {
   // tarifaire "Actes & Tarifs", catégorie Laboratoire) — permet le calcul
   // automatique du montant à facturer au patient.
   prix?: number;
+  // Bilan (ex : « Bilan hépatique ») : nom et détail des examens qui le composent, avec leur prix.
+  bilan?: string;
+  composants?: { nom: string; prix: number }[];
   // Marque l'examen comme déjà reporté sur une facture patient, pour éviter
   // de le facturer deux fois depuis l'onglet Facturation.
   facture?: boolean;

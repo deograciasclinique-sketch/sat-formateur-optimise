@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { SelecteurBilans, bilansAPrescrire, totalBilans, type ChoixBilans } from "./BilansLabo";
 import AntecedentsEditeur, { ANTECEDENTS_VIDES, antecedentsRenseignes, resumeAntecedents } from "./AntecedentsPatient";
 import { jsPDF } from "jspdf";
 import { logActivity } from "../lib/activityLogger";
@@ -298,6 +299,7 @@ export default function TabConsultation({
     [actes]
   );
   const [selectedExamenIds, setSelectedExamenIds] = useState<string[]>([]);
+  const [bilansChoisis, setBilansChoisis] = useState<ChoixBilans>({});
   const [examenSearchQuery, setExamenSearchQuery] = useState("");
   const [consPrescriptionAutre, setConsPrescriptionAutre] = useState("");
   const [consPrescriptionUrgent, setConsPrescriptionUrgent] = useState(false);
@@ -319,8 +321,8 @@ export default function TabConsultation({
       selectedExamenIds.reduce((sum, id) => {
         const acte = examensCatalogue.find((a) => a.id === id);
         return sum + (acte?.prix || 0);
-      }, 0),
-    [selectedExamenIds, examensCatalogue]
+      }, 0) + totalBilans(bilansChoisis, examensCatalogue),
+    [selectedExamenIds, examensCatalogue, bilansChoisis]
   );
 
   const handlePrescrireExamen = () => {
@@ -332,8 +334,9 @@ export default function TabConsultation({
       return;
     }
     const examensChoisis = examensCatalogue.filter((a) => selectedExamenIds.includes(a.id));
-    if (examensChoisis.length === 0 && !consPrescriptionAutre.trim()) {
-      alert("Veuillez sélectionner au moins un examen dans la liste (ou en préciser un hors liste).");
+    const bilans = bilansAPrescrire(bilansChoisis, examensCatalogue);
+    if (examensChoisis.length === 0 && bilans.length === 0 && !consPrescriptionAutre.trim()) {
+      alert("Veuillez sélectionner au moins un bilan ou un examen dans la liste (ou en préciser un hors liste).");
       return;
     }
     const priorite = consPrescriptionUrgent ? "urgente" : "normale";
@@ -354,6 +357,27 @@ export default function TabConsultation({
       interpretation: "",
       createdAt: new Date().toISOString()
     }));
+    // Bilans : une demande par bilan, avec le détail des examens et de leurs prix.
+    bilans.forEach((b) => {
+      nouveauxExamens.push({
+        id: generateUid(),
+        patient: consPatient,
+        contact: consContact,
+        dateDemande: getTodayStr(),
+        analyses: `${b.bilan} : ${b.lignes.map((l) => l.nom).join(", ")}`,
+        bilan: b.bilan,
+        composants: b.lignes.map((l) => ({ nom: l.nom, prix: l.prix })),
+        prix: b.total,
+        priorite,
+        prescripteur,
+        technicien: "",
+        statut: "En attente",
+        dateResultat: "",
+        resultat: "",
+        interpretation: "",
+        createdAt: new Date().toISOString()
+      });
+    });
     // Examen hors grille tarifaire (saisie libre), sans prix connu.
     if (consPrescriptionAutre.trim()) {
       nouveauxExamens.push({
@@ -374,10 +398,11 @@ export default function TabConsultation({
     }
     if (onUpdateLaboExamens) {
       onUpdateLaboExamens([...nouveauxExamens, ...laboExamens]);
-      const noms = nouveauxExamens.map((e) => e.analyses).join(", ");
+      const noms = nouveauxExamens.map((e) => e.bilan || e.analyses).join(", ");
       const total = nouveauxExamens.reduce((s, e) => s + (e.prix || 0), 0);
       alert(`Examen(s) prescrit(s) (${noms}) — Total ${total.toLocaleString("fr-FR")} F.\nEnvoyé(s) au laboratoire ET mis à disposition dans l'onglet Facturation (avec leur prix) pour le patient "${consPatient}".`);
       setSelectedExamenIds([]);
+      setBilansChoisis({});
       setConsPrescriptionAutre("");
       setConsPrescriptionUrgent(false);
     }
@@ -2332,6 +2357,8 @@ export default function TabConsultation({
                 Prescrire un ou plusieurs examens au laboratoire
               </label>
 
+              <SelecteurBilans choix={bilansChoisis} onChange={setBilansChoisis} catalogue={examensCatalogue} />
+
               {examensCatalogue.length === 0 ? (
                 <p className="text-2xs text-warning-700 bg-warning-50 border border-warning-200 rounded-lg px-3 py-2">
                   Aucun examen tarifé n'est encore renseigné. Le responsable doit d'abord les ajouter dans l'onglet
@@ -2383,7 +2410,7 @@ export default function TabConsultation({
               <div className="flex gap-2 items-center">
                 <div className="flex-1 flex items-center justify-between bg-primary-50 border border-primary-200 rounded-lg px-3 py-2">
                   <span className="text-2xs uppercase font-bold tracking-wider text-primary-700">
-                    {selectedExamenIds.length} examen(s) sélectionné(s)
+                    {Object.keys(bilansChoisis).length > 0 && `${Object.keys(bilansChoisis).length} bilan(s) + `}{selectedExamenIds.length} examen(s)
                   </span>
                   <span className="text-sm font-black font-mono text-primary-800">
                     {totalExamensSelectionnes.toLocaleString("fr-FR")} F

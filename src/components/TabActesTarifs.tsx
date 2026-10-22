@@ -7,6 +7,7 @@ import React, { useState } from "react";
 import { jsPDF } from "jspdf";
 import { ActeTarifaire, Staff } from "../types";
 import { generateUid, getTodayStr } from "../data";
+import { examensManquants } from "../lib/bilans";
 import { Plus, Trash2, Search, Receipt, Lock, Download, Edit2, Check, X } from "lucide-react";
 
 interface TabActesTarifsProps {
@@ -203,6 +204,33 @@ export default function TabActesTarifs({ actes, onUpdateActes, isResponsable = f
           Seul le responsable/directeur du service peut ajouter, modifier ou supprimer un acte tarifaire. Vous pouvez consulter la grille ci-dessous.
         </div>
       )}
+
+      {isResponsable && (() => {
+        const manquants = examensManquants(actes.filter((x) => x.categorie === "Laboratoire"));
+        if (manquants.length === 0) return null;
+        return (
+          <div className="bg-primary-50 border border-primary-200 rounded-xl p-4 flex flex-wrap items-center gap-3 text-xs text-primary-900">
+            <span className="flex-1 min-w-[220px]">
+              <b>Bilans de laboratoire :</b> {manquants.length} examen(s) des bilans ne sont pas encore dans votre grille (ils utilisent un tarif indicatif).
+              Ajoutez-les pour fixer vos propres prix.
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirm(`Ajouter ${manquants.length} examens de laboratoire à la grille, avec un tarif indicatif que vous pourrez modifier ?`)) return;
+                const now = new Date().toISOString();
+                onUpdateActes([
+                  ...manquants.map((m) => ({ id: generateUid(), nom: m.nom, categorie: "Laboratoire", prix: m.prix, description: "Examen de bilan (tarif indicatif à ajuster)", createdAt: now })),
+                  ...actes,
+                ]);
+              }}
+              className="bg-primary-700 hover:bg-primary-800 text-white font-bold px-3 py-2 rounded-lg cursor-pointer"
+            >
+              Ajouter les examens des bilans
+            </button>
+          </div>
+        );
+      })()}
 
       {isResponsable && (
         <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-xs">

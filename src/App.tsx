@@ -2539,6 +2539,7 @@ export default function App() {
           {activeTab === "labo" && (
             <TabLabo
               examens={laboExamens}
+              actes={actesTarifaires}
               staff={staff}
               onUpdateExamens={handleUpdateLaboExamens}
               consultations={consultations}

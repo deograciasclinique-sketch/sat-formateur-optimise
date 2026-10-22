@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { ExamenLabo, Staff, Consultation, Medicament, MouvementStock } from "../types";
+import { ExamenLabo, Staff, Consultation, Medicament, MouvementStock, ActeTarifaire } from "../types";
+import { SelecteurBilans, DetailBilan, bilansAPrescrire, type ChoixBilans } from "./BilansLabo";
 import { generateUid, getTodayStr } from "../data";
 import { ResultatTDR, TdrDengue, demandeTdrPalu, demandeTdrDengue, dengueComplet, interpreterDengue, alerteDengue, texteResultatTdr } from "../modules/thlo/tdr";
 import { Plus, Trash2, Printer, MessageCircle, Search, FlaskConical, CheckCircle, FileText, X, Beaker, AlertTriangle, Eye, Upload, Download } from "lucide-react";
@@ -28,9 +29,12 @@ interface TabLaboProps {
   // importées en masse depuis le laboratoire (mêmes mouvements que la pharmacie).
   mouvements?: MouvementStock[];
   onUpdateMouvements?: (movs: MouvementStock[]) => void;
+  /** Grille « Actes & Tarifs » : prix des examens composant les bilans. */
+  actes?: ActeTarifaire[];
 }
 
-export default function TabLabo({ examens, staff, onUpdateExamens, consultations = [], onUpdateConsultations, medicaments = [], onUpdateMedicaments, mouvements = [], onUpdateMouvements }: TabLaboProps) {
+export default function TabLabo({ examens, staff, onUpdateExamens, consultations = [], onUpdateConsultations, medicaments = [], onUpdateMedicaments, mouvements = [], onUpdateMouvements, actes = [] }: TabLaboProps) {
+  const catalogueLabo = React.useMemo(() => actes.filter((a) => a.categorie === "Laboratoire"), [actes]);
   // Load dynamic clinic profile from LocalStorage safely
   
   const [showUrgentAlert, setShowUrgentAlert] = useState(false);
@@ -107,6 +111,7 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
   const [examDateDemande, setExamDateDemande] = useState(getTodayStr());
   const [examPrescripteur, setExamPrescripteur] = useState("");
   const [examAnalyses, setExamAnalyses] = useState<string[]>([]);
+  const [examBilans, setExamBilans] = useState<ChoixBilans>({});
   const [examUrgent, setExamUrgent] = useState(false);
   const [examAnalysesCustom, setExamAnalysesCustom] = useState("");
 
@@ -411,14 +416,23 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
   const [viewingPatient, setViewingPatient] = useState<string>("");
   const [printingExam, setPrintingExam] = useState<ExamenLabo | null>(null);
 
+  // Détail d'un bilan pour les impressions (bon d'analyse, résultats).
+  const htmlBilan = (e: ExamenLabo) => {
+    if (!e.composants?.length) return "";
+    const total = e.composants.reduce((t, c) => t + (c.prix || 0), 0);
+    const lignes = e.composants.map((c) => `<tr><td style="padding:3px 8px;border-bottom:1px solid #eee">${c.nom}</td><td style="padding:3px 8px;border-bottom:1px solid #eee;text-align:right;white-space:nowrap">${(c.prix || 0).toLocaleString("fr-FR")} F</td></tr>`).join("");
+    return `<div style="font-weight:bold;margin-bottom:4px">${e.bilan}</div><table style="width:100%;border-collapse:collapse;font-size:12px">${lignes}<tr><td style="padding:4px 8px;font-weight:bold">Total (${e.composants.length} examens)</td><td style="padding:4px 8px;font-weight:bold;text-align:right;white-space:nowrap">${total.toLocaleString("fr-FR")} F</td></tr></table>`;
+  };
+
   const handleCreateRequest = () => {
     const allAnalyses = [...examAnalyses];
     if (examAnalysesCustom.trim()) {
       allAnalyses.push(examAnalysesCustom.trim());
     }
     const finalAnalysesStr = allAnalyses.join(" + ");
+    const bilans = bilansAPrescrire(examBilans, catalogueLabo);
 
-    if (!examPatient.trim() || !finalAnalysesStr) {
+    if (!examPatient.trim() || (!finalAnalysesStr && bilans.length === 0)) {
       alert("Veuillez renseigner le patient et au moins une analyse demandée.");
       return;
     }
@@ -451,7 +465,16 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
       createdAt: new Date().toISOString()
     };
 
-    onUpdateExamens([newExam, ...examens]);
+    const demandesBilans: ExamenLabo[] = bilans.map((b) => ({
+      ...newExam,
+      id: generateUid(),
+      analyses: `${b.bilan} : ${b.lignes.map((l) => l.nom).join(", ")}`,
+      bilan: b.bilan,
+      composants: b.lignes.map((l) => ({ nom: l.nom, prix: l.prix })),
+      prix: b.total,
+    }));
+    onUpdateExamens([...demandesBilans, ...(finalAnalysesStr ? [newExam] : []), ...examens]);
+    setExamBilans({});
     setExamPatient("");
     setExamContact("");
     alert("Demande d'examen de laboratoire générée en attente de prélèvement.");
@@ -560,7 +583,7 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
 
           <div class="section-title">Analyses / Examens Demandés</div>
           <div class="content-box">
-${examen.analyses || "Aucune analyse spécifiée"}
+${examen.composants?.length ? htmlBilan(examen) : (examen.analyses || "Aucune analyse spécifiée")}
           </div>
 
           <div class="signature-grid">
@@ -643,7 +666,7 @@ ${examen.analyses || "Aucune analyse spécifiée"}
           </div>
           
           <div class="section-title">Analyse réalisée</div>
-          <div style="font-size: 15px; font-weight: bold; margin-bottom: 25px;">${examen.analyses}</div>
+          <div style="font-size: 15px; font-weight: bold; margin-bottom: 25px;">${examen.composants?.length ? `${examen.bilan}<div style="font-size:12px;font-weight:normal;margin-top:4px">${examen.composants.map((c) => c.nom).join(" • ")}</div>` : examen.analyses}</div>
           
           <div class="section-title">Résultats d'Analyses Biologiques</div>
           <div class="content-box">${examen.resultat || "Analyse en cours d'interprétation..."}</div>
@@ -894,6 +917,7 @@ ${examen.analyses || "Aucune analyse spécifiée"}
 
             <div>
               <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Analyses demandées *</label>
+              <div className="mb-2"><SelecteurBilans choix={examBilans} onChange={setExamBilans} catalogue={catalogueLabo} /></div>
               <div className="border border-stone-200 rounded-lg p-3 bg-stone-50 max-h-64 overflow-y-auto space-y-3">
                 {[
                   { category: "TDR (comptés dans le TLOH)", options: ["TDR Paludisme", "TDR Dengue (NS1 / IgM / IgG)"] },
@@ -1019,6 +1043,17 @@ ${examen.analyses || "Aucune analyse spécifiée"}
                 </select>
               </div>
             </div>
+
+            {(() => {
+              const sel = examens.find((x) => x.id === selectedExamId);
+              if (!sel?.composants?.length) return null;
+              return (
+                <div>
+                  <span className="text-xs uppercase font-semibold tracking-wider text-stone-500">Examens du {sel.bilan}</span>
+                  <DetailBilan composants={sel.composants} />
+                </div>
+              );
+            })()}
 
             {(() => {
               const sel = examens.find((x) => x.id === selectedExamId);
@@ -1163,7 +1198,7 @@ ${examen.analyses || "Aucune analyse spécifiée"}
                         <div>{e.patient}</div>
                         {e.contact && <div className="text-xs text-stone-500 dark:text-stone-400 font-semibold mt-0.5">📞 {e.contact}</div>}
                       </td>
-                      <td className="p-3 font-semibold text-stone-700">{e.analyses}</td>
+                      <td className="p-3 font-semibold text-stone-700">{e.composants?.length ? <><div>{e.bilan}</div><DetailBilan composants={e.composants} compact /></> : e.analyses}</td>
                       <td className="p-3 font-medium text-stone-600">{pres ? pres.nom : "—"}</td>
                                             <td className="p-3 text-center">
                         <span
@@ -1366,12 +1401,13 @@ ${examen.analyses || "Aucune analyse spécifiée"}
                   <div className="min-w-0">
                     <div className="text-xs font-mono text-stone-500 dark:text-stone-400">{new Date(e.dateDemande).toLocaleDateString("fr-FR")}</div>
                     <div className="text-sm font-bold text-stone-800 truncate">
-                      {e.analyses || e.examen}
+                      {e.bilan || e.analyses || e.examen}
                       {e.priorite === "urgente" && (
                         <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-lg text-2xs font-bold bg-danger-100 text-danger-800 border border-danger-200 uppercase tracking-widest">Urgent</span>
                       )}
                     </div>
                     <div className="text-xs text-stone-500 mt-0.5">Prescripteur : {e.prescripteur}</div>
+                    <DetailBilan composants={e.composants} compact />
                     {e.interpretation && (
                       <span className={`inline-block mt-1 px-2 py-0.5 rounded-lg text-2xs font-bold ${
                         e.interpretation.toLowerCase().includes("normal") ? "bg-success-100 text-success-800" :
