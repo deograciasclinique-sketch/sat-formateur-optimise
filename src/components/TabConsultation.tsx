@@ -126,6 +126,8 @@ export default function TabConsultation({
   // met à jour ce dossier existant au lieu d'en créer un nouveau, et conserve
   // le praticien de la salle infirmier qui a pris les constantes.
   const [pendingSource, setPendingSource] = useState<Consultation | null>(null);
+  // Consultation de suivi : même dossier (code patient), nouvelle date, lien vers la visite précédente.
+  const [suiviDe, setSuiviDe] = useState<Consultation | null>(null);
 
   useEffect(() => {
     if (currentUser?.id && !consMedecin) {
@@ -651,12 +653,18 @@ export default function TabConsultation({
       consultations: Consultation[];
       labExams: ExamenLabo[];
       scannedDocs: DocumentArchive[];
+      noms: Set<string>;
     }>();
 
+    // Un dossier = un code patient quand il existe ; les visites sans code d'un patient de même
+    // nom rejoignent son dossier (anciennes fiches), sinon regroupement par nom.
+    const codeParNom = new Map<string, string>();
+    consultations.forEach((c) => { if (c.codePatient) codeParNom.set(normalizePatientName(c.patient), c.codePatient); });
     [...consultations]
       .sort((a, b) => a.date.localeCompare(b.date))
       .forEach((c) => {
-        const key = normalizePatientName(c.patient);
+        const nomNorm = normalizePatientName(c.patient);
+        const key = c.codePatient || codeParNom.get(nomNorm) || nomNorm;
         if (!key) return;
         if (!map.has(key)) {
           map.set(key, {
@@ -668,10 +676,12 @@ export default function TabConsultation({
             lastDate: c.date,
             consultations: [],
             labExams: [],
-            scannedDocs: []
+            scannedDocs: [],
+            noms: new Set<string>()
           });
         }
         const entry = map.get(key)!;
+        entry.noms.add(nomNorm);
         entry.consultations.unshift(c); // le plus récent en premier au final (car on itère du plus ancien au plus récent)
         // Toujours garder l'identité la plus récente affichée
         if (c.date >= entry.lastDate) {
@@ -686,9 +696,9 @@ export default function TabConsultation({
     // Rattacher les examens de laboratoire et documents scannés au bon patient
     map.forEach((entry) => {
       entry.labExams = laboExamens
-        ? laboExamens.filter((e) => normalizePatientName(e.patient) === entry.key)
+        ? laboExamens.filter((e) => entry.noms.has(normalizePatientName(e.patient)))
         : [];
-      entry.scannedDocs = documents.filter((d) => normalizePatientName(d.patient) === entry.key);
+      entry.scannedDocs = documents.filter((d) => entry.noms.has(normalizePatientName(d.patient)));
     });
 
     return Array.from(map.values()).sort((a, b) => b.lastDate.localeCompare(a.lastDate));
@@ -711,6 +721,7 @@ export default function TabConsultation({
   );
 
   const resetConsultationForm = () => {
+    setSuiviDe(null);
     setConsPatient("");
     setConsDate(getTodayStr());
     setConsAge("");
@@ -754,6 +765,7 @@ export default function TabConsultation({
   };
 
   const handleReprendreDossierInfirmier = (c: Consultation) => {
+    setSuiviDe(null);
     setPendingSource(c);
     setConsPatient(c.patient || "");
     setConsAge(c.age ? String(c.age) : "");
@@ -813,16 +825,37 @@ export default function TabConsultation({
     "Réactif de laboratoire": { emoji: "🧪", label: "Réactif", color: "bg-success-50 text-success-700 border-success-200" },
   };
 
+  /**
+   * Nouvelle consultation de SUIVI sur le même dossier : identité, code patient, adresse et
+   * antécédents repris de la dernière visite ; nouvelle date (du jour par défaut, modifiable) ;
+   * la nouvelle fiche est rattachée à la précédente (suiteDe) et apparaît dans le même dossier.
+   */
   const handleContinuerDossier = (c: Consultation) => {
-    setConsPatient(c.patient);
-    if (c.telephoneMedecin) { telMedecinAuto.current = ""; setConsTelMedecin(c.telephoneMedecin); }
-    setConsAge(c.age ? c.age.toString() : "");
-    setConsSexe(c.sexe);
-    setConsContact(c.contact || "");
-    setConsProfession(c.profession || "");
-    setConsFemmeEnceinte(c.femmeEnceinte || false);
+    // Toujours partir de la visite la plus récente du dossier.
+    const dossier = consultations.filter((x) => (c.codePatient && x.codePatient === c.codePatient) || normalizePatientName(x.patient) === normalizePatientName(c.patient));
+    const derniere = [...dossier].sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""))[0] || c;
+    resetConsultationForm();
+    setPendingSource(null);
+    setSuiviDe(derniere);
+    setConsPatient(derniere.patient);
+    if (derniere.telephoneMedecin) { telMedecinAuto.current = ""; setConsTelMedecin(derniere.telephoneMedecin); }
+    // Âge mis à jour d'après le temps écoulé depuis la dernière visite.
+    const ans = derniere.date ? Math.floor((Date.now() - new Date(derniere.date + "T12:00").getTime()) / (365.25 * 86400000)) : 0;
+    setConsAge(derniere.age ? String(derniere.age + Math.max(0, ans)) : "");
+    setConsSexe(derniere.sexe);
+    setConsContact(derniere.contact || "");
+    setConsProfession(derniere.profession || "");
+    setConsFemmeEnceinte(derniere.femmeEnceinte || false);
+    setConsCommune(derniere.commune || "");
+    setConsVillageSecteur(derniere.villageSecteur || "");
+    setConsZoneResidence(derniere.zoneResidence || "");
+    setConsModeEntree(derniere.modeEntree || "");
+    setConsAncienConsultant(true);
+    const avecAntecedents = [...dossier].filter((x) => x.antecedentsPatient).sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+    if (avecAntecedents?.antecedentsPatient) setConsAntecedents({ ...ANTECEDENTS_VIDES, ...avecAntecedents.antecedentsPatient });
+    setConsDate(getTodayStr());
     setSimilarPatientSuggestion(null);
-    // Focus the form
+    setViewingPatientKey(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -934,7 +967,8 @@ export default function TabConsultation({
 
         const newCons: Consultation = {
       id: pendingSource?.id || generateUid(),
-      codePatient: pendingSource?.codePatient,
+      codePatient: pendingSource?.codePatient || suiviDe?.codePatient,
+      suiteDe: pendingSource?.suiteDe || suiviDe?.id,
       patient: consPatient.trim(),
       age: parseFloat(consAge) || 0,
       sexe: consSexe as any,
@@ -1833,6 +1867,25 @@ export default function TabConsultation({
             <Plus className="w-5 h-5 text-primary-700" />
             Nouvelle Consultation de Médecine Générale
           </h3>
+
+          {suiviDe && !pendingSource && (
+            <div className="bg-info-50 border border-info-200 text-info-900 px-3 py-2.5 rounded-xl text-xs space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold">
+                  🔁 Consultation de suivi — dossier {suiviDe.codePatient ? <span className="font-mono">{suiviDe.codePatient} </span> : ""}{suiviDe.patient}
+                </span>
+                <button type="button" onClick={() => setSuiviDe(null)} className="underline font-normal whitespace-nowrap">Ne pas rattacher</button>
+              </div>
+              <div>
+                Visite précédente du <strong>{new Date(suiviDe.date + "T12:00").toLocaleDateString("fr-FR")}</strong>
+                {suiviDe.diagnosticFinal || suiviDe.diagnostic ? <> — diagnostic : <strong>{suiviDe.diagnosticFinal || suiviDe.diagnostic}</strong></> : null}
+              </div>
+              {suiviDe.ordonnance && suiviDe.ordonnance.length > 0 && (
+                <div className="text-info-800">Traitement prescrit : {suiviDe.ordonnance.map((l) => [l.medicamentNom, l.posologie].filter(Boolean).join(" ")).join(" ; ")}</div>
+              )}
+              <div className="text-info-700">Choisissez la date de cette nouvelle consultation ci-dessous (du jour par défaut).</div>
+            </div>
+          )}
 
           {pendingSource && (
             <div className="bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between">
@@ -3071,9 +3124,9 @@ export default function TabConsultation({
                           type="button"
                           onClick={() => handleContinuerDossier(p.consultations[0])}
                           className="bg-info-50 hover:bg-info-100 text-info-700 text-xs font-bold px-2 py-1 rounded-lg border border-info-200 transition-all inline-flex items-center gap-1 w-full justify-center"
-                          title="Nouvelle consultation pour ce patient"
+                          title="Nouvelle consultation de suivi sur ce même dossier, à une nouvelle date"
                         >
-                          <Plus className="w-3 h-3" /> Nouvelle visite
+                          <Plus className="w-3 h-3" /> Consultation de suivi
                         </button>
                       </div>
                     </td>
@@ -3091,13 +3144,26 @@ export default function TabConsultation({
           <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col">
             <div className="p-5 border-b border-stone-100 flex items-center justify-between shrink-0">
               <div>
-                <h3 className="text-base font-serif font-bold text-stone-900">{viewingPatientDossier.patient}</h3>
+                <h3 className="text-base font-serif font-bold text-stone-900">
+                  {viewingPatientDossier.consultations.find((c) => c.codePatient)?.codePatient && (
+                    <span className="font-mono text-emerald-600 mr-2">{viewingPatientDossier.consultations.find((c) => c.codePatient)!.codePatient}</span>
+                  )}
+                  {viewingPatientDossier.patient}
+                </h3>
                 <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
                   {viewingPatientDossier.age} ans / {viewingPatientDossier.sexe}
                   {viewingPatientDossier.contact ? ` — 📞 ${viewingPatientDossier.contact}` : ""}
                   {" — "}{viewingPatientDossier.consultations.length} consultation{viewingPatientDossier.consultations.length > 1 ? "s" : ""} enregistrée{viewingPatientDossier.consultations.length > 1 ? "s" : ""}
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => handleContinuerDossier(viewingPatientDossier.consultations[0])}
+                className="ml-auto mr-2 bg-info-600 hover:bg-info-700 text-white text-xs font-bold px-3 py-2 rounded-lg inline-flex items-center gap-1.5"
+                title="Nouvelle consultation sur ce même dossier, à une nouvelle date"
+              >
+                <Plus className="w-4 h-4" /> Consultation de suivi
+              </button>
               <button
                 type="button"
                 onClick={() => setViewingPatientKey(null)}
@@ -3117,7 +3183,13 @@ export default function TabConsultation({
                   {viewingPatientDossier.consultations.map((c) => (
                     <div key={c.id} className="border border-stone-200 rounded-xl p-3 flex items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-xs font-mono text-stone-500 dark:text-stone-400">{new Date(c.date).toLocaleDateString("fr-FR")}</div>
+                        <div className="text-xs font-mono text-stone-500 dark:text-stone-400">
+                          {new Date(c.date).toLocaleDateString("fr-FR")}
+                          {c.suiteDe && (() => {
+                            const prec = consultations.find((x) => x.id === c.suiteDe);
+                            return <span className="ml-2 font-sans font-bold text-info-700">🔁 suivi{prec ? ` de la visite du ${new Date(prec.date).toLocaleDateString("fr-FR")}` : ""}</span>;
+                          })()}
+                        </div>
                         <div className="text-sm font-bold text-primary-800 truncate">{c.diagnostic}</div>
                         <div className="text-xs text-stone-500 truncate">{c.plainte}</div>
                         {c.decision && c.decision !== "Retour à domicile" && (

@@ -750,6 +750,8 @@ export interface Consultation {
   id: string;
   // Code patient du registre (src/lib/patients.ts), ex : "DG-7K3PM".
   codePatient?: string;
+  /** Consultation de suivi : id de la consultation précédente du même dossier. */
+  suiteDe?: string;
   patient: string;
   age: number;
   sexe: "Masculin" | "Féminin";
