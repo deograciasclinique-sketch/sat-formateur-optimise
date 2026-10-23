@@ -1,6 +1,8 @@
 import "./domGuard";
 // Doit être chargé en premier : adapte l'application au téléphone quand elle tourne dans l'APK Android.
 import { NATIF } from "./lib/natif";
+// Ajoute le jeton de l'appareil aux appels /api (assistants IA) — après natif.ts.
+import "./lib/apiAuth";
 import { DEMO, SAAS, COMMERCIAL, MODE, CONFIG_COMMERCIALE } from "./lib/edition";
 import ChoixMode from "./components/ChoixMode";
 import AbonnementGate from "./components/AbonnementGate";

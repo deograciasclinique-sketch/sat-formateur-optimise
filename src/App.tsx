@@ -7,6 +7,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { SelfHealingErrorBoundary, useSystemWatchdog } from "./components/SelfHealingEngine";
 import { subscribeToCloudKey, pushMergedToCloudKey, mergeThreeWay } from "./lib/liveSync";
+import { nettoyerDonnees } from "./lib/nettoyage";
 import { useCloudSyncedState } from "./lib/useCloudSyncedState";
 import PatientMobilePortal from "./components/PatientMobilePortal";
 import {
@@ -1391,10 +1392,10 @@ export default function App() {
     
     // Asynchronously back up to cloud Firestore
     if (db && authReadyState) {
-      db.collection("dg_staff_cloud").doc("global_list").set({
+      db.collection("dg_staff_cloud").doc("global_list").set(nettoyerDonnees({
         staff: newStaff,
         updatedAt: new Date().toISOString()
-      }).then(() => {
+      })).then(() => {
         console.log("Cloud backup updated successfully.");
       }).catch((err) => {
         console.error("Cloud backup auto-update failed:", err);

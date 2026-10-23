@@ -3,11 +3,11 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import {
-  generateComplianceReport,
-  generateOptimizationReport,
-  generateConsultationAssistant,
-  generateLabProcedure,
-} from "./api/_lib/geminiCore.js";
+  routeCompliance,
+  routeOptimisation,
+  routeConsultation,
+  routeProcedureLabo,
+} from "./api/_lib/routes.js";
 
 // NOTE IMPORTANTE : ce serveur Express sert uniquement au développement local
 // (npm run dev) et à un hébergement de type Node classique (Render, Cloud Run,
@@ -20,50 +20,17 @@ import {
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.disable("x-powered-by");
+app.use(express.json({ limit: "100kb" }));
 
-// API endpoint for compliance report generation
-app.post("/api/gemini/compliance", async (req, res) => {
-  try {
-    const result = await generateComplianceReport(req.body);
-    res.json(result);
-  } catch (error: any) {
-    console.error("Error generating compliance report:", error);
-    res.status(500).json({ error: error.message || "Erreur lors de la génération du rapport." });
-  }
-});
-
-// API endpoint for App & Clinical Operations Optimization
-app.post("/api/app-optimize", async (req, res) => {
-  try {
-    const result = await generateOptimizationReport(req.body);
-    res.json(result);
-  } catch (error: any) {
-    console.error("Error generating optimization report:", error);
-    res.status(500).json({ error: error.message || "Erreur lors de la génération du rapport d'optimisation." });
-  }
-});
-
-// API endpoint for Smart Consultation Assistant
-app.post("/api/gemini/consultation-assistant", async (req, res) => {
-  try {
-    const result = await generateConsultationAssistant(req.body);
-    res.json(result);
-  } catch (error: any) {
-    console.error("Error in consultation assistant:", error);
-    res.status(500).json({ error: error.message || "Erreur de l'assistant médical IA." });
-  }
-});
-
-// API endpoint for AI-assisted lab exam procedure generation
-app.post("/api/gemini/lab-procedure", async (req, res) => {
-  try {
-    const result = await generateLabProcedure(req.body);
-    res.json(result);
-  } catch (error: any) {
-    console.error("Error generating lab procedure:", error);
-    res.status(500).json({ error: error.message || "Erreur lors de la génération de la procédure." });
-  }
+// Mêmes routes (et même sécurité : jeton, limite d'appels, validation) qu'en production.
+app.post("/api/gemini/compliance", routeCompliance);
+app.post("/api/app-optimize", routeOptimisation);
+app.post("/api/gemini/consultation-assistant", routeConsultation);
+app.post("/api/gemini/lab-procedure", routeProcedureLabo);
+app.all(["/api/gemini/:route", "/api/app-optimize"], (_req, res) => {
+  res.setHeader("Allow", "POST");
+  res.status(405).json({ error: "Méthode non autorisée." });
 });
 
 // Vite middleware for development vs static asset serving for production

@@ -4,20 +4,8 @@
  */
 
 // Fonction serverless Vercel : POST /api/gemini/lab-procedure
+// Sécurité (jeton du personnel, limite d'appels, validation des champs) : voir api/_lib/securite.ts et validation.ts.
 
-import { generateLabProcedure } from "../_lib/geminiCore.js";
+import { routeProcedureLabo } from "../_lib/routes.js";
 
-export default async function handler(req: any, res: any) {
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "Méthode non autorisée." });
-    return;
-  }
-
-  try {
-    const result = await generateLabProcedure(req.body);
-    res.status(200).json(result);
-  } catch (error: any) {
-    console.error("Error generating lab procedure:", error);
-    res.status(500).json({ error: error.message || "Erreur lors de la génération de la procédure." });
-  }
-}
+export default routeProcedureLabo;

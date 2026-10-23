@@ -16,6 +16,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { db, authReady, getCurrentUid } from "../lib/firebase";
 import { getTodayStr } from "../data";
+import { nettoyerTexte } from "../lib/nettoyage";
 import {
   requestNotificationPermission,
   sendBrowserNotification,
@@ -244,8 +245,23 @@ export default function PatientMobilePortal() {
       setBookingError("Connexion au service de rendez-vous indisponible. Vérifiez votre connexion internet puis réessayez.");
       return;
     }
-    if (!selectedDate) {
+    if (!selectedDate || !/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
       setBookingError("Veuillez choisir la date souhaitée.");
+      return;
+    }
+    // Validation + nettoyage de chaque champ avant l'envoi (les règles Firestore revérifient côté serveur).
+    const nomPropre = nettoyerTexte(patientName).replace(/[<>]/g, "").trim();
+    const motifPropre = nettoyerTexte(motif).replace(/[<>]/g, "").trim();
+    if (nomPropre.length < 2 || nomPropre.length > 100) {
+      setBookingError("Veuillez indiquer votre nom complet (2 à 100 caractères).");
+      return;
+    }
+    if (!/^\d{8,15}$/.test(phoneKey)) {
+      setBookingError("Numéro de téléphone invalide : 8 chiffres attendus (ex. 70 12 34 56).");
+      return;
+    }
+    if (motifPropre.length > 300) {
+      setBookingError("Le motif est trop long (300 caractères maximum).");
       return;
     }
     if (selectedDate < getTodayStr()) {
@@ -280,9 +296,9 @@ export default function PatientMobilePortal() {
         date: selectedDate,
         heure: "",
         moment,
-        patientNom: patientName.trim(),
+        patientNom: nomPropre,
         patientTel: phoneKey,
-        motif: motif.trim(),
+        motif: motifPropre,
         statut: "Demandé",
         createdAt: Date.now(),
         patientUid: uid

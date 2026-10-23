@@ -19,6 +19,7 @@
  */
 
 import { db } from "./firebase";
+import { nettoyerDonnees } from "./nettoyage";
 
 const COLLECTION = "dg_live_sync";
 
@@ -41,7 +42,8 @@ export function subscribeToCloudKey(
           if (!snap.exists) return;
           const payload = snap.data();
           if (payload && Object.prototype.hasOwnProperty.call(payload, "data")) {
-            onUpdate(payload.data);
+            // Données reçues nettoyées aussi (protège contre d'anciennes données piégées).
+            onUpdate(nettoyerDonnees(payload.data));
           }
         },
         (err) => {
@@ -162,7 +164,7 @@ export function pushMergedToCloudKey(key: string, local: any, base: any): Promis
       const remote = snap.exists ? (snap.data() as any)?.data : undefined;
       const merged = mergeThreeWay(base, local, remote);
       let sanitized: any;
-      sanitized = merged === undefined ? null : JSON.parse(JSON.stringify(merged));
+      sanitized = merged === undefined ? null : nettoyerDonnees(JSON.parse(JSON.stringify(merged)));
       tx.set(ref, { data: sanitized, updatedAt: Date.now() }, { merge: true });
       return sanitized;
     })
@@ -177,7 +179,8 @@ export function pushToCloudKey(key: string, value: any): Promise<void> {
 
   let sanitized: any;
   try {
-    sanitized = value === undefined ? null : JSON.parse(JSON.stringify(value));
+    // Nettoyage de chaque champ AVANT d'écrire dans la base (voir nettoyage.ts).
+    sanitized = value === undefined ? null : nettoyerDonnees(JSON.parse(JSON.stringify(value)));
   } catch (err) {
     console.error(`[liveSync] Impossible de préparer "${key}" pour l'envoi:`, err);
     return Promise.reject(err);

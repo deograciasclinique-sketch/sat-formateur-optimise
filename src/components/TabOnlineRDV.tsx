@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from "react";
 import { db, authReady } from "../lib/firebase";
 import { formatWhatsAppNumber } from "../lib/whatsapp";
+import { nettoyerDonnees } from "../lib/nettoyage";
 import { 
   Smartphone, 
   Calendar, 
@@ -196,7 +197,7 @@ export default function TabOnlineRDV() {
       const selectedMed = onlineMeds.find((m) => m.id === patientMedId);
       const medecinNom = selectedMed ? `${selectedMed.nom} (${selectedMed.specialite || 'Généraliste'})` : "Médecin";
 
-      await db.collection("rdv").add({
+      await db.collection("rdv").add(nettoyerDonnees({
         medecinId: patientMedId,
         medecinNom,
         date: patientDate,
@@ -206,7 +207,7 @@ export default function TabOnlineRDV() {
         motif: patientMotif.trim(),
         statut: "Demandé",
         createdAt: Date.now()
-      });
+      }));
 
       setBookingStatus({
         type: "ok",
@@ -323,12 +324,12 @@ export default function TabOnlineRDV() {
   const handleAddDoctor = async () => {
     if (!db || !secNewMedNom.trim()) return;
     try {
-      await db.collection("medecins").add({
+      await db.collection("medecins").add(nettoyerDonnees({
         nom: secNewMedNom.trim(),
         specialite: secNewMedSpec.trim(),
         actif: true,
         createdAt: Date.now()
-      });
+      }));
       setSecNewMedNom("");
       setSecNewMedSpec("");
       alert("Médecin ajouté avec succès !");
@@ -354,12 +355,12 @@ export default function TabOnlineRDV() {
           specialite = parts.slice(1).join(sep).trim();
         }
         if (!nom) continue;
-        await db.collection("medecins").add({
+        await db.collection("medecins").add(nettoyerDonnees({
           nom,
           specialite,
           actif: true,
           createdAt: Date.now()
-        });
+        }));
         count++;
       }
       setSecBulkMeds("");
@@ -401,7 +402,7 @@ export default function TabOnlineRDV() {
       const selectedMed = allMedsAdmin.find((m) => m.id === secRdvManualMedId);
       const medecinNom = selectedMed ? `${selectedMed.nom} (${selectedMed.specialite || 'Généraliste'})` : "Médecin";
 
-      await db.collection("rdv").add({
+      await db.collection("rdv").add(nettoyerDonnees({
         medecinId: secRdvManualMedId,
         medecinNom,
         date: secRdvManualDate,
@@ -411,7 +412,7 @@ export default function TabOnlineRDV() {
         motif: secRdvManualMotif.trim(),
         statut: "Confirmé",
         createdAt: Date.now()
-      });
+      }));
 
       setSecRdvManualNom("");
       setSecRdvManualTel("");

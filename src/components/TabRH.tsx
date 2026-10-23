@@ -10,6 +10,7 @@ import { Staff, RhFiche, Conge, Absence, PinAuditLog } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { Calendar, UserCheck, ShieldAlert, Plus, Trash2, Check, X, FileText, DollarSign, Lock, Key, RefreshCw, Eye, EyeOff, Ban, History, Search, Download, Cloud, CloudDownload, CloudUpload, CheckCircle2 } from "lucide-react";
 import { db } from "../lib/firebase";
+import { nettoyerDonnees } from "../lib/nettoyage";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -386,10 +387,10 @@ export default function TabRH({
     setIsSyncing(true);
     setSyncStatus("Sauvegarde en cours...");
     try {
-      await db.collection("dg_staff_cloud").doc("global_list").set({
+      await db.collection("dg_staff_cloud").doc("global_list").set(nettoyerDonnees({
         staff: staff,
         updatedAt: new Date().toISOString()
-      });
+      }));
       setSyncStatus("✅ Sauvegarde cloud complétée avec succès !");
       setTimeout(() => setSyncStatus(null), 5000);
     } catch (err: any) {

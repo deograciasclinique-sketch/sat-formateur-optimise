@@ -16,6 +16,7 @@ import { DEFAULT_CLINIC_PROFILE, nettoyerProfil } from "../data";
 import { encryptData, decryptData } from "../lib/cryptoBackup";
 import { db } from "../lib/firebase";
 import { subscribeToCloudKey, pushToCloudKey } from "../lib/liveSync";
+import { nettoyerTexte } from "../lib/nettoyage";
 import {
   isNotificationSupported,
   getNotificationPermission,
@@ -492,7 +493,7 @@ export default function TabSettings({
       // 1. Créer d'abord le document Firestore parent (métadonnées seulement,
       // pas de contenu volumineux) pour obtenir un ID unique.
       const docRef = await db.collection("dg_backups").add({
-        note: cloudBackupNote || "Sauvegarde manuelle standard",
+        note: nettoyerTexte(cloudBackupNote || "").slice(0, 300) || "Sauvegarde manuelle standard",
         date: dateStr,
         sizeKB: sizeKB,
         version: "2.0-chunked",
