@@ -88,6 +88,7 @@ import TabDashboardGlobal from "./components/TabDashboardGlobal";
 import TabSettings from "./components/TabSettings";
 import TabPlanifFamiliale from "./components/TabPlanifFamiliale";
 import ResponsableCodeSetup from "./components/ResponsableCodeSetup";
+import BandeauPharmacieGarde from "./components/BandeauPharmacieGarde";
 import { DEMO, DEMO_AGENTS, NOM_PRODUIT, lienAchat, reinitialiserDemo, COMMERCIAL, BUILD, choisirMode } from "./lib/edition";
 import {
   getSessionPin, setSessionPin, clearSessionPin, recordActivity, getLastActivity,
@@ -2357,6 +2358,17 @@ export default function App() {
                 Ouvrir le TLOH
               </button>
             </div>
+          )}
+          {/* Pharmacie de garde : visible sur la page de chaque utilisateur, quel que soit son poste */}
+          {activeTab !== "pharma" && (
+            <BandeauPharmacieGarde
+              utilisateurId={currentUser?.id || currentUserPin || ""}
+              theme={theme}
+              onGerer={allowedTabs.includes("pharma") ? () => {
+                setActiveTab("pharma");
+                setTimeout(() => document.getElementById("pharmacies-garde")?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+              } : undefined}
+            />
           )}
           {!posteReconnu && (
             <div className="mb-4 bg-red-50 border border-red-300 text-red-800 px-4 py-3 rounded-xl text-sm font-semibold flex items-start gap-2 shadow-xs">
