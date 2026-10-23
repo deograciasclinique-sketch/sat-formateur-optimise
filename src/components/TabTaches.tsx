@@ -5,6 +5,7 @@
 
 import React, { useState } from "react";
 import { verifierCodeDirecteur } from "../lib/accessSession";
+import { SHIFTS_GARDE, SHIFT_GARDE_DEFAUT, HORAIRES_AGENT, HORAIRE_AGENT_DEFAUT, estShiftDeJour } from "../lib/horaires";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { Staff, Task, GardeAgent } from "../types";
 import { generateUid, getTodayStr, safeSet } from "../data";
@@ -51,7 +52,7 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
   const [staffNom, setStaffNom] = useState("");
   const [staffPoste, setStaffPoste] = useState("");
   const [staffContact, setStaffContact] = useState("");
-  const [staffHoraire, setStaffHoraire] = useState("7h – 14h");
+  const [staffHoraire, setStaffHoraire] = useState(HORAIRE_AGENT_DEFAUT);
   const [staffCodeEntree, setStaffCodeEntree] = useState("");
 
   // Staff search & department filter states
@@ -271,8 +272,7 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
       // Rule B: If previous day was Nuit (ends at 07h), they cannot do Matin, Après-midi, or Garde 24h on the current day.
       if (prev.shift.includes("Nuit")) {
         if (
-          currentGarde.shift.includes("Matin") ||
-          currentGarde.shift.includes("Après-midi") ||
+          estShiftDeJour(currentGarde.shift) ||
           currentGarde.shift.includes("24h") ||
           currentGarde.shift.includes("24")
         ) {
@@ -314,7 +314,7 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
   const [newGardeAgentId, setNewGardeAgentId] = useState("");
   const [newGardeAgentNom, setNewGardeAgentNom] = useState("");
   const [newGardeDate, setNewGardeDate] = useState(getTodayStr());
-  const [newGardeShift, setNewGardeShift] = useState("Nuit (21h-07h)");
+  const [newGardeShift, setNewGardeShift] = useState(SHIFT_GARDE_DEFAUT);
   const [newGardeService, setNewGardeService] = useState("Urgences");
   const [newGardeStatut, setNewGardeStatut] = useState("Confirmé");
   const [newGardeNotes, setNewGardeNotes] = useState("");
@@ -430,7 +430,7 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
       setNewGardeAgentId(agent.id);
       setNewGardeAgentNom(agent.nom);
       setNewGardeDate(dateStr);
-      setNewGardeShift("Nuit (21h-07h)");
+      setNewGardeShift(SHIFT_GARDE_DEFAUT);
       setNewGardeService("Urgences");
       setNewGardeStatut("Confirmé");
       setNewGardeNotes("");
@@ -478,7 +478,7 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
     setNewGardeAgentId("");
     setNewGardeAgentNom("");
     setNewGardeDate(dateStr);
-    setNewGardeShift("Nuit (21h-07h)");
+    setNewGardeShift(SHIFT_GARDE_DEFAUT);
     setNewGardeService("Urgences");
     setNewGardeStatut("Confirmé");
     setNewGardeNotes("");
@@ -1097,7 +1097,7 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
 
                               if (agentGarde.shift.includes("Nuit")) {
                                 cellStyle = "bg-info-50 border border-info-200 text-info-800 hover:border-info-400 hover:bg-info-100/50 dark:bg-info-950/20 dark:border-info-900/30 dark:text-info-400";
-                              } else if (agentGarde.shift.includes("Matin")) {
+                              } else if (agentGarde.shift.includes("Matin") || agentGarde.shift.includes("Jour")) {
                                 cellStyle = "bg-primary-50 border border-primary-200 text-primary-800 hover:border-primary-400 hover:bg-primary-100/50 dark:bg-primary-950/20 dark:border-primary-900/30 dark:text-primary-400";
                               } else if (agentGarde.shift.includes("Après-midi")) {
                                 cellStyle = "bg-warning-50 border border-warning-200 text-warning-800 hover:border-warning-400 hover:bg-warning-100/50 dark:bg-warning-950/20 dark:border-warning-900/30 dark:text-warning-400";
@@ -1415,10 +1415,7 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
                       onChange={(e) => setNewGardeShift(e.target.value)}
                       className="w-full border border-stone-200 dark:border-stone-750 rounded-lg px-3 py-2 bg-stone-50 dark:bg-stone-850 text-stone-800 dark:text-stone-200 font-semibold focus:outline-none"
                     >
-                      <option value="Matin (07h-14h)">Matin (07h-14h)</option>
-                      <option value="Après-midi (14h-21h)">Après-midi (14h-21h)</option>
-                      <option value="Nuit (21h-07h)">Nuit (21h-07h)</option>
-                      <option value="Garde 24h">Garde 24h</option>
+                      {SHIFTS_GARDE.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </div>
 
@@ -1538,11 +1535,7 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
                   onChange={(e) => setStaffHoraire(e.target.value)}
                   className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none"
                 >
-                  <option value="7h – 14h">7h – 14h (Matin)</option>
-                  <option value="14h – 21h">14h – 21h (Soir)</option>
-                  <option value="21h – 7h (Garde)">21h – 7h (Nuit/Garde)</option>
-                  <option value="7h – 16h">7h – 16h (Médecin)</option>
-                  <option value="Flexible">Flexible</option>
+                  {HORAIRES_AGENT.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </div>
               <div>

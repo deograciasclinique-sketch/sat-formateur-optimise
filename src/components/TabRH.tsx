@@ -4,6 +4,7 @@
  */
 
 import { isResponsableCode } from "../lib/accessSession";
+import { HORAIRE_AGENT_DEFAUT } from "../lib/horaires";
 import React, { useState } from "react";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { Staff, RhFiche, Conge, Absence, PinAuditLog } from "../types";
@@ -464,7 +465,7 @@ export default function TabRH({
               nom: doc.nom,
               poste: doc.specialite || "Médecin (Portail)",
               contact: doc.contact || "+226 70 00 00 00",
-              horaire: "7h – 16h",
+              horaire: HORAIRE_AGENT_DEFAUT === "7h – 14h" ? "7h – 16h" : HORAIRE_AGENT_DEFAUT,
               codeEntree: "7777" // default PIN for imported doctors
             });
             addedCount++;

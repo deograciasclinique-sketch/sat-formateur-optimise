@@ -1,5 +1,6 @@
 import React, { useRef } from "react";
 import { verifierCodeDirecteur } from "../lib/accessSession";
+import { SHIFTS_GARDE, SHIFT_GARDE_DEFAUT } from "../lib/horaires";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import html2canvas from "html2canvas";
 import { motion } from "motion/react";
@@ -246,7 +247,7 @@ export default function TabDashboardGlobal({
   const [newGardeAgentId, setNewGardeAgentId] = React.useState("");
   const [newGardeAgentNom, setNewGardeAgentNom] = React.useState("");
   const [newGardeDate, setNewGardeDate] = React.useState(todayStr);
-  const [newGardeShift, setNewGardeShift] = React.useState("Nuit (21h-07h)");
+  const [newGardeShift, setNewGardeShift] = React.useState(SHIFT_GARDE_DEFAUT);
   const [newGardeService, setNewGardeService] = React.useState("Urgences");
   const [newGardeStatut, setNewGardeStatut] = React.useState("Confirmé");
   const [newGardeNotes, setNewGardeNotes] = React.useState("");
@@ -2176,10 +2177,7 @@ export default function TabDashboardGlobal({
                     onChange={(e) => setNewGardeShift(e.target.value)}
                     className="w-full border border-stone-200 dark:border-stone-800 rounded-lg px-2.5 py-1.5 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 outline-none"
                   >
-                    <option value="Matin (07h-14h)">Matin (07h-14h)</option>
-                    <option value="Après-midi (14h-21h)">Après-midi (14h-21h)</option>
-                    <option value="Nuit (21h-07h)">Nuit (21h-07h)</option>
-                    <option value="Garde 24h">Garde 24h</option>
+                    {SHIFTS_GARDE.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
 
