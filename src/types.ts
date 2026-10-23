@@ -808,6 +808,8 @@ export interface Consultation {
   // Conduite à tenir après le diagnostic de certitude, avant l'ordonnance.
   conduiteATenir?: ConduiteItem[];
   ordonnance: LigneOrdonnance[];
+  /** Ville (zone) dont la pharmacie de garde est indiquée au patient ; vide = ville du cabinet. */
+  zoneGardeId?: string;
   photos?: string[];
   createdAt: string;
   agentCode?: string;

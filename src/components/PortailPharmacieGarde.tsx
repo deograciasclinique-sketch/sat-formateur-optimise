@@ -1,17 +1,23 @@
 /**
  * Portail patient : pharmacie(s) de garde du moment, avec appel et itinéraire en un geste.
- * Lit la copie publique « pharmacies_public/zone » publiée par l'onglet Pharmacie
- * (sans les remarques internes) ; le groupe de garde est recalculé ici, à l'heure du téléphone.
+ * Ville du cabinet par défaut ; le patient peut choisir une autre ville enregistrée par le cabinet.
+ * Lit la copie publique « pharmacies_public/zone » (sans remarques internes) ; la garde est
+ * recalculée ici, à l'heure du téléphone.
  */
 import React, { useEffect, useState } from "react";
-import { Pill, Phone, Navigation } from "lucide-react";
+import { Pill, Phone, Navigation, ExternalLink } from "lucide-react";
 import { db, authReady } from "../lib/firebase";
 import { nettoyerDonnees } from "../lib/nettoyage";
-import { DonneesPharmacies, normaliser, periodeDeGarde, libellePeriode, lienItineraire } from "../lib/pharmacies";
+import { DonneesPharmacies, normaliser, zoneOuCabinet, gardeDuMoment, lienItineraire, nomZone } from "../lib/pharmacies";
+
+const CLE_VILLE = "dg_portail_ville_garde";
 
 export default function PortailPharmacieGarde() {
   const [donnees, setDonnees] = useState<DonneesPharmacies | null>(null);
   const [maintenant, setMaintenant] = useState(() => new Date());
+  const [villeId, setVilleId] = useState<string>(() => {
+    try { return localStorage.getItem(CLE_VILLE) || ""; } catch { return ""; }
+  });
 
   useEffect(() => {
     let annule = false;
@@ -27,19 +33,35 @@ export default function PortailPharmacieGarde() {
     return () => { annule = true; stop?.(); clearInterval(t); };
   }, []);
 
-  const garde = donnees ? periodeDeGarde(donnees, maintenant) : null;
-  if (!donnees || !garde || garde.pharmacies.length === 0) return null;
+  if (!donnees || donnees.zones.length === 0) return null;
+  const zone = zoneOuCabinet(donnees, villeId);
+  const garde = gardeDuMoment(zone, maintenant);
+  const choisir = (id: string) => {
+    setVilleId(id);
+    try { localStorage.setItem(CLE_VILLE, id); } catch { /* ignore */ }
+  };
 
   return (
     <div className="bg-white p-4 rounded-2xl border border-emerald-200 space-y-3">
       <div className="flex items-center gap-2">
         <div className="p-2 rounded-xl bg-emerald-50 text-emerald-700"><Pill className="w-5 h-5" /></div>
-        <div>
-          <h3 className="text-sm font-bold text-stone-800">Pharmacie{garde.pharmacies.length > 1 ? "s" : ""} de garde{donnees.zone ? ` — ${donnees.zone}` : ""}</h3>
-          <p className="text-[11px] text-stone-500">{libellePeriode(garde)}</p>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-bold text-stone-800">Pharmacie de garde</h3>
+          {garde && <p className="text-[11px] text-stone-500">{garde.periode}</p>}
         </div>
       </div>
-      {garde.pharmacies.map((p) => {
+      {donnees.zones.length > 1 && (
+        <select value={zone?.id || ""} onChange={(e) => choisir(e.target.value)} aria-label="Ville"
+          className="w-full p-2.5 bg-stone-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+          {donnees.zones.map((z) => <option key={z.id} value={z.id}>{nomZone(z)}</option>)}
+        </select>
+      )}
+      {!garde || garde.pharmacies.length === 0 ? (
+        <p className="text-xs text-stone-500">
+          La garde de {zone ? nomZone(zone) : "cette ville"} n'est pas encore renseignée.
+          {zone?.lien && <> <a href={zone.lien} target="_blank" rel="noopener noreferrer" className="text-primary-700 font-bold underline inline-flex items-center gap-0.5">Voir la liste <ExternalLink className="w-3 h-3" /></a></>}
+        </p>
+      ) : garde.pharmacies.slice(0, 40).map((p) => {
         const lien = lienItineraire(p);
         return (
           <div key={p.id} className="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
@@ -48,7 +70,7 @@ export default function PortailPharmacieGarde() {
             {p.horaires && <p className="text-xs text-stone-500 italic">{p.horaires}</p>}
             <div className="grid grid-cols-2 gap-2 mt-2">
               {p.telephone && (
-                <a href={`tel:${p.telephone.replace(/[^\d+]/g, "").replace(/^(\d{8})$/, "+226$1")}`}
+                <a href={`tel:${zone?.pays === "Burkina Faso" ? p.telephone.replace(/[^\d+]/g, "").replace(/^(\d{8})$/, "+226$1") : p.telephone.replace(/[^\d+]/g, "")}`}
                   className="flex items-center justify-center gap-1.5 bg-white rounded-lg py-2 text-xs font-bold text-stone-800 border border-stone-200">
                   <Phone className="w-4 h-4 text-primary-600" />Appeler
                 </a>

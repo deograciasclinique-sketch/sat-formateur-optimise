@@ -1,5 +1,5 @@
 import { Consultation } from "../types";
-import { lirePharmaciesLocal, periodeDeGarde, texteGarde } from "./pharmacies";
+import { texteGardeZone } from "./pharmacies";
 
 /**
  * Nettoie un numéro de téléphone saisi sous n'importe quelle forme
@@ -65,11 +65,11 @@ export function buildConsultationWhatsAppMessage(c: Consultation, clinicName = "
   }
   // Pharmacie(s) de garde du moment, pour acheter les médicaments prescrits.
   if (c.ordonnance && c.ordonnance.length > 0) {
-    const pharmacies = lirePharmaciesLocal();
-    const garde = periodeDeGarde(pharmacies);
-    if (garde && garde.pharmacies.length > 0) {
+    // Ville choisie pour ce patient sur la consultation, sinon la ville du cabinet.
+    const garde = texteGardeZone(c.zoneGardeId);
+    if (garde) {
       lines.push("");
-      lines.push(texteGarde(pharmacies, garde));
+      lines.push(garde);
     }
   }
   lines.push("");

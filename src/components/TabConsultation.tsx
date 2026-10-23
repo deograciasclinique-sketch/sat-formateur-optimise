@@ -13,7 +13,7 @@ import { interpreterDengue, dengueComplet } from "../modules/thlo/tdr";
 import { AntecedentsPatient, Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
-import { blocGardeHtml, lirePharmaciesLocal, periodeDeGarde, texteGarde } from "../lib/pharmacies";
+import { blocGardeHtml, lirePharmaciesLocal, texteGardeZone, nomZone, zoneCabinet } from "../lib/pharmacies";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
 import EpidemioAssistant from "./EpidemioAssistant";
@@ -202,6 +202,8 @@ export default function TabConsultation({
 
   // Prescription builder states
   const [presLines, setPresLines] = useState<LigneOrdonnance[]>([]);
+  // Ville de la pharmacie de garde indiquée au patient (vide = ville du cabinet).
+  const [consZoneGarde, setConsZoneGarde] = useState("");
   const [presMedName, setPresMedName] = useState("");
   const [presMedId, setPresMedId] = useState<string | undefined>(undefined);
   const [presCustomMode, setPresCustomMode] = useState(false);
@@ -737,6 +739,7 @@ export default function TabConsultation({
     setConsDiagnosticFinal("");
     setConsCAT([]);
     setPresLines([]);
+    setConsZoneGarde("");
     setTempPhotos([]);
     setTempLabResults([]);
     setShowFormCamera(false);
@@ -778,6 +781,7 @@ export default function TabConsultation({
     setConsDiagnosticFinal(c.diagnosticFinal || "");
     setConsCAT(c.conduiteATenir || []);
     setPresLines(c.ordonnance || []);
+    setConsZoneGarde(c.zoneGardeId || "");
     setConsDecision((c.decision as any) || "Retour à domicile");
     setConsConsignesInf(c.consignesInfirmier || "");
     setConsReferenceService(c.referenceService || "");
@@ -969,6 +973,7 @@ export default function TabConsultation({
       mdoDeclareCategorie: detectedMDO?.category,
       mdoDeclareDate: detectedMDO ? new Date().toISOString() : undefined,
       ordonnance: [...presLines],
+      zoneGardeId: consZoneGarde || undefined,
       photos: [...tempPhotos],
       labResults: [...tempLabResults],
       createdAt: pendingSource?.createdAt || new Date().toISOString(),
@@ -1165,7 +1170,7 @@ export default function TabConsultation({
   const handleShareWhatsAppOrdonnance = (cons: Consultation) => {
     const doctorName = staff.find((s) => s.id === cons.medecinId)?.nom || "Médecin Traitant";
     const ordonnanceText = cons.ordonnance.map(line => `- ${line.medicamentNom} : ${line.posologie} (${line.duree})`).join("\n");
-    const text = `Bonjour,\n\nVoici les éléments de votre consultation du ${new Date(cons.date).toLocaleDateString("fr-FR")} avec le Dr. ${doctorName} :\n\nDiagnostic :\n${cons.diagnostic || "Non spécifié"}\n\nOrdonnance :\n${ordonnanceText}\n\nConseils Hygiéno-Diététiques :\n${cons.observations || "Aucun"}${(() => { const d = lirePharmaciesLocal(); const g = periodeDeGarde(d); return g && g.pharmacies.length ? "\n\n" + texteGarde(d, g) : ""; })()}\n\nClinique : ${profile.name}\n\n*Veuillez trouver le fichier PDF de l'ordonnance en pièce jointe (si envoyé par la clinique).*`;
+    const text = `Bonjour,\n\nVoici les éléments de votre consultation du ${new Date(cons.date).toLocaleDateString("fr-FR")} avec le Dr. ${doctorName} :\n\nDiagnostic :\n${cons.diagnostic || "Non spécifié"}\n\nOrdonnance :\n${ordonnanceText}\n\nConseils Hygiéno-Diététiques :\n${cons.observations || "Aucun"}${(() => { const t = texteGardeZone(cons.zoneGardeId); return t ? "\n\n" + t : ""; })()}\n\nClinique : ${profile.name}\n\n*Veuillez trouver le fichier PDF de l'ordonnance en pièce jointe (si envoyé par la clinique).*`;
     const encoded = encodeURIComponent(text);
     
     let phone = cons.contact || "";
@@ -1245,7 +1250,7 @@ export default function TabConsultation({
             <span style="font-size: 12px; color: #78716c;">${doctorName}</span><br>
             <div class="stamp">${profile.stampText}</div>
           </div>
-          ${blocGardeHtml()}
+          ${blocGardeHtml(cons.zoneGardeId)}
         </body>
       </html>
     `);
@@ -2774,6 +2779,24 @@ export default function TabConsultation({
             <FileText className="w-5 h-5 text-primary-700" />
             Rédiger l'Ordonnance Médicale
           </h3>
+
+          {(() => {
+            // Pharmacie de garde indiquée au patient : ville du cabinet par défaut, ou la ville où il habite.
+            const pharmaciesZones = lirePharmaciesLocal();
+            if (pharmaciesZones.zones.length < 2) return null;
+            const cab = zoneCabinet(pharmaciesZones);
+            return (
+              <div className="flex flex-wrap items-center gap-2 text-xs bg-emerald-50 border border-emerald-100 rounded-xl p-2">
+                <span className="font-bold text-emerald-800">💊 Pharmacie de garde indiquée au patient :</span>
+                <select value={consZoneGarde} onChange={(e) => setConsZoneGarde(e.target.value)} className="p-1.5 rounded-lg border border-emerald-200 bg-white text-xs">
+                  <option value="">{cab ? `${nomZone(cab)} (ville du cabinet)` : "Ville du cabinet"}</option>
+                  {pharmaciesZones.zones.filter((zz) => zz.id !== cab?.id).map((zz) => (
+                    <option key={zz.id} value={zz.id}>{nomZone(zz)}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })()}
 
           <div className="space-y-4">
             <div className="grid grid-cols-4 gap-2 bg-stone-50/50 p-3 rounded-xl border border-stone-100">
