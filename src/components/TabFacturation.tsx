@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from "react";
+import { verifierCodeDirecteur } from "../lib/accessSession";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { logActivity } from "../lib/activityLogger";
 import { Facture, Depense, FactureLigne, ExamenLabo, ActeTarifaire, Medicament, Consultation } from "../types";
@@ -277,9 +278,9 @@ export default function TabFacturation({
     alert("Le code d'accès Directeur a été modifié avec succès !");
   };
 
-  const handleUnlock = (e: React.FormEvent) => {
+  const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (enteredCode.trim() === directorCode) {
+    if (await verifierCodeDirecteur(enteredCode, directorCode)) {
       setIsDirectorUnlocked(true);
       setUnlockError("");
       setEnteredCode("");

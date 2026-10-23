@@ -1,4 +1,5 @@
 import React, { useRef } from "react";
+import { verifierCodeDirecteur } from "../lib/accessSession";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import html2canvas from "html2canvas";
 import { motion } from "motion/react";
@@ -224,9 +225,9 @@ export default function TabDashboardGlobal({
     alert("Le code d'accès Directeur a été modifié avec succès !");
   };
 
-  const handleUnlock = (e: React.FormEvent) => {
+  const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (enteredCode.trim() === directorCode) {
+    if (await verifierCodeDirecteur(enteredCode, directorCode)) {
       setIsDirectorUnlocked(true);
       setUnlockError("");
       setEnteredCode("");

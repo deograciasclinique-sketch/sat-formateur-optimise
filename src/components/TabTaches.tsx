@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from "react";
+import { verifierCodeDirecteur } from "../lib/accessSession";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { Staff, Task, GardeAgent } from "../types";
 import { generateUid, getTodayStr, safeSet } from "../data";
@@ -322,9 +323,9 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
     setGardes(newGardes);
   };
 
-  const handleUnlockDirector = (e: React.FormEvent) => {
+  const handleUnlockDirector = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (enteredCode.trim() === directorCode) {
+    if (await verifierCodeDirecteur(enteredCode, directorCode)) {
       setIsDirectorUnlocked(true);
       setUnlockError("");
       setEnteredCode("");

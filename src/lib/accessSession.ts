@@ -112,3 +112,24 @@ export function startResponsableCodeSync(): () => void {
     }
   });
 }
+
+// ─── Code « Directeur » (planning des gardes, console des agents, facturation) ───
+
+export const CODE_DIRECTEUR_DEFAUT = "1234";
+
+/**
+ * Vérifie le code Directeur saisi.
+ * Accepte : le code Directeur enregistré (comparé comme texte : un code relu en nombre,
+ * avec des espaces ou vide ne bloque plus l'accès) — ou le code personnel du Responsable,
+ * qui doit toujours pouvoir déverrouiller ces écrans.
+ */
+export async function verifierCodeDirecteur(saisi: string, codeEnregistre: unknown): Promise<boolean> {
+  const s = String(saisi ?? "").trim();
+  if (!s) return false;
+  const attendu = (typeof codeEnregistre === "string" || typeof codeEnregistre === "number")
+    && String(codeEnregistre).trim()
+    ? String(codeEnregistre).trim()
+    : CODE_DIRECTEUR_DEFAUT;
+  if (s === attendu) return true;
+  return isResponsableCode(s);
+}
