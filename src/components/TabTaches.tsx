@@ -5,6 +5,7 @@
 
 import React, { useState } from "react";
 import { verifierCodeDirecteur } from "../lib/accessSession";
+import RotationAutomatique from "./RotationAutomatique";
 import { SHIFTS_GARDE, SHIFT_GARDE_DEFAUT, HORAIRES_AGENT, HORAIRE_AGENT_DEFAUT, estShiftDeJour } from "../lib/horaires";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { Staff, Task, GardeAgent } from "../types";
@@ -1297,6 +1298,9 @@ export default function TabTaches({ staff, tasks, onUpdateStaff, onUpdateTasks, 
               </div>
             </div>
           )}
+
+          {/* Rotation automatique 4 agents (Jour → Nuit → Repos → Repos) */}
+          {isDirectorUnlocked && <RotationAutomatique staff={staff} gardes={gardes} onSave={saveGardes} />}
 
           {/* Quick Schedule Creator / Editor */}
           {isDirectorUnlocked && (
