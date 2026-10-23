@@ -21,6 +21,7 @@ import {
   normaliser, periodeDeGarde, gardeConfiguree, libellePeriode, telephones, lienItineraire,
   lirePosition, texteGarde, echapperHtml, donneesPubliques, versJour,
 } from "../lib/pharmacies";
+import { PHARMACIES_BOBO, ZONE_BOBO, REFERENCE_GARDE_BOBO } from "../lib/pharmaciesBoboDioulasso";
 
 type Props = { theme?: "light" | "dark" };
 
@@ -133,6 +134,44 @@ export default function PharmaciesGarde({ theme = "light" }: Props) {
   };
 
   // ─── Import par lot : « Nom ; Quartier ; Téléphone ; Groupe » ───
+  // ─── Liste de référence de Bobo-Dioulasso (79 pharmacies, groupes 1 à 4, positions GPS) ───
+  const chargerBobo = () => {
+    if (!window.confirm(`Charger les ${PHARMACIES_BOBO.length} pharmacies de Bobo-Dioulasso avec leurs groupes de garde ?\n\nLes pharmacies déjà saisies sont conservées (pas de doublon).`)) return;
+    let ajoutees = 0;
+    maj((d) => {
+      const groupes = [...d.garde.groupes];
+      const idGroupe = (num: number) => {
+        if (!num) return "";
+        const nom = `Groupe ${num}`;
+        let g = groupes.find((x) => x.nom.toLowerCase() === nom.toLowerCase());
+        if (!g) { g = { id: generateUid(), nom }; groupes.push(g); }
+        return g.id;
+      };
+      [1, 2, 3, 4].forEach(idGroupe); // crée les 4 groupes dans l'ordre du tour
+      const pharmacies = [...d.pharmacies];
+      const cle = (t: string) => t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/^pharmacie\s+/, "").trim();
+      for (const r of PHARMACIES_BOBO) {
+        if (pharmacies.some((p) => cle(p.nom) === cle(r.nom))) continue;
+        pharmacies.push({
+          id: generateUid(), nom: r.nom, quartier: r.quartier, telephone: r.telephone, telephone2: r.telephone2 || "",
+          lat: r.lat ?? null, lng: r.lng ?? null, groupeId: idGroupe(r.groupe),
+        });
+        ajoutees++;
+      }
+      pharmacies.sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
+      const dejaRegle = d.garde.groupeReferenceId && d.garde.dateReference;
+      const garde = dejaRegle ? { ...d.garde, groupes } : {
+        ...d.garde, groupes,
+        groupeReferenceId: idGroupe(REFERENCE_GARDE_BOBO.groupe),
+        dateReference: REFERENCE_GARDE_BOBO.date,
+        heureChangement: REFERENCE_GARDE_BOBO.heure,
+        dureeJours: REFERENCE_GARDE_BOBO.dureeJours,
+      };
+      return { ...d, zone: d.zone || ZONE_BOBO, pharmacies, garde };
+    });
+    window.alert(`${ajoutees} pharmacie(s) ajoutée(s). Vérifiez la garde de cette semaine avec le programme officiel ; corrigez-la au besoin avec « Corriger une garde ».`);
+  };
+
   const importer = () => {
     const lignes = importTexte.split("\n").map((l) => l.trim()).filter(Boolean);
     if (!lignes.length) return;
@@ -303,6 +342,9 @@ export default function PharmaciesGarde({ theme = "light" }: Props) {
             <span>
               Le tour de garde n'est pas encore réglé. Cliquez sur <strong>Gérer</strong> : ajoutez les pharmacies (ou importez la liste),
               créez les groupes de garde dans l'ordre du programme officiel, puis indiquez quel groupe est de garde à une date connue.
+              <button type="button" onClick={chargerBobo} className="mt-2 block px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold">
+                Charger d'un coup les {PHARMACIES_BOBO.length} pharmacies de Bobo-Dioulasso (groupes 1 à 4)
+              </button>
             </span>
           </div>
         ) : (
@@ -429,6 +471,7 @@ export default function PharmaciesGarde({ theme = "light" }: Props) {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className={`text-sm font-bold ${titre} flex items-center gap-2`}><Pill className="w-4 h-4 text-primary-600" /> 2. Pharmacies de la zone</h4>
               <button type="button" onClick={() => setImportOuvert(!importOuvert)} className="text-xs font-bold text-primary-600 hover:underline flex items-center gap-1"><Upload className="w-3.5 h-3.5" />Importer une liste</button>
+              <button type="button" onClick={chargerBobo} className="text-xs font-bold text-emerald-700 hover:underline flex items-center gap-1"><Pill className="w-3.5 h-3.5" />Charger les pharmacies de Bobo-Dioulasso</button>
             </div>
 
             {importOuvert && (
