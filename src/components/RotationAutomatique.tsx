@@ -17,7 +17,7 @@ type Props = {
   onSave: (gardes: GardeAgent[]) => void;
 };
 
-const NOMS_PAR_DEFAUT = ["Zouré", "Rama", "Tobo", "Madiara"];
+const NOMS_PAR_DEFAUT = ["Zouré", "Rama", "Tobo", "Traoré Madiara"];
 const SERVICES = ["Urgences", "Maternité", "Pédiatrie", "Médecine Générale", "Pharmacie"];
 
 const sansAccent = (t: string) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
@@ -37,7 +37,10 @@ type Agent = { id: string; nom: string; poste: string };
 export default function RotationAutomatique({ staff, gardes, onSave }: Props) {
   // Pré-sélection : agents de la fiche RH dont le nom contient Zouré, Rama, Tobo, Madiara.
   const initial = useMemo(() => NOMS_PAR_DEFAUT.map((n) => {
-    const s = staff.find((x) => sansAccent(x.nom).includes(sansAccent(n)));
+    // Tous les mots du nom doivent figurer dans la fiche RH, dans n'importe quel ordre
+    // (« Traoré Madiara » trouve « TRAORE Madiara » comme « Madiara Traoré »).
+    const mots = sansAccent(n).split(/\s+/);
+    const s = staff.find((x) => { const nom = sansAccent(x.nom); return mots.every((m) => nom.includes(m)); });
     return s ? { choix: s.id, libre: "" } : { choix: "Autre", libre: n };
   }), [staff]);
   const [agents, setAgentsBrut] = useState(initial);
@@ -72,7 +75,10 @@ export default function RotationAutomatique({ staff, gardes, onSave }: Props) {
     const jours = semaines * 7;
     const fin = decaler(debut, jours - 1);
     const memeAgent = (g: GardeAgent, a: Agent) => (a.id && g.agentId === a.id) || sansAccent(g.agentNom || "") === sansAccent(a.nom);
-    const existants = gardes.filter((g) => g.date >= debut && g.date <= fin && liste.some((a) => memeAgent(g, a)));
+    // Remplacées : les gardes de ces agents sur la période, et toute rotation automatique déjà
+    // générée sur la période (ex. un agent retiré du programme, comme l'ancienne « Madiara »).
+    const existants = gardes.filter((g) => g.date >= debut && g.date <= fin
+      && (liste.some((a) => memeAgent(g, a)) || (g.notes || "").startsWith("Rotation automatique (Jour")));
     if (!window.confirm(
       `Générer la rotation de ${liste.map((a) => a.nom).join(", ")} du ${new Date(debut + "T12:00").toLocaleDateString("fr-FR")} au ${new Date(fin + "T12:00").toLocaleDateString("fr-FR")} (${semaines} semaines) ?` +
       (existants.length ? `\n\n${existants.length} garde(s) déjà programmée(s) pour ces agents sur cette période seront remplacées.` : "")
