@@ -13,6 +13,7 @@ import { interpreterDengue, dengueComplet } from "../modules/thlo/tdr";
 import { AntecedentsPatient, Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
+import { blocGardeHtml, lirePharmaciesLocal, periodeDeGarde, texteGarde } from "../lib/pharmacies";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
 import EpidemioAssistant from "./EpidemioAssistant";
@@ -1164,7 +1165,7 @@ export default function TabConsultation({
   const handleShareWhatsAppOrdonnance = (cons: Consultation) => {
     const doctorName = staff.find((s) => s.id === cons.medecinId)?.nom || "Médecin Traitant";
     const ordonnanceText = cons.ordonnance.map(line => `- ${line.medicamentNom} : ${line.posologie} (${line.duree})`).join("\n");
-    const text = `Bonjour,\n\nVoici les éléments de votre consultation du ${new Date(cons.date).toLocaleDateString("fr-FR")} avec le Dr. ${doctorName} :\n\nDiagnostic :\n${cons.diagnostic || "Non spécifié"}\n\nOrdonnance :\n${ordonnanceText}\n\nConseils Hygiéno-Diététiques :\n${cons.observations || "Aucun"}\n\nClinique : ${profile.name}\n\n*Veuillez trouver le fichier PDF de l'ordonnance en pièce jointe (si envoyé par la clinique).*`;
+    const text = `Bonjour,\n\nVoici les éléments de votre consultation du ${new Date(cons.date).toLocaleDateString("fr-FR")} avec le Dr. ${doctorName} :\n\nDiagnostic :\n${cons.diagnostic || "Non spécifié"}\n\nOrdonnance :\n${ordonnanceText}\n\nConseils Hygiéno-Diététiques :\n${cons.observations || "Aucun"}${(() => { const d = lirePharmaciesLocal(); const g = periodeDeGarde(d); return g && g.pharmacies.length ? "\n\n" + texteGarde(d, g) : ""; })()}\n\nClinique : ${profile.name}\n\n*Veuillez trouver le fichier PDF de l'ordonnance en pièce jointe (si envoyé par la clinique).*`;
     const encoded = encodeURIComponent(text);
     
     let phone = cons.contact || "";
@@ -1244,6 +1245,7 @@ export default function TabConsultation({
             <span style="font-size: 12px; color: #78716c;">${doctorName}</span><br>
             <div class="stamp">${profile.stampText}</div>
           </div>
+          ${blocGardeHtml()}
         </body>
       </html>
     `);

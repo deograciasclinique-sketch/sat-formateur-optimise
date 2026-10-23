@@ -1,4 +1,5 @@
 import { Consultation } from "../types";
+import { lirePharmaciesLocal, periodeDeGarde, texteGarde } from "./pharmacies";
 
 /**
  * Nettoie un numéro de téléphone saisi sous n'importe quelle forme
@@ -60,6 +61,15 @@ export function buildConsultationWhatsAppMessage(c: Consultation, clinicName = "
     lines.push(`Suite recommandée : ${c.decision}`);
     if (c.decision === "Référer vers un autre service" && c.referenceService) {
       lines.push(`Service : ${c.referenceService}`);
+    }
+  }
+  // Pharmacie(s) de garde du moment, pour acheter les médicaments prescrits.
+  if (c.ordonnance && c.ordonnance.length > 0) {
+    const pharmacies = lirePharmaciesLocal();
+    const garde = periodeDeGarde(pharmacies);
+    if (garde && garde.pharmacies.length > 0) {
+      lines.push("");
+      lines.push(texteGarde(pharmacies, garde));
     }
   }
   lines.push("");

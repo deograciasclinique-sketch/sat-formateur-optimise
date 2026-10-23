@@ -51,6 +51,13 @@ service cloud.firestore {
         && d.createdAt is number;
     }
 
+    // Pharmacies de la zone et tour de garde (copie publique, sans remarques internes) :
+    // lisible par le portail patient, modifiable par le personnel uniquement.
+    match /pharmacies_public/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isStaff();
+    }
+
     // Médecins proposés aux patients
     match /medecins/{medecinId} {
       allow read: if isSignedIn();

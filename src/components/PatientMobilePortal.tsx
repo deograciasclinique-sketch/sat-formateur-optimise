@@ -17,6 +17,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { db, authReady, getCurrentUid } from "../lib/firebase";
 import { getTodayStr } from "../data";
 import { nettoyerTexte } from "../lib/nettoyage";
+import PortailPharmacieGarde from "./PortailPharmacieGarde";
 import {
   requestNotificationPermission,
   sendBrowserNotification,
@@ -455,6 +456,7 @@ export default function PatientMobilePortal() {
                   </button>
                 </div>
               </div>
+              <PortailPharmacieGarde />
               <ClinicContact />
             </div>
           )}
@@ -505,6 +507,7 @@ export default function PatientMobilePortal() {
                 </button>
               )}
 
+              <PortailPharmacieGarde />
               <ClinicContact />
             </div>
           )}

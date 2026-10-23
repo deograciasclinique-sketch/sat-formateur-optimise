@@ -19,6 +19,7 @@ import {
   Legend
 } from "recharts";
 import BarcodeScanner from "./BarcodeScanner";
+import PharmaciesGarde from "./PharmaciesGarde";
 import { jsPDF } from "jspdf";
 
 interface TabPharmacieProps {
@@ -1079,6 +1080,9 @@ export default function TabPharmacie({
           <div className="text-xs text-stone-500 dark:text-stone-400 mt-1">Dispensés aujourd'hui</div>
         </div>
       </div>
+
+      {/* 💊 Pharmacies de la zone et pharmacie de garde */}
+      <PharmaciesGarde theme={theme} />
 
       {/* ⚡ Fast Barcode Scan Stock Update Section */}
       <div id="barcode-scan-section" className={`rounded-2xl border p-5 shadow-xs transition-all duration-200 ${
