@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Consultation, Facture, FactureLigne, ActeTarifaire } from "../types";
+import { Consultation, Facture, FactureLigne, ActeTarifaire, Medicament, ExamenLabo } from "../types";
+import OrdresMedecin from "./OrdresMedecin";
 import { generateUid, getTodayStr } from "../data";
 import { Plus, UserPlus, Wallet, ArrowRight, Clock, CheckCircle2, Trash2, ReceiptText, Search, ShieldCheck, AlertTriangle } from "lucide-react";
 import { VALIDITE_RECU_JOURS, dernierRecu, listeRecusValides, dateCourteFr, RecuConsultation } from "../lib/recuConsultation";
@@ -26,6 +27,11 @@ interface TabAccueilCaisseProps {
   // plutôt que de saisir un montant fixe.
   actes?: ActeTarifaire[];
   theme?: "light" | "dark";
+  // Pour chiffrer automatiquement l'ordre du médecin (prix pharmacie, examens demandés).
+  medicaments?: Medicament[];
+  laboExamens?: ExamenLabo[];
+  onUpdateLaboExamens?: (e: ExamenLabo[]) => void;
+  agentNom?: string;
 }
 
 // Ligne de panier : soit un acte du catalogue (acteId renseigné), soit une
@@ -219,6 +225,10 @@ export default function TabAccueilCaisse({
   onUpdateFactures,
   actes = [],
   theme = "light",
+  medicaments = [],
+  laboExamens = [],
+  onUpdateLaboExamens,
+  agentNom,
 }: TabAccueilCaisseProps) {
   // --- Patient déjà enregistré : retrouvé par son code, son nom ou son téléphone ---
   const [rechercheCode, setRechercheCode] = useState("");
@@ -615,6 +625,20 @@ export default function TabAccueilCaisse({
           laboratoire une fois le paiement encaissé, selon l'orientation choisie ci-dessous.
         </p>
       </div>
+
+      {/* Ordres du médecin : coût calculé automatiquement, encaissement / envoi / annonce au patient */}
+      <OrdresMedecin
+        consultations={consultations}
+        onUpdateConsultations={onUpdateConsultations}
+        factures={factures}
+        onUpdateFactures={onUpdateFactures}
+        actes={actes}
+        medicaments={medicaments}
+        laboExamens={laboExamens}
+        onUpdateLaboExamens={onUpdateLaboExamens}
+        agentNom={agentNom}
+        isDark={isDark}
+      />
 
       {enAttentePaiementConsult.length > 0 && (
         <div className={`rounded-lg border-2 border-amber-400 p-4 space-y-3 ${isDark ? "bg-gray-800" : "bg-amber-50/40"}`}>

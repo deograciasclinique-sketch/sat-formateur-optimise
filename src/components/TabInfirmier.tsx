@@ -642,6 +642,11 @@ export default function TabInfirmier({
                     <span className={`inline-block mt-1 text-xs font-bold px-2 py-0.5 rounded ${nonPaye ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>
                       {nonPaye ? "⚠ Actes pas encore payés au secrétariat" : "✓ Prêt à exécuter"}
                     </span>
+                    {c.devisActes && (
+                      <span className={`inline-block mt-1 ml-2 text-xs font-bold px-2 py-0.5 rounded ${c.devisActes.statut === "payé" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+                        💰 {c.devisActes.total.toLocaleString("fr-FR")} FCFA — {c.devisActes.statut === "payé" ? "payé" : c.devisActes.statut === "à payer" ? "à payer au secrétariat (soins autorisés)" : "annoncé au patient"}
+                      </span>
+                    )}
                     {c.consignesInfirmier && (
                       <div className="mt-2 text-sm rounded border border-amber-300 bg-amber-50 text-amber-900 px-2 py-1.5">
                         <b>Consignes du médecin :</b> {c.consignesInfirmier}

@@ -1032,6 +1032,12 @@ export default function App() {
       const avant = new Map(prevConsultations.map((c) => [c.id, c.statut]));
       consultations.forEach((c) => {
         if (!avant.has(c.id) || avant.get(c.id) === c.statut) return;
+        if (c.statut === "Attente paiement actes") {
+          const t = "💰 Ordre du médecin à facturer";
+          const tx = `${c.patient} — coût calculé à l'Accueil & Caisse.`;
+          showToast(t, tx, "info");
+          sendBrowserNotification(t, tx, `caisse-${c.id}`);
+        }
         const renvoi = c.decision === "Renvoi en salle infirmière" && c.statut === "Attente paiement actes";
         if (!renvoi && c.statut !== "Attente exécution actes") return;
         const titre = renvoi ? "💉 Patient renvoyé en salle infirmière" : "💉 Soins à exécuter (actes payés)";
@@ -2469,6 +2475,10 @@ export default function App() {
               onUpdateFactures={handleUpdateFactures}
               actes={actesTarifaires}
               theme={theme}
+              medicaments={medicaments}
+              laboExamens={laboExamens}
+              onUpdateLaboExamens={handleUpdateLaboExamens}
+              agentNom={currentUser?.nom}
             />
           )}
 
@@ -2507,6 +2517,8 @@ export default function App() {
               onUpdateLaboExamens={handleUpdateLaboExamens}
               actes={actesTarifaires}
               medicaments={medicaments}
+              consultations={consultations}
+              onUpdateConsultations={handleUpdateConsultations}
             />
           )}
 

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import OrdresMedecin from "./OrdresMedecin";
 import React, { useState } from "react";
 import { verifierCodeDirecteur } from "../lib/accessSession";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
@@ -1308,15 +1309,17 @@ export default function TabFacturation({
       {/* Circuit paiement : patients revenus du médecin, en attente de payer
           les soins/examens/autres actes prescrits avant transfert aux
           infirmiers ou au labo pour exécution. */}
-      {dossiersActesAPayer.length > 0 && (
-        <div className="bg-orange-50 border border-orange-300 rounded-2xl p-4 shadow-xs space-y-3">
-          <div className="text-xs font-bold uppercase tracking-wider text-orange-700">
-            Paiement des actes prescrits en attente ({dossiersActesAPayer.length})
-          </div>
-          {dossiersActesAPayer.map((c) => (
-            <ActePaiementRow key={c.id} cons={c} onEncaisser={handleEncaisserActes} />
-          ))}
-        </div>
+      {onUpdateConsultations && (
+        <OrdresMedecin
+          consultations={consultations}
+          onUpdateConsultations={onUpdateConsultations}
+          factures={factures}
+          onUpdateFactures={onUpdateFactures}
+          actes={actes}
+          medicaments={medicaments}
+          laboExamens={laboExamens}
+          onUpdateLaboExamens={onUpdateLaboExamens}
+        />
       )}
 
       {/* Sub-navigation Menu bar */}

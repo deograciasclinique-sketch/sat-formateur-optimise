@@ -752,6 +752,17 @@ export interface Consultation {
   codePatient?: string;
   /** Consultation de suivi : id de la consultation précédente du même dossier. */
   suiteDe?: string;
+  /** Coût des actes prescrits, calculé et envoyé par le secrétariat (ordre du médecin). */
+  devisActes?: {
+    lignes: { designation: string; qte: number; prix: number; source?: string }[];
+    total: number;
+    /** payé = encaissé ; « à payer » = envoyé à l'infirmerie, paiement après ; annoncé = devis donné au patient. */
+    statut: "payé" | "à payer" | "annoncé";
+    le: string;
+    par?: string;
+    factureId?: string;
+    examensIds?: string[];
+  };
   patient: string;
   age: number;
   sexe: "Masculin" | "Féminin";
