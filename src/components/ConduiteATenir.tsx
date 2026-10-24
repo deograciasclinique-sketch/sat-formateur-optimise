@@ -323,7 +323,7 @@ export function ConduiteATenirListe({ items, seulementType, compact }: { items?:
   return (
     <ol className={compact ? "space-y-0.5" : "space-y-1.5"}>
       {liste.map((i, idx) => (
-        <li key={i.id} className={`flex gap-2 ${compact ? "text-xs" : "text-sm"}`}>
+        <li key={i.id || idx} className={`flex gap-2 ${compact ? "text-xs" : "text-sm"}`}>
           <span className="font-bold opacity-50">{idx + 1}.</span>
           <span>
             {!unSeulType && <b>{typeCat(i.type).emoji} {typeCat(i.type).label} : </b>}
