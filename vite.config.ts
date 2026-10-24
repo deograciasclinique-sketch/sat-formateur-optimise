@@ -7,6 +7,12 @@ import {defineConfig} from 'vite';
 // Édition démo (VITE_EDITION=demo) : le nom du cabinet est remplacé partout dans les écrans et
 // les impressions par une clinique fictive. L'édition « cabinet » n'est pas modifiée.
 // L'édition commerciale (VITE_EDITION=commercial : démo + espace clinique) est nettoyée de la même façon.
+// Filet de sécurité : sur un projet Vercel « commercial », si la variable VITE_EDITION a été
+// oubliée, on compile quand même l'édition commerciale (jamais la version du cabinet).
+if (!process.env.VITE_EDITION) {
+  const projet = [process.env.VERCEL_PROJECT_PRODUCTION_URL, process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL].filter(Boolean).join(" ");
+  if (/commercial/i.test(projet)) process.env.VITE_EDITION = 'commercial';
+}
 const DEMO = process.env.VITE_EDITION === 'demo' || process.env.VITE_EDITION === 'commercial';
 const REMPLACEMENTS: [RegExp, string][] = [
   [/Cabinet Privé de Soins DEO[ -]GRACIAS/g, 'Clinique Démo Santé'],
