@@ -4,12 +4,13 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv, Facture, SoinRealise, PlanSoins } from "../types";
+import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv, Facture, SoinRealise, PlanSoins, ActeTarifaire } from "../types";
 import SalleDesSoins, { FormulaireSoin, PreRemplissageSoin, cloturerPlansComplets, prisesAFaireAujourdhui, dureeDepuisTexte } from "./SalleDesSoins";
 import { recuValide, dernierRecu, dateCourteFr } from "../lib/recuConsultation";
 import {
   construireDossiers, trouverDossier, ConstantesRdvForm, NouveauRdvForm, DossierPatientView, RdvDuJour, ListeDossiers,
 } from "./InfirmierDossiers";
+import ComplementsSoins from "./ComplementsSoins";
 import { ConduiteATenirListe, catASoinsInfirmiers, TYPES_INFIRMIER, conduiteEnLignes, enListeCAT } from "./ConduiteATenir";
 import { generateUid } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
@@ -53,6 +54,8 @@ interface TabInfirmierProps {
   onUpdatePlansSoins?: (p: PlanSoins[]) => void;
   // Nom de l'agent connecté, pré-rempli comme auteur du soin.
   agentNom?: string;
+  // Grille Actes & Tarifs (actes ajoutés par l'infirmier pendant les soins).
+  actes?: ActeTarifaire[];
 }
 
 type ModeCloture = "transfert" | "moimeme";
@@ -85,6 +88,7 @@ export default function TabInfirmier({
   plansSoins = [],
   onUpdatePlansSoins,
   agentNom = "",
+  actes = [],
 }: TabInfirmierProps) {
   const isDark = theme === "dark";
 
@@ -254,7 +258,8 @@ export default function TabInfirmier({
   // (même si les actes ne sont pas encore payés au secrétariat).
   const actesAExecuter = useMemo(
     () => consultations
-      .filter((c) => !c.soinsExecutes && (c.statut === "Attente exécution actes" || (c.statut === "Attente paiement actes" && c.decision === "Renvoi en salle infirmière")))
+      .filter((c) => !c.soinsExecutes && (c.statut === "Attente exécution actes" || (c.statut === "Attente paiement actes" && (
+        c.decision === "Renvoi en salle infirmière" || c.decision === "Mise en observation" || catASoinsInfirmiers(c.conduiteATenir)))))
       .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")),
     [consultations]
   );
@@ -665,6 +670,18 @@ export default function TabInfirmier({
                         </ul>
                       </div>
                     )}
+                    <ComplementsSoins
+                      c={c}
+                      consultations={consultations}
+                      onUpdateConsultations={onUpdateConsultations}
+                      actes={actes}
+                      medicaments={medicaments}
+                      onUpdateMedicaments={onUpdateMedicaments}
+                      mouvements={mouvements}
+                      onUpdateMouvements={onUpdateMouvements}
+                      agentNom={agentNom}
+                      isDark={isDark}
+                    />
                   </div>
                   <div className="flex flex-col items-end gap-1 flex-none">
                     <button

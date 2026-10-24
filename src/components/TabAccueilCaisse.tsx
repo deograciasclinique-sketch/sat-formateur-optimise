@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Consultation, Facture, FactureLigne, ActeTarifaire, Medicament, ExamenLabo } from "../types";
+import { Consultation, Facture, FactureLigne, ActeTarifaire, Medicament, ExamenLabo, MouvementStock } from "../types";
 import OrdresMedecin from "./OrdresMedecin";
 import { generateUid, getTodayStr } from "../data";
 import { Plus, UserPlus, Wallet, ArrowRight, Clock, CheckCircle2, Trash2, ReceiptText, Search, ShieldCheck, AlertTriangle } from "lucide-react";
@@ -32,6 +32,9 @@ interface TabAccueilCaisseProps {
   laboExamens?: ExamenLabo[];
   onUpdateLaboExamens?: (e: ExamenLabo[]) => void;
   agentNom?: string;
+  onUpdateMedicaments?: (m: Medicament[]) => void;
+  mouvements?: MouvementStock[];
+  onUpdateMouvements?: (m: MouvementStock[]) => void;
 }
 
 // Ligne de panier : soit un acte du catalogue (acteId renseigné), soit une
@@ -229,6 +232,9 @@ export default function TabAccueilCaisse({
   laboExamens = [],
   onUpdateLaboExamens,
   agentNom,
+  onUpdateMedicaments,
+  mouvements = [],
+  onUpdateMouvements,
 }: TabAccueilCaisseProps) {
   // --- Patient déjà enregistré : retrouvé par son code, son nom ou son téléphone ---
   const [rechercheCode, setRechercheCode] = useState("");
@@ -638,6 +644,9 @@ export default function TabAccueilCaisse({
         onUpdateLaboExamens={onUpdateLaboExamens}
         agentNom={agentNom}
         isDark={isDark}
+        onUpdateMedicaments={onUpdateMedicaments}
+        mouvements={mouvements}
+        onUpdateMouvements={onUpdateMouvements}
       />
 
       {enAttentePaiementConsult.length > 0 && (

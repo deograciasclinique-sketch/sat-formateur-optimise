@@ -1038,7 +1038,7 @@ export default function App() {
           showToast(t, tx, "info");
           sendBrowserNotification(t, tx, `caisse-${c.id}`);
         }
-        const renvoi = c.decision === "Renvoi en salle infirmière" && c.statut === "Attente paiement actes";
+        const renvoi = c.statut === "Attente paiement actes" && (c.decision === "Renvoi en salle infirmière" || c.decision === "Mise en observation" || (Array.isArray(c.conduiteATenir) && c.conduiteATenir.some((i: any) => i && (i.type === "Voie injectable" || i.type === "Soins infirmiers"))));
         if (!renvoi && c.statut !== "Attente exécution actes") return;
         const titre = renvoi ? "💉 Patient renvoyé en salle infirmière" : "💉 Soins à exécuter (actes payés)";
         const texte = `${c.patient} — ${c.consignesInfirmier || "voir la décision du médecin"}`;
@@ -2479,6 +2479,9 @@ export default function App() {
               laboExamens={laboExamens}
               onUpdateLaboExamens={handleUpdateLaboExamens}
               agentNom={currentUser?.nom}
+              onUpdateMedicaments={handleUpdateMedicaments}
+              mouvements={mouvements}
+              onUpdateMouvements={handleUpdateMouvements}
             />
           )}
 
@@ -2504,6 +2507,7 @@ export default function App() {
               plansSoins={plansSoins}
               onUpdatePlansSoins={handleUpdatePlansSoins}
               agentNom={currentUser?.nom || ""}
+              actes={actesTarifaires}
             />
           )}
 
@@ -2519,6 +2523,9 @@ export default function App() {
               medicaments={medicaments}
               consultations={consultations}
               onUpdateConsultations={handleUpdateConsultations}
+              onUpdateMedicaments={handleUpdateMedicaments}
+              mouvements={mouvements}
+              onUpdateMouvements={handleUpdateMouvements}
             />
           )}
 

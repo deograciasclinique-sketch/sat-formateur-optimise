@@ -1037,7 +1037,11 @@ export default function TabConsultation({
         // Renvoi explicite en salle infirmière : passage à la caisse s'il y a
         // des actes à payer, sinon directement dans la liste des soins à exécuter.
         ? (presLines.length > 0 || catASoinsInfirmiers(consCAT) ? "Attente paiement actes" : "Attente exécution actes")
-        : pendingSource ? (presLines.length > 0 || catASoinsInfirmiers(consCAT) ? "Attente paiement actes" : "Terminée") : undefined,
+        // Soins infirmiers, mise en observation ou médicaments de la pharmacie du cabinet :
+        // la décision part EN MÊME TEMPS au secrétariat (facture) et en salle infirmière (exécution).
+        : (catASoinsInfirmiers(consCAT) || consDecision === "Mise en observation" || presLines.some((l) => !!l.medicamentId))
+          ? "Attente paiement actes"
+          : pendingSource ? (presLines.length > 0 ? "Attente paiement actes" : "Terminée") : undefined,
     };
     const maintenantIso = new Date().toISOString();
     const nomAgent = currentUser?.nom || "Agent";

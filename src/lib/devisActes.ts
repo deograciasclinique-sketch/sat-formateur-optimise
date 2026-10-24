@@ -14,11 +14,27 @@ export type LigneDevis = {
   qte: number;
   prix: number;
   /** origine de la ligne (pour l'affichage) */
-  source: "soin" | "injectable" | "médicament" | "examen" | "ajout";
+  source: "soin" | "injectable" | "médicament" | "examen" | "ajout" | "infirmier";
   /** prix à fixer par la secrétaire (rien trouvé dans la grille) */
   aTarifer?: boolean;
   examenId?: string;
+  /** ajouté par l'infirmier en salle (ComplementsSoins) */
+  complementId?: string;
+  /** produit injectable du stock, à sortir du stock au paiement / à l'envoi (les médicaments
+   *  de l'ordonnance, eux, sont déjà déduits à la prescription) */
+  stockMedId?: string;
 };
+
+/** Actes / consommables ajoutés par les infirmiers et pas encore facturés. */
+export function complementsAFacturer(c: Consultation) {
+  return (Array.isArray(c.complementsInfirmier) ? c.complementsInfirmier : []).filter((x) => x && !x.factureId);
+}
+
+export function lignesComplements(c: Consultation, deja: Set<string> = new Set()): LigneDevis[] {
+  return complementsAFacturer(c)
+    .filter((x) => !deja.has(x.id))
+    .map((x) => ({ uid: "c" + x.id, designation: `${x.designation} (ajouté en salle${x.par ? " par " + x.par : ""})`, qte: x.qte, prix: x.prix, source: "infirmier" as const, complementId: x.id, aTarifer: !x.prix }));
+}
 
 let compteur = 0;
 const uid = () => `l${Date.now().toString(36)}${(compteur++).toString(36)}`;
@@ -85,7 +101,7 @@ export function proposerDevis(c: Consultation, actes: ActeTarifaire[], medicamen
       const inj = it.injectable;
       ajouterActe(acteInjection(inj.voie || "", actes), `Injection ${inj.voie || ""} — ${inj.produit}`, "injectable");
       const med = inj.medicamentId ? medicaments.find((m) => m.id === inj.medicamentId) : undefined;
-      if (med && med.prixVente > 0) lignes.push({ uid: uid(), designation: `${med.nom}${med.dosage ? " " + med.dosage : ""}`, qte: 1, prix: med.prixVente, source: "médicament" });
+      if (med) lignes.push({ uid: uid(), designation: `${med.nom}${med.dosage ? " " + med.dosage : ""}`, qte: 1, prix: med.prixVente || 0, source: "médicament", stockMedId: med.id, aTarifer: !med.prixVente });
     } else if (it.type === "Soins infirmiers") {
       ajouterActe(acteDepuisTexte(it.description, actes), `Soin : ${it.description}`, "soin");
     }

@@ -752,9 +752,24 @@ export interface Consultation {
   codePatient?: string;
   /** Consultation de suivi : id de la consultation précédente du même dossier. */
   suiteDe?: string;
+  /** Produits injectables de la conduite à tenir déjà sortis du stock (évite une double sortie). */
+  stockInjectablesDeduit?: boolean;
+  /** Actes / consommables ajoutés par les infirmiers pendant les soins (facturés ensuite). */
+  complementsInfirmier?: {
+    id: string;
+    designation: string;
+    qte: number;
+    prix: number;
+    acteId?: string;
+    medicamentId?: string;
+    par?: string;
+    le: string;
+    /** facture qui l'a réglé (absent = encore à facturer) */
+    factureId?: string;
+  }[];
   /** Coût des actes prescrits, calculé et envoyé par le secrétariat (ordre du médecin). */
   devisActes?: {
-    lignes: { designation: string; qte: number; prix: number; source?: string }[];
+    lignes: { designation: string; qte: number; prix: number; source?: string; complementId?: string }[];
     total: number;
     /** payé = encaissé ; « à payer » = envoyé à l'infirmerie, paiement après ; annoncé = devis donné au patient. */
     statut: "payé" | "à payer" | "annoncé";

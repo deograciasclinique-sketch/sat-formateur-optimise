@@ -8,7 +8,7 @@ import React, { useState } from "react";
 import { verifierCodeDirecteur } from "../lib/accessSession";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { logActivity } from "../lib/activityLogger";
-import { Facture, Depense, FactureLigne, ExamenLabo, ActeTarifaire, Medicament, Consultation } from "../types";
+import { Facture, Depense, FactureLigne, ExamenLabo, ActeTarifaire, Medicament, Consultation, MouvementStock } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { 
   Plus, Trash2, Check, DollarSign, CreditCard, Filter, AlertTriangle, 
@@ -36,6 +36,9 @@ interface TabFacturationProps {
   // avec son prix et l'ajouter à la facture, sans ressaisie manuelle.
   actes?: ActeTarifaire[];
   medicaments?: Medicament[];
+  onUpdateMedicaments?: (m: Medicament[]) => void;
+  mouvements?: MouvementStock[];
+  onUpdateMouvements?: (m: MouvementStock[]) => void;
   // Circuit paiement : dossiers en attente de paiement des actes prescrits
   // (soins, examens, autres) après la consultation médicale, avant transfert
   // aux infirmiers ou au labo pour exécution.
@@ -132,7 +135,10 @@ export default function TabFacturation({
   actes = [],
   medicaments = [],
   consultations = [],
-  onUpdateConsultations
+  onUpdateConsultations,
+  onUpdateMedicaments,
+  mouvements = [],
+  onUpdateMouvements
 }: TabFacturationProps) {
   // Dossiers dont la prescription (soins/examens/autres) a été faite par le
   // médecin et qui attendent le paiement au secrétariat avant transfert aux
@@ -1319,6 +1325,9 @@ export default function TabFacturation({
           medicaments={medicaments}
           laboExamens={laboExamens}
           onUpdateLaboExamens={onUpdateLaboExamens}
+          onUpdateMedicaments={onUpdateMedicaments}
+          mouvements={mouvements}
+          onUpdateMouvements={onUpdateMouvements}
         />
       )}
 

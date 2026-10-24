@@ -9,11 +9,11 @@
  *   • Annoncer au patient : impression du devis ou message WhatsApp, sans encaisser.
  * Les dossiers « à payer » restent listés jusqu'à l'encaissement.
  */
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Wallet, Send, Megaphone, Printer, Trash2, Plus, Stethoscope, AlertTriangle, ChevronDown, ChevronUp, MessageCircle } from "lucide-react";
-import { ActeTarifaire, Consultation, ExamenLabo, Facture, Medicament } from "../types";
+import { ActeTarifaire, Consultation, ExamenLabo, Facture, Medicament, MouvementStock } from "../types";
 import { generateUid, getTodayStr } from "../data";
-import { LigneDevis, proposerDevis, totalDevis, fcfa, texteDevis } from "../lib/devisActes";
+import { LigneDevis, proposerDevis, totalDevis, fcfa, texteDevis, complementsAFacturer, lignesComplements } from "../lib/devisActes";
 import { ConduiteATenirListe, TYPES_INFIRMIER, catASoinsInfirmiers } from "./ConduiteATenir";
 import { formatWhatsAppNumber } from "../lib/whatsapp";
 import { echapperHtml } from "../lib/pharmacies";
@@ -29,6 +29,10 @@ type Props = {
   onUpdateLaboExamens?: (e: ExamenLabo[]) => void;
   agentNom?: string;
   isDark?: boolean;
+  // Gestion de stock automatique (produits injectables prescrits).
+  onUpdateMedicaments?: (m: Medicament[]) => void;
+  mouvements?: MouvementStock[];
+  onUpdateMouvements?: (m: MouvementStock[]) => void;
 };
 
 function nomCabinet(): string {
@@ -39,7 +43,7 @@ export default function OrdresMedecin(props: Props) {
   const { consultations, isDark } = props;
   const aFacturer = useMemo(
     () => consultations
-      .filter((c) => c.statut === "Attente paiement actes" || (c.devisActes?.statut === "à payer"))
+      .filter((c) => c.statut === "Attente paiement actes" || c.devisActes?.statut === "à payer" || complementsAFacturer(c).length > 0)
       .sort((a, b) => (b.derniereMajLe || b.createdAt || "").localeCompare(a.derniereMajLe || a.createdAt || "")),
     [consultations]
   );
@@ -57,20 +61,36 @@ export default function OrdresMedecin(props: Props) {
   );
 }
 
-function CarteOrdre({ c, consultations, onUpdateConsultations, factures, onUpdateFactures, actes = [], medicaments = [], laboExamens = [], onUpdateLaboExamens, agentNom, isDark }: Props & { c: Consultation }) {
+function CarteOrdre({ c, consultations, onUpdateConsultations, factures, onUpdateFactures, actes = [], medicaments = [], laboExamens = [], onUpdateLaboExamens, agentNom, isDark, onUpdateMedicaments, mouvements = [], onUpdateMouvements }: Props & { c: Consultation }) {
   const dejaAPayer = c.devisActes?.statut === "à payer";
+  // Ordre déjà payé : seuls les ajouts de l'infirmerie restent à facturer (complément).
+  const modeComplement = c.devisActes?.statut === "payé";
   const [ouvert, setOuvert] = useState(!dejaAPayer);
-  const [lignes, setLignes] = useState<LigneDevis[]>(() =>
-    c.devisActes ? c.devisActes.lignes.map((l, i) => ({ uid: "d" + i, designation: l.designation, qte: l.qte, prix: l.prix, source: (l.source as any) || "ajout" }))
-      : proposerDevis(c, actes, medicaments, laboExamens)
-  );
+  const lignesInitiales = (): LigneDevis[] => {
+    if (modeComplement) return lignesComplements(c);
+    if (c.devisActes) {
+      const base = c.devisActes.lignes.map((l, i) => ({ uid: "d" + i, designation: l.designation, qte: l.qte, prix: l.prix, source: (l.source as any) || "ajout", complementId: l.complementId }));
+      return [...base, ...lignesComplements(c, new Set(base.map((l) => l.complementId).filter(Boolean) as string[]))];
+    }
+    return [...proposerDevis(c, actes, medicaments, laboExamens), ...lignesComplements(c)];
+  };
+  const [lignes, setLignes] = useState<LigneDevis[]>(lignesInitiales);
+  // Un infirmier ajoute un acte pendant que la fiche est ouverte : la ligne arrive ici aussitôt.
+  const idsComplements = complementsAFacturer(c).map((x) => x.id).join(",");
+  useEffect(() => {
+    setLignes((ls) => {
+      const presents = new Set(ls.map((l) => l.complementId).filter(Boolean) as string[]);
+      const nouvelles = lignesComplements(c, presents);
+      return nouvelles.length ? [...ls, ...nouvelles] : ls;
+    });
+  }, [idsComplements]); // eslint-disable-line react-hooks/exhaustive-deps
   const [mode, setMode] = useState("Espèces");
   const [ajout, setAjout] = useState("");
   const total = totalDevis(lignes);
   const aTarifer = lignes.some((l) => l.aTarifer && !l.prix);
   const carte = isDark ? "border-gray-700 bg-gray-900/40" : "border-gray-200 bg-white";
 
-  const recalculer = () => setLignes(proposerDevis(c, actes, medicaments, laboExamens));
+  const recalculer = () => setLignes(modeComplement ? lignesComplements(c) : [...proposerDevis(c, actes, medicaments, laboExamens), ...lignesComplements(c)]);
   const maj = (uid: string, champ: "qte" | "prix", v: number) => setLignes(lignes.map((l) => (l.uid === uid ? { ...l, [champ]: Math.max(0, v), aTarifer: champ === "prix" ? false : l.aTarifer } : l)));
   const ajouterActe = (id: string) => {
     const a = actes.find((x) => x.id === id);
@@ -78,10 +98,31 @@ function CarteOrdre({ c, consultations, onUpdateConsultations, factures, onUpdat
     setAjout("");
   };
   const devis = (statut: "payé" | "à payer" | "annoncé", factureId?: string): NonNullable<Consultation["devisActes"]> => ({
-    lignes: lignes.filter((l) => l.qte > 0).map((l) => ({ designation: l.designation, qte: l.qte, prix: l.prix, source: l.source })),
+    lignes: lignes.filter((l) => l.qte > 0).map((l) => ({ designation: l.designation, qte: l.qte, prix: l.prix, source: l.source, ...(l.complementId ? { complementId: l.complementId } : {}) })),
     total, statut, le: new Date().toISOString(), par: agentNom, factureId,
     examensIds: lignes.map((l) => l.examenId).filter(Boolean) as string[],
   });
+  /** Sortie de stock des produits injectables (une seule fois par consultation). */
+  const sortirStock = (): boolean => {
+    if (c.stockInjectablesDeduit || !onUpdateMedicaments) return false;
+    const aSortir = lignes.filter((l) => l.stockMedId && l.qte > 0);
+    if (!aSortir.length) return false;
+    let stock = [...medicaments];
+    const mvts: MouvementStock[] = [];
+    for (const l of aSortir) {
+      const i = stock.findIndex((m) => m.id === l.stockMedId);
+      if (i < 0) continue;
+      const q = Math.min(l.qte, stock[i].stock);
+      if (q <= 0) continue;
+      stock[i] = { ...stock[i], stock: stock[i].stock - q };
+      mvts.push({ id: generateUid(), medId: stock[i].id, type: "sortie", qte: q, motif: `Injectable prescrit — Patient : ${c.patient}`, prixUnitaire: l.prix, montant: l.prix * q, date: getTodayStr(), createdAt: new Date().toISOString() });
+    }
+    if (!mvts.length) return false;
+    onUpdateMedicaments(stock);
+    if (onUpdateMouvements) onUpdateMouvements([...mvts, ...mouvements]);
+    return true;
+  };
+
   const verifier = () => {
     if (lignes.filter((l) => l.qte > 0).length === 0) { alert("Ajoutez au moins une ligne à facturer."); return false; }
     if (aTarifer && !confirm("Certaines lignes n'ont pas de prix (0 FCFA). Continuer quand même ?")) return false;
@@ -99,18 +140,25 @@ function CarteOrdre({ c, consultations, onUpdateConsultations, factures, onUpdat
     onUpdateFactures([f, ...factures]);
     const ids = new Set(lignes.map((l) => l.examenId).filter(Boolean) as string[]);
     if (ids.size && onUpdateLaboExamens) onUpdateLaboExamens(laboExamens.map((e) => (ids.has(e.id) ? { ...e, facture: true } : e)));
+    const complementsPayes = new Set(lignes.map((l) => l.complementId).filter(Boolean) as string[]);
+    const deduit = sortirStock();
     onUpdateConsultations(consultations.map((x) => x.id !== c.id ? x : {
       ...x,
+      ...(deduit ? { stockInjectablesDeduit: true } : {}),
       statut: x.statut === "Attente paiement actes" ? (x.soinsExecutes ? "Terminée" : "Attente exécution actes") : x.statut,
-      devisActes: devis("payé", factureId),
+      // Complément seul : l'ordre initial (déjà payé) est conservé tel quel.
+      devisActes: modeComplement && x.devisActes ? x.devisActes : devis("payé", factureId),
+      complementsInfirmier: (x.complementsInfirmier || []).map((k) => (complementsPayes.has(k.id) ? { ...k, factureId } : k)),
     }));
     alert(`${fcfa(total)} encaissés pour ${c.patient}.${c.statut === "Attente paiement actes" && !c.soinsExecutes ? " Le dossier est envoyé aux infirmiers / au laboratoire pour exécution." : ""}`);
   };
 
   const envoyerSansPayer = () => {
     if (!verifier()) return;
+    const deduit = sortirStock();
     onUpdateConsultations(consultations.map((x) => x.id !== c.id ? x : {
       ...x,
+      ...(deduit ? { stockInjectablesDeduit: true } : {}),
       statut: x.soinsExecutes ? x.statut : "Attente exécution actes",
       devisActes: devis("à payer"),
     }));
@@ -147,6 +195,7 @@ function CarteOrdre({ c, consultations, onUpdateConsultations, factures, onUpdat
             {c.codePatient && <span className="font-mono text-emerald-600 mr-1.5">{c.codePatient}</span>}{c.patient}
             {dejaAPayer && <span className="ml-2 text-xs font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800">Soins envoyés — {fcfa(c.devisActes!.total)} à payer</span>}
             {c.devisActes?.statut === "annoncé" && <span className="ml-2 text-xs font-bold px-2 py-0.5 rounded bg-sky-100 text-sky-800">Devis annoncé au patient</span>}
+            {modeComplement && <span className="ml-2 text-xs font-bold px-2 py-0.5 rounded bg-sky-100 text-sky-800">Complément ajouté par l'infirmerie</span>}
           </div>
           <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
             Décision : <b>{c.decision || "Soins / examens prescrits"}</b>{c.diagnostic ? ` · ${c.diagnostic}` : ""}
