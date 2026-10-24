@@ -830,7 +830,20 @@ export default function TabConsultation({
    * antécédents repris de la dernière visite ; nouvelle date (du jour par défaut, modifiable) ;
    * la nouvelle fiche est rattachée à la précédente (suiteDe) et apparaît dans le même dossier.
    */
-  const handleContinuerDossier = (c: Consultation) => {
+  const handleContinuerDossier = (c: Consultation, modeSuivi = true) => {
+    // Depuis l'alerte « Patient similaire » pendant qu'un dossier transféré (ou une consultation
+    // en cours) est ouvert : on ne fait que reprendre l'identité, SANS abandonner ce dossier
+    // (sinon l'enregistrement créait une nouvelle fiche et le dossier restait dans la file).
+    if (!modeSuivi || pendingSource) {
+      setConsPatient(c.patient);
+      setConsAge(c.age ? c.age.toString() : "");
+      setConsSexe(c.sexe);
+      setConsContact(c.contact || "");
+      setConsProfession(c.profession || "");
+      setConsFemmeEnceinte(c.femmeEnceinte || false);
+      setSimilarPatientSuggestion(null);
+      return;
+    }
     // Toujours partir de la visite la plus récente du dossier.
     const dossier = consultations.filter((x) => (c.codePatient && x.codePatient === c.codePatient) || normalizePatientName(x.patient) === normalizePatientName(c.patient));
     const derniere = [...dossier].sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""))[0] || c;
@@ -1956,7 +1969,7 @@ export default function TabConsultation({
                     </span>
                     <button
                       type="button"
-                      onClick={() => handleContinuerDossier(similarPatientSuggestion)}
+                      onClick={() => handleContinuerDossier(similarPatientSuggestion, !pendingSource)}
                       className="flex-shrink-0 font-bold underline hover:text-warning-900"
                     >
                       Continuer son dossier

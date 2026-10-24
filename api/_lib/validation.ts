@@ -14,7 +14,9 @@ import { ErreurPublique } from "./securite.js";
 const CARACTERES_INTERDITS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
 // Balises HTML / scripts (« <script> », « <img onerror=…> », « </div> »…).
 // « TA<90 » ou « 3 < 5 » ne sont pas touchés (pas de lettre juste après « < »).
-const BALISES = /<\/?[a-zA-Z!?][^>]*>?/g;
+// Uniquement de vraies balises fermées (« <b> », « <img …> ») : un texte comme « Glycémie<Normale »
+// ou « TA<90 » n'est plus coupé.
+const BALISES = /<\/?[a-zA-Z!?][^<>]*>/g;
 
 /** Nettoie un texte libre. Retourne une chaîne (éventuellement vide). */
 export function nettoyerTexte(v: unknown): string {
@@ -24,6 +26,7 @@ export function nettoyerTexte(v: unknown): string {
     .normalize("NFC")
     .replace(CARACTERES_INTERDITS, "")
     .replace(BALISES, "")
+    .replace(/<(?=[a-zA-Z!?\/])/g, "‹")
     .replace(/\r\n?/g, "\n")
     .replace(/\n{4,}/g, "\n\n\n")
     .trim();

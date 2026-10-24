@@ -14,7 +14,9 @@
  */
 
 const CARACTERES_INTERDITS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
-const BALISES = /<\/?[a-zA-Z!?][^>]*>?/g;
+// Uniquement de vraies balises fermées (« <b> », « <img …> ») : un texte comme « Glycémie<Normale »
+// ou « TA<90 » n'est plus coupé.
+const BALISES = /<\/?[a-zA-Z!?][^<>]*>/g;
 const CLES_INTERDITES = new Set(["__proto__", "constructor", "prototype"]);
 const PROFONDEUR_MAX = 40;
 const TEXTE_MAX = 200_000; // hors images
@@ -26,7 +28,9 @@ export function nettoyerTexte(t: string): string {
     return /^data:[a-z0-9.+-]+\/[a-z0-9.+-]+(;[a-z0-9=._-]+)*;base64,[A-Za-z0-9+/=\s]*$/i.test(t) ? t : "";
   }
   let s = t.replace(CARACTERES_INTERDITS, "");
-  if (s.includes("<")) s = s.replace(BALISES, "");
+  // Balises fermées retirées ; un « < » restant devant une lettre est remplacé par « ‹ »
+  // (le texte reste lisible, mais ne peut plus ouvrir une balise dans une fiche imprimée).
+  if (s.includes("<")) s = s.replace(BALISES, "").replace(/<(?=[a-zA-Z!?\/])/g, "‹");
   if (/^\s*javascript:/i.test(s)) s = s.replace(/^\s*javascript:/i, "");
   if (s.length > TEXTE_MAX) s = s.slice(0, TEXTE_MAX);
   return s;
