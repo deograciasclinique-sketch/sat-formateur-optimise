@@ -52,12 +52,30 @@ export function subscribeToCloudKey(key: string, onUpdate: (data: any) => void):
   }
 }
 
+/** Échecs d'envoi répétés : message visible (sinon l'erreur reste cachée dans la console). */
+const echecs: Record<string, { n: number; affiche: number }> = {};
+function signalerEchec(key: string, err: any) {
+  const e = (echecs[key] = echecs[key] || { n: 0, affiche: 0 });
+  e.n++;
+  if (e.n < 3 || Date.now() - e.affiche < 120_000 || typeof document === "undefined") return;
+  e.affiche = Date.now();
+  const t = document.createElement("div");
+  t.setAttribute("role", "alert");
+  t.textContent = `⚠️ Synchronisation bloquée (${key.replace(/^dg_/, "")}) : ${String(err?.code || err?.message || err).slice(0, 140)}. Vérifiez la connexion ; si le message revient, faites une capture.`;
+  t.style.cssText = "position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483647;background:#b91c1c;color:#fff;padding:12px 16px;border-radius:12px;font:600 13px system-ui,sans-serif;max-width:calc(100% - 32px);box-shadow:0 10px 24px rgba(0,0,0,.25)";
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 12000);
+}
+
 /** Envoi fusionné : retourne la valeur fusionnée réellement enregistrée. */
 export function pushMergedToCloudKey(key: string, local: any, base: any): Promise<any> {
-  return sync.pushMerged(key, local, base).catch((err: any) => {
-    console.error(`[liveSync] Échec de l'envoi fusionné de "${key}":`, err);
-    throw err;
-  });
+  return sync.pushMerged(key, local, base)
+    .then((v) => { if (echecs[key]) echecs[key].n = 0; return v; })
+    .catch((err: any) => {
+      console.error(`[liveSync] Échec de l'envoi fusionné de "${key}":`, err);
+      signalerEchec(key, err);
+      throw err;
+    });
 }
 
 /** Envoi direct : la valeur de ce poste remplace celle du cloud. */

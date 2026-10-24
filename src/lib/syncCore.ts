@@ -55,8 +55,32 @@ export function sameJson(a: any, b: any): boolean {
   try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
 }
 
+/** Liste fusionnable fiche par fiche (même règle qu'avant la nouvelle synchro). */
 export function isIdList(v: any): v is Array<{ id: string }> {
-  return Array.isArray(v) && v.every((it) => it && typeof it === "object" && typeof it.id === "string" && it.id.length > 0);
+  return Array.isArray(v) && v.every((it) => it && typeof it === "object" && typeof it.id === "string");
+}
+
+const estObjet = (it: any) => !!it && typeof it === "object" && !Array.isArray(it);
+
+/**
+ * Liste rangée « une fiche = un document » : tableau d'objets, AVEC OU SANS identifiant
+ * (une ancienne fiche sans « id » ne doit jamais bloquer la synchro de toute la liste).
+ */
+export function estListeFiches(v: any): v is any[] {
+  return Array.isArray(v) && v.every(estObjet);
+}
+
+/** Retire les entrées vides (null, texte…) d'une liste de fiches. */
+export function nettoyerListe(v: any[]): any[] {
+  const propre = v.filter(estObjet);
+  if (propre.length !== v.length) console.warn(`[sync] ${v.length - propre.length} entrée(s) vide(s) ignorée(s) dans une liste.`);
+  return propre;
+}
+
+function empreinte(t: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36);
 }
 
 /** Identifiant de document Firestore sûr (pas de « / », pas de « . » seul), stable. */
@@ -65,11 +89,14 @@ function encoderId(id: string): string {
   return e.length > 700 ? e.slice(0, 700) : e;
 }
 
-/** docId de chaque fiche d'une liste ; les id en double (anciennes données) restent distincts. */
-export function docIds(liste: Array<{ id: string }>): string[] {
+/** docId de chaque fiche d'une liste ; les id en double (anciennes données) restent distincts ;
+ *  une fiche sans identifiant reçoit un docId calculé d'après son contenu. */
+export function docIds(liste: any[]): string[] {
   const vus = new Map<string, number>();
   return liste.map((it) => {
-    const base = encoderId(it.id);
+    const id = it && typeof it.id === "string" && it.id ? it.id : "";
+    let base = id ? encoderId(id) : "";
+    if (!base || /^__.*__$/.test(base)) base = "_sansid_" + empreinte(JSON.stringify(it ?? null));
     const n = (vus.get(base) || 0) + 1;
     vus.set(base, n);
     return n === 1 ? base : `${base}~${n}`;
@@ -138,7 +165,7 @@ export type Operation = { type: "set"; docId: string; data: any; pos: number } |
  * Seules les fiches ajoutées, modifiées, supprimées ou déplacées sont écrites.
  * L'ordre est gardé avec un nombre « pos » croissant (insertion en tête = pos plus petit).
  */
-export function calculerOperations(actuel: Map<string, Fiche>, cible: Array<{ id: string }>): Operation[] {
+export function calculerOperations(actuel: Map<string, Fiche>, cible: any[]): Operation[] {
   const ids = docIds(cible);
   const ops: Operation[] = [];
   const garder = new Set(ids);
@@ -279,8 +306,9 @@ export function creerSync(opt: Options) {
     const ancienne = parent?.data;
     const fiches = new Map(fichesCloud);
     const ops: Operation[] = [];
-    if (!ecritureAncienPoste(parent) || !isIdList(ancienne)) return { fiches, ops };
-    const ids = docIds(ancienne);
+    if (!ecritureAncienPoste(parent) || !Array.isArray(ancienne)) return { fiches, ops };
+    const listeAncienne = nettoyerListe(ancienne);
+    const ids = docIds(listeAncienne);
     const supprimees = new Set<string>(Array.isArray(parent?.supprimes) ? parent.supprimes : []);
     let seuil: number = typeof parent?.miroirLe === "number" ? parent.miroirLe : typeof parent?.migreLe === "number" ? parent.migreLe : Infinity;
     if (seuil === Infinity) { // migration faite avant cette version : date de migration = plus ancienne fiche
@@ -289,7 +317,7 @@ export function creerSync(opt: Options) {
     }
     let max = -Infinity;
     fiches.forEach((f) => { if (f.pos > max) max = f.pos; });
-    ancienne.forEach((item, i) => {
+    listeAncienne.forEach((item, i) => {
       const propre = opt.nettoyer(JSON.parse(JSON.stringify(item)));
       if (JSON.stringify(propre).length > TAILLE_MAX_FICHE) return;
       const ex = fiches.get(ids[i]);
@@ -307,7 +335,7 @@ export function creerSync(opt: Options) {
 
   async function absorberAncienneListe(cle: string, c: Canal) {
     const ancienne = c.parent?.data;
-    if (!ecritureAncienPoste(c.parent) || !isIdList(ancienne) || !c.itemsCharges || c.absorptionEnCours) return;
+    if (!ecritureAncienPoste(c.parent) || !Array.isArray(ancienne) || !c.itemsCharges || c.absorptionEnCours) return;
     const db = opt.db();
     if (!db) return;
     c.absorptionEnCours = true;
@@ -415,29 +443,29 @@ export function creerSync(opt: Options) {
   }
 
   /** Nettoie une liste et écarte les fiches trop grosses pour un document. */
-  function preparerListe(cle: string, liste: Array<{ id: string }>): { propre: any[]; ecartees: Set<string> } {
+  function preparerListe(cle: string, liste: any[]): { propre: any[]; ecartees: Set<number> } {
     const propre: any[] = [];
-    const ecartees = new Set<string>();
-    for (const item of liste) {
+    const ecartees = new Set<number>();
+    liste.forEach((item, i) => {
       const p = opt.nettoyer(JSON.parse(JSON.stringify(item)));
       const octets = JSON.stringify(p).length;
       if (octets > TAILLE_MAX_FICHE) {
-        ecartees.add(p.id);
-        opt.signalerFicheTropGrosse?.(cle, p.id, octets);
-        continue;
+        ecartees.add(i);
+        opt.signalerFicheTropGrosse?.(cle, String(p?.id ?? "?"), octets);
+        return;
       }
       propre.push(p);
-    }
+    });
     return { propre, ecartees };
   }
 
-  async function ecrireListe(cle: string, cible: Array<{ id: string }>, parent: any, fiches: Map<string, Fiche>) {
+  async function ecrireListe(cle: string, cible: any[], parent: any, fiches: Map<string, Fiche>) {
     const { propre, ecartees } = preparerListe(cle, cible);
     // Une fiche trop grosse n'est ni écrite ni supprimée du cloud (on garde l'ancienne version).
     const actuel = new Map(fiches);
     if (ecartees.size) {
-      const ids = docIds(cible as any);
-      cible.forEach((it, i) => { if (ecartees.has(it.id)) actuel.delete(ids[i]); });
+      const ids = docIds(cible);
+      cible.forEach((_it, i) => { if (ecartees.has(i)) actuel.delete(ids[i]); });
     }
     const migrer = !estFormatFiches(parent);
     // Même en migration on compare aux fiches déjà présentes : une migration interrompue
@@ -469,6 +497,18 @@ export function creerSync(opt: Options) {
     return propre;
   }
 
+  /**
+   * La valeur doit-elle être rangée fiche par fiche ? Oui pour toute liste d'objets ; et si la clé
+   * est déjà au nouveau format, toute liste (les entrées vides sont ignorées) : on n'écrit JAMAIS
+   * une liste brute dans le document parent d'une clé migrée (cela annulait des enregistrements).
+   */
+  function versListeFiches(v: any, parent: any): any[] | null {
+    if (!Array.isArray(v)) return null;
+    if (estListeFiches(v)) return v;
+    if (estFormatFiches(parent)) return nettoyerListe(v);
+    return null;
+  }
+
   /** Envoi FUSIONNÉ (App) : fusion avec le cloud, puis seules les fiches changées sont écrites. */
   async function pushMerged(cle: string, local: any, base: any): Promise<any> {
     if (!opt.db()) return local;
@@ -477,9 +517,10 @@ export function creerSync(opt: Options) {
     const integre = integrerAncienneListe(parent, fiches).fiches;
     const remote = estFormatFiches(parent) ? assembler(integre) : parent && Object.prototype.hasOwnProperty.call(parent, "data") ? parent.data : (fiches.size ? assembler(fiches) : undefined);
     const merged = mergeThreeWay(base, local, remote);
-    if (isIdList(merged)) {
-      await ecrireListe(cle, merged, parent, fiches);
-      return opt.nettoyer(JSON.parse(JSON.stringify(merged)));
+    const liste = versListeFiches(merged, parent);
+    if (liste) {
+      await ecrireListe(cle, liste, parent, fiches);
+      return opt.nettoyer(JSON.parse(JSON.stringify(liste)));
     }
     const propre = merged === undefined ? null : opt.nettoyer(JSON.parse(JSON.stringify(merged)));
     await ref(cle).set({ data: propre, updatedAt: Date.now() }, { merge: true });
@@ -489,10 +530,13 @@ export function creerSync(opt: Options) {
   /** Envoi direct (remplace la valeur du cloud par celle de ce poste). */
   async function push(cle: string, valeur: any): Promise<void> {
     if (!opt.db()) return;
-    if (isIdList(valeur)) {
+    if (Array.isArray(valeur)) {
       const { parent, fiches } = await etatCloud(cle);
-      await ecrireListe(cle, valeur, parent, fiches);
-      return;
+      const liste = versListeFiches(valeur, parent);
+      if (liste) {
+        await ecrireListe(cle, liste, parent, fiches);
+        return;
+      }
     }
     const propre = valeur === undefined ? null : opt.nettoyer(JSON.parse(JSON.stringify(valeur)));
     await ref(cle).set({ data: propre, updatedAt: Date.now() }, { merge: true });
