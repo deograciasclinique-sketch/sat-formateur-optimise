@@ -51,7 +51,16 @@ export const typeCat = (v: string) => TYPES_CAT.find((t) => t.value === v) || TY
 
 /** Types exécutés par l'infirmier (salle infirmier). */
 export const TYPES_INFIRMIER = ["Voie injectable", "Soins infirmiers"];
-export const catASoinsInfirmiers = (items?: ConduiteItem[]) => (items || []).some((i) => TYPES_INFIRMIER.includes(i.type));
+/**
+ * Conduite à tenir toujours sous forme de liste : les anciennes fiches l'ont parfois en texte
+ * libre (ou mal formée) — sans cette conversion, l'écran plantait.
+ */
+export function enListeCAT(items: unknown): ConduiteItem[] {
+  if (Array.isArray(items)) return items.filter((i): i is ConduiteItem => !!i && typeof i === "object" && typeof (i as any).type === "string");
+  if (typeof items === "string" && items.trim()) return [{ id: "texte", type: "Autre", description: items.trim() }];
+  return [];
+}
+export const catASoinsInfirmiers = (items?: unknown) => enListeCAT(items).some((i) => TYPES_INFIRMIER.includes(i.type));
 
 export const VOIES_INJECTABLES = ["IV directe", "IV lente", "Perfusion IV", "IM", "SC", "ID"];
 export const FREQUENCES_INJ = ["Dose unique", "1 fois / jour", "2 fois / jour (toutes les 12 h)", "3 fois / jour (toutes les 8 h)", "4 fois / jour (toutes les 6 h)", "H0, H12, H24 puis 1 fois / jour", "Si besoin"];
@@ -84,8 +93,8 @@ export function texteInjectable(p: PrescInjectable): string {
   return t;
 }
 
-export function conduiteEnLignes(items?: ConduiteItem[]): string[] {
-  return (items || []).map((i) => `${typeCat(i.type).label} : ${i.description}`);
+export function conduiteEnLignes(items?: unknown): string[] {
+  return enListeCAT(items).map((i) => `${typeCat(i.type).label} : ${i.description}`);
 }
 
 /** Éditeur de la conduite à tenir (formulaire de consultation). */
@@ -306,9 +315,9 @@ function FormInjectable({ medicaments, onAjouter, onAjouterCAT, avecOrdonnance }
 }
 
 /** Affichage en lecture seule (dossier, salle infirmier). */
-export function ConduiteATenirListe({ items, seulementType, compact }: { items?: ConduiteItem[]; seulementType?: string | string[]; compact?: boolean }) {
+export function ConduiteATenirListe({ items, seulementType, compact }: { items?: unknown; seulementType?: string | string[]; compact?: boolean }) {
   const filtre = seulementType ? (Array.isArray(seulementType) ? seulementType : [seulementType]) : null;
-  const liste = (items || []).filter((i) => !filtre || filtre.includes(i.type));
+  const liste = enListeCAT(items).filter((i) => !filtre || filtre.includes(i.type));
   const unSeulType = filtre && filtre.length === 1;
   if (!liste.length) return null;
   return (

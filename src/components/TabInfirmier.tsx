@@ -10,7 +10,7 @@ import { recuValide, dernierRecu, dateCourteFr } from "../lib/recuConsultation";
 import {
   construireDossiers, trouverDossier, ConstantesRdvForm, NouveauRdvForm, DossierPatientView, RdvDuJour, ListeDossiers,
 } from "./InfirmierDossiers";
-import { ConduiteATenirListe, catASoinsInfirmiers, TYPES_INFIRMIER, conduiteEnLignes } from "./ConduiteATenir";
+import { ConduiteATenirListe, catASoinsInfirmiers, TYPES_INFIRMIER, conduiteEnLignes, enListeCAT } from "./ConduiteATenir";
 import { generateUid } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send, CalendarDays, FolderOpen, CalendarPlus } from "lucide-react";
@@ -272,9 +272,9 @@ export default function TabInfirmier({
   // « Noter les soins » : ouvre le registre de la Salle des soins pré-rempli
   // avec la prescription (injectables / soins de la conduite à tenir, ordonnance).
   const ouvrirSoinDepuisConsultation = (c: Consultation) => {
-    const injs = (c.conduiteATenir || []).filter((i) => i.type === "Voie injectable" && i.injectable).map((i) => i.injectable!);
+    const injs = enListeCAT(c.conduiteATenir).filter((i) => i.type === "Voie injectable" && i.injectable).map((i) => i.injectable!);
     const rappel = [
-      ...conduiteEnLignes((c.conduiteATenir || []).filter((i) => TYPES_INFIRMIER.includes(i.type))),
+      ...conduiteEnLignes(enListeCAT(c.conduiteATenir).filter((i) => TYPES_INFIRMIER.includes(i.type))),
       ...(c.ordonnance || []).map((l) => `${l.medicamentNom}${l.posologie ? " — " + l.posologie : ""}${l.duree ? " (" + l.duree + ")" : ""}`),
     ];
     setFormSoin({
@@ -711,7 +711,7 @@ export default function TabInfirmier({
                         <div>{[c.antecedentsPatient.allergies && `Allergies : ${c.antecedentsPatient.allergies}`, (c.antecedentsPatient.medicaux || []).join(", "), c.antecedentsPatient.traitements && `Traitements : ${c.antecedentsPatient.traitements}`].filter(Boolean).join(" · ") || "—"}</div>
                       </div>
                     )}
-                    {(c.conduiteATenir || []).length > 0 && (
+                    {enListeCAT(c.conduiteATenir).length > 0 && (
                       <div className={`rounded border p-2 sm:col-span-2 ${bloc}`}>
                         <b>Conduite à tenir complète</b>
                         <ConduiteATenirListe items={c.conduiteATenir} compact />

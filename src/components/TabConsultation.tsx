@@ -17,7 +17,7 @@ import { blocGardeHtml, lirePharmaciesLocal, texteGardeZone, nomZone, zoneCabine
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
 import EpidemioAssistant from "./EpidemioAssistant";
-import { ConduiteATenirEditor, ConduiteATenirListe, catASoinsInfirmiers, conduiteEnLignes, PrescInjectable } from "./ConduiteATenir";
+import { ConduiteATenirEditor, ConduiteATenirListe, catASoinsInfirmiers, conduiteEnLignes, PrescInjectable, enListeCAT } from "./ConduiteATenir";
 import { MDODiseaseOverview } from "../modules/epidemio/mdoData";
 
 interface TabConsultationProps {
@@ -236,7 +236,7 @@ export default function TabConsultation({
     setEditExamenPhysique(selectedConsultation.examenPhysique || "");
     setEditDiagnostic(selectedConsultation.diagnostic || "");
     setEditDiagnosticFinal(selectedConsultation.diagnosticFinal || "");
-    setEditCAT(selectedConsultation.conduiteATenir || []);
+    setEditCAT(enListeCAT(selectedConsultation.conduiteATenir));
     setEditObservations(selectedConsultation.observations || "");
     setIsEditingDetail(true);
   };
@@ -791,7 +791,7 @@ export default function TabConsultation({
     setConsAntecedents(c.antecedentsPatient ? { ...ANTECEDENTS_VIDES, ...c.antecedentsPatient } : ANTECEDENTS_VIDES);
     setConsDiagnostic(c.diagnostic || "");
     setConsDiagnosticFinal(c.diagnosticFinal || "");
-    setConsCAT(c.conduiteATenir || []);
+    setConsCAT(enListeCAT(c.conduiteATenir));
     setPresLines(c.ordonnance || []);
     setConsZoneGarde(c.zoneGardeId || "");
     setConsDecision((c.decision as any) || "Retour à domicile");
@@ -1594,7 +1594,7 @@ export default function TabConsultation({
     y += 17;
 
     // Conduite à tenir
-    if (cons.conduiteATenir && cons.conduiteATenir.length > 0) {
+    if (enListeCAT(cons.conduiteATenir).length > 0) {
       doc.setFont("Helvetica", "bold");
       doc.setFontSize(8);
       doc.setTextColor(13, 148, 136);
@@ -3653,7 +3653,7 @@ export default function TabConsultation({
                           )}
                         </p>
                       </div>
-                      {selectedConsultation.conduiteATenir && selectedConsultation.conduiteATenir.length > 0 && (
+                      {enListeCAT(selectedConsultation.conduiteATenir).length > 0 && (
                         <div>
                           <span className="text-xs uppercase font-semibold tracking-wider text-primary-700/70">Conduite à tenir :</span>
                           <div className="mt-1"><ConduiteATenirListe items={selectedConsultation.conduiteATenir} /></div>

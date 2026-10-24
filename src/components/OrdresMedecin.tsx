@@ -167,10 +167,10 @@ function CarteOrdre({ c, consultations, onUpdateConsultations, factures, onUpdat
             <div className="text-xs font-bold uppercase tracking-wide text-gray-500">Ordre du médecin</div>
             {c.consignesInfirmier && <div><b>Consignes :</b> {c.consignesInfirmier}</div>}
             {catASoinsInfirmiers(c.conduiteATenir) && <ConduiteATenirListe items={c.conduiteATenir} seulementType={TYPES_INFIRMIER} compact />}
-            {(c.ordonnance || []).length > 0 && (
-              <div><b>Ordonnance :</b> {c.ordonnance.map((l) => l.medicamentNom + (l.quantitePrescrite ? ` ×${l.quantitePrescrite}` : "")).join(" ; ")}</div>
+            {Array.isArray(c.ordonnance) && c.ordonnance.length > 0 && (
+              <div><b>Ordonnance :</b> {c.ordonnance.filter(Boolean).map((l) => l.medicamentNom + (l.quantitePrescrite ? ` ×${l.quantitePrescrite}` : "")).join(" ; ")}</div>
             )}
-            {!c.consignesInfirmier && !catASoinsInfirmiers(c.conduiteATenir) && !(c.ordonnance || []).length && <div className="text-gray-500 italic">Voir la fiche de consultation.</div>}
+            {!c.consignesInfirmier && !catASoinsInfirmiers(c.conduiteATenir) && !(Array.isArray(c.ordonnance) && c.ordonnance.length) && <div className="text-gray-500 italic">Voir la fiche de consultation.</div>}
           </div>
 
           {/* Devis */}

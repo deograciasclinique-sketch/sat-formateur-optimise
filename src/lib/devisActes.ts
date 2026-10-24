@@ -78,7 +78,9 @@ export function proposerDevis(c: Consultation, actes: ActeTarifaire[], medicamen
   };
 
   // 1) Conduite à tenir : soins infirmiers et injectables.
-  for (const it of c.conduiteATenir || []) {
+  const cat = Array.isArray(c.conduiteATenir) ? c.conduiteATenir.filter((i) => i && typeof i === "object") : [];
+  const ordonnance = Array.isArray(c.ordonnance) ? c.ordonnance.filter((l) => l && typeof l === "object") : [];
+  for (const it of cat) {
     if (it.type === "Voie injectable" && it.injectable) {
       const inj = it.injectable;
       ajouterActe(acteInjection(inj.voie || "", actes), `Injection ${inj.voie || ""} — ${inj.produit}`, "injectable");
@@ -94,7 +96,7 @@ export function proposerDevis(c: Consultation, actes: ActeTarifaire[], medicamen
     ajouterActe(a, `Soins : ${c.consignesInfirmier}`, "soin");
   }
   // 3) Ordonnance : médicaments de la pharmacie du cabinet.
-  for (const l of c.ordonnance || []) {
+  for (const l of ordonnance) {
     const med = l.medicamentId ? medicaments.find((m) => m.id === l.medicamentId) : undefined;
     if (med && med.prixVente > 0) lignes.push({ uid: uid(), designation: med.nom + (med.dosage ? " " + med.dosage : ""), qte: Math.max(1, l.quantitePrescrite || 1), prix: med.prixVente, source: "médicament" });
   }
