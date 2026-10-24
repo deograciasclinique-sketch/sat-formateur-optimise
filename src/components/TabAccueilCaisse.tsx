@@ -12,7 +12,8 @@ import { VALIDITE_RECU_JOURS, dernierRecu, listeRecusValides, dateCourteFr, Recu
 import { PatientRegistre, chercherPatients, doublonsPossibles, nouveauCode, ageActuel, anneeDepuisAge, estUnCode, normaliserCode } from "../lib/patients";
 import CartePatient from "./CartePatient";
 import BarcodeScanner from "./BarcodeScanner";
-import { IdCard, ScanLine, X } from "lucide-react";
+import { IdCard, ScanLine, X, Stethoscope, Users, Wallet2 as Wallet2Icon } from "lucide-react";
+import { complementsAFacturer } from "../lib/devisActes";
 
 interface TabAccueilCaisseProps {
   consultations: Consultation[];
@@ -310,6 +311,13 @@ export default function TabAccueilCaisse({
 
   const isDark = theme === "dark";
   const today = getTodayStr();
+
+  // Onglet affiché (l'inscription d'un nouveau patient est la page d'accueil).
+  const [vue, setVue] = useState<"nouveau" | "ordres" | "encaisser" | "acte" | "recus" | "jour">("nouveau");
+  const nbOrdres = useMemo(
+    () => consultations.filter((c) => c && (c.statut === "Attente paiement actes" || c.devisActes?.statut === "à payer" || complementsAFacturer(c).length > 0)).length,
+    [consultations]
+  );
 
   // --- Reçus de consultation encore valables (14 jours) -------------------
   const [rechercheRecus, setRechercheRecus] = useState("");
@@ -619,93 +627,69 @@ export default function TabAccueilCaisse({
     setRechercheExistant("");
   };
 
-  return (
-    <div className={`p-4 space-y-6 ${isDark ? "text-gray-100" : "text-gray-900"}`}>
+  const carteCls = `rounded-xl border shadow-sm ${isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"}`;
+  const Etape = ({ n, titre, sous }: { n: number; titre: string; sous?: string }) => (
+    <div className="flex items-start gap-3 mb-3">
+      <span className="w-7 h-7 rounded-full bg-primary-600 text-white text-sm font-bold flex items-center justify-center shrink-0">{n}</span>
       <div>
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <UserPlus className="w-5 h-5" /> Accueil & Caisse — Nouveau patient
-        </h2>
-        <p className={`text-sm ${isDark ? "text-gray-400" : "text-gray-500"}`}>
-          Enregistrement du patient et facturation selon la demande (consultation et/ou tout autre
-          acte du catalogue). Le dossier est envoyé vers l'infirmerie, la maternité ou le
-          laboratoire une fois le paiement encaissé, selon l'orientation choisie ci-dessous.
-        </p>
+        <div className="font-bold leading-7">{titre}</div>
+        {sous && <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>{sous}</div>}
+      </div>
+    </div>
+  );
+  const actesConsultation = actes.filter((a) => /consultation/i.test(a.categorie || "") || /consultation/i.test(a.nom)).slice(0, 4);
+  const encaisseAujourdhui = factures.filter((f) => f.date === today).reduce((s, f) => s + (f.montantPaye || 0), 0);
+  const onglets: { id: typeof vue; label: string; icon: React.ReactNode; n?: number; alerte?: boolean }[] = [
+    { id: "nouveau", label: "Nouveau patient", icon: <UserPlus className="w-4 h-4" /> },
+    { id: "ordres", label: "Ordres du médecin", icon: <Stethoscope className="w-4 h-4" />, n: nbOrdres, alerte: nbOrdres > 0 },
+    { id: "encaisser", label: "À encaisser", icon: <Wallet className="w-4 h-4" />, n: enAttentePaiementConsult.length, alerte: enAttentePaiementConsult.length > 0 },
+    { id: "acte", label: "Acte supplémentaire", icon: <ReceiptText className="w-4 h-4" /> },
+    { id: "recus", label: "Reçus valables", icon: <ShieldCheck className="w-4 h-4" />, n: recusValides.length },
+    { id: "jour", label: "Patients du jour", icon: <Users className="w-4 h-4" />, n: dejaEnvoyesAujourdhui.length },
+  ];
+
+  return (
+    <div className={`p-3 sm:p-4 space-y-4 max-w-6xl mx-auto ${isDark ? "text-gray-100" : "text-gray-900"}`}>
+      {/* En-tête */}
+      <div className={`${carteCls} p-4 flex flex-wrap items-center justify-between gap-3`}>
+        <div className="flex items-center gap-3">
+          <span className="w-11 h-11 rounded-xl bg-primary-600 text-white flex items-center justify-center"><Wallet2Icon className="w-6 h-6" /></span>
+          <div>
+            <h2 className="text-xl font-bold leading-tight">Accueil &amp; Caisse</h2>
+            <p className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>Inscrire, encaisser et orienter les patients</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 text-sm">
+          <div className={`px-3 py-1.5 rounded-lg ${isDark ? "bg-gray-900" : "bg-gray-50"}`}><div className="text-[11px] text-gray-500">Patients du jour</div><div className="font-bold">{dejaEnvoyesAujourdhui.length}</div></div>
+          <div className={`px-3 py-1.5 rounded-lg ${isDark ? "bg-gray-900" : "bg-emerald-50"}`}><div className="text-[11px] text-gray-500">Encaissé aujourd'hui</div><div className="font-bold text-emerald-700">{encaisseAujourdhui.toLocaleString("fr-FR")} FCFA</div></div>
+        </div>
       </div>
 
-      {/* Ordres du médecin : coût calculé automatiquement, encaissement / envoi / annonce au patient */}
-      <OrdresMedecin
-        consultations={consultations}
-        onUpdateConsultations={onUpdateConsultations}
-        factures={factures}
-        onUpdateFactures={onUpdateFactures}
-        actes={actes}
-        medicaments={medicaments}
-        laboExamens={laboExamens}
-        onUpdateLaboExamens={onUpdateLaboExamens}
-        agentNom={agentNom}
-        isDark={isDark}
-        onUpdateMedicaments={onUpdateMedicaments}
-        mouvements={mouvements}
-        onUpdateMouvements={onUpdateMouvements}
-      />
+      {/* Onglets */}
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+        {onglets.map((o) => (
+          <button key={o.id} type="button" onClick={() => setVue(o.id)}
+            className={`shrink-0 px-3 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 border transition-colors ${
+              vue === o.id ? "bg-primary-600 border-primary-600 text-white shadow" : isDark ? "border-gray-700 bg-gray-800 hover:bg-gray-700" : "border-gray-200 bg-white hover:bg-gray-50"}`}>
+            {o.icon}{o.label}
+            {o.n !== undefined && o.n > 0 && (
+              <span className={`min-w-5 px-1.5 rounded-full text-xs font-bold ${vue === o.id ? "bg-white/25 text-white" : o.alerte ? "bg-red-600 text-white" : isDark ? "bg-gray-700" : "bg-gray-100 text-gray-700"}`}>{o.n}</span>
+            )}
+          </button>
+        ))}
+      </div>
 
-      {enAttentePaiementConsult.length > 0 && (
-        <div className={`rounded-lg border-2 border-amber-400 p-4 space-y-3 ${isDark ? "bg-gray-800" : "bg-amber-50/40"}`}>
-          <h3 className="font-bold flex items-center gap-2">
-            <Clock className="w-5 h-5 text-amber-500" /> À encaisser ({enAttentePaiementConsult.length})
-          </h3>
-          <p className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
-            Patients déjà enregistrés mais dont la consultation n'est pas payée (par exemple venus sur rendez-vous avec un reçu expiré).
-          </p>
-          {enAttentePaiementConsult.map((c) => {
-            const dr = dernierRecu(factures, consultations, c.patient, c.contact, today);
-            const ouvert = encaisserId === c.id;
-            return (
-              <div key={c.id} className={`rounded border p-3 ${isDark ? "border-gray-700" : "border-gray-200 bg-white"}`}>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="font-medium">{c.patient}</div>
-                    <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
-                      {c.plainte || "Consultation"}
-                      {dr ? ` · dernier reçu du ${dateCourteFr(dr.payeLe)}, expiré le ${dateCourteFr(dr.valableJusquau)}` : " · aucun reçu antérieur"}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => { setEncaisserId(ouvert ? null : c.id); setPanierEncaisser([]); }}
-                    className="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm font-medium flex items-center gap-1.5 hover:bg-emerald-700"
-                  >
-                    <Wallet className="w-4 h-4" /> {ouvert ? "Fermer" : "Encaisser"}
-                  </button>
-                </div>
-                {ouvert && (
-                  <div className="mt-3 space-y-3">
-                    <SelecteurActes actes={actes} panier={panierEncaisser} setPanier={setPanierEncaisser} isDark={isDark} />
-                    <div className="flex flex-wrap items-end justify-between gap-2">
-                      <div>
-                        <label className="text-xs font-medium">Mode de paiement</label>
-                        <select className="w-full mt-1 px-2 py-1.5 text-sm rounded border bg-transparent" value={modePaiementEncaisser} onChange={(e) => setModePaiementEncaisser(e.target.value)}>
-                          <option value="Espèces">Espèces</option>
-                          <option value="Mobile Money">Mobile Money</option>
-                          <option value="Assurance">Assurance</option>
-                        </select>
-                      </div>
-                      <button onClick={() => handleEncaisserEnAttente(c)} className="px-4 py-2 rounded bg-emerald-600 text-white font-medium flex items-center gap-2 hover:bg-emerald-700">
-                        <Wallet className="w-4 h-4" /> Encaisser {panierTotal(panierEncaisser) > 0 ? `${panierTotal(panierEncaisser).toLocaleString("fr-FR")} FCFA` : ""}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+      {vue !== "ordres" && nbOrdres > 0 && (
+        <button type="button" onClick={() => setVue("ordres")} className="w-full text-left rounded-lg border border-amber-400 bg-amber-50 text-amber-900 px-3 py-2 text-sm flex items-center gap-2 hover:bg-amber-100">
+          <Stethoscope className="w-4 h-4 shrink-0" /> <span><b>{nbOrdres} ordre{nbOrdres > 1 ? "s" : ""} du médecin</b> à facturer — cliquez pour voir</span> <ArrowRight className="w-4 h-4 ml-auto shrink-0" />
+        </button>
       )}
 
-      <div
-        className={`rounded-lg border p-4 space-y-4 ${
-          isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"
-        }`}
-      >
+      {vue === "nouveau" && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+          <div className="lg:col-span-2 space-y-4">
+            <section className={`${carteCls} p-4 space-y-3`}>
+              <Etape n={1} titre="Identité du patient" sous="Patient déjà venu : tapez son code, son nom ou scannez sa carte. Sinon remplissez les champs : un code lui sera attribué." />
         {/* Patient déjà enregistré : son code suffit */}
         {patientSel ? (
           <div className="rounded-lg border-2 border-emerald-500 bg-emerald-500/10 p-3 flex flex-wrap items-center justify-between gap-3">
@@ -830,18 +814,6 @@ export default function TabAccueilCaisse({
               onChange={(e) => setCommune(e.target.value)}
             />
           </div>
-          <div>
-            <label className="text-sm font-medium">Mode de paiement</label>
-            <select
-              className="w-full mt-1 px-3 py-2 rounded border bg-transparent"
-              value={modePaiement}
-              onChange={(e) => setModePaiement(e.target.value)}
-            >
-              <option value="Espèces">Espèces</option>
-              <option value="Mobile Money">Mobile Money</option>
-              <option value="Assurance">Assurance</option>
-            </select>
-          </div>
         </div>
 
         {recuFormulaire && (
@@ -883,8 +855,10 @@ export default function TabAccueilCaisse({
           )
         )}
 
-        <div>
-          <label className="text-sm font-medium">Orienter le patient vers *</label>
+            </section>
+
+            <section className={`${carteCls} p-4`}>
+              <Etape n={2} titre="Orienter le patient vers" />
           <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
             {(
               [
@@ -912,31 +886,145 @@ export default function TabAccueilCaisse({
               </button>
             ))}
           </div>
-        </div>
+                    </section>
 
-        <div>
-          <label className="text-sm font-medium">Actes à facturer *</label>
-          <div className="mt-1">
-            <SelecteurActes actes={actes} panier={panierNouveau} setPanier={setPanierNouveau} isDark={isDark} />
+            <section className={`${carteCls} p-4`}>
+              <Etape n={3} titre="Actes à facturer" sous="Consultation et/ou autres actes demandés par le patient." />
+              {actesConsultation.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {actesConsultation.map((a) => (
+                    <button key={a.id} type="button"
+                      onClick={() => setPanierNouveau(panierNouveau.some((l) => l.acteId === a.id) ? panierNouveau : [...panierNouveau, { uid: generateUid(), acteId: a.id, designation: a.nom, qte: 1, prix: a.prix }])}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium border flex items-center gap-1 ${panierNouveau.some((l) => l.acteId === a.id) ? "bg-emerald-600 border-emerald-600 text-white" : "border-emerald-500 text-emerald-700 hover:bg-emerald-50"}`}>
+                      {panierNouveau.some((l) => l.acteId === a.id) ? <CheckCircle2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />} {a.nom} · {a.prix.toLocaleString("fr-FR")} F
+                    </button>
+                  ))}
+                </div>
+              )}
+              <SelecteurActes actes={actes} panier={panierNouveau} setPanier={setPanierNouveau} isDark={isDark} />
+            </section>
           </div>
-        </div>
 
-        <div className="flex justify-end">
-          <button
-            onClick={handleEnregistrerEtEncaisser}
-            className="px-4 py-2 rounded bg-emerald-600 text-white font-medium flex items-center gap-2 hover:bg-emerald-700"
-          >
-            <Wallet className="w-4 h-4" />
-            Encaisser &amp; envoyer{" "}
-            {serviceDestination === "Infirmerie"
-              ? "à l'infirmerie"
-              : serviceDestination === "Maternite"
-              ? "à la maternité"
-              : "au laboratoire"}
-          </button>
+          {/* Récapitulatif */}
+          <aside className={`${carteCls} p-4 space-y-3 lg:sticky lg:top-4`}>
+            <div className="font-bold flex items-center gap-2"><ReceiptText className="w-4 h-4" /> Récapitulatif</div>
+            <div className="text-sm space-y-1">
+              <div className="flex justify-between gap-2"><span className="text-gray-500">Patient</span><span className="font-semibold text-right">{patientSel ? `${patientSel.code} · ${patientSel.nom}` : patient.trim() || "—"}</span></div>
+              <div className="flex justify-between gap-2"><span className="text-gray-500">Statut</span><span>{patientSel ? "Ancien patient" : patient.trim() ? "Nouveau (code créé)" : "—"}</span></div>
+              <div className="flex justify-between gap-2"><span className="text-gray-500">Vers</span><span className="font-semibold">{serviceDestination === "Maternite" ? "Maternité" : serviceDestination}</span></div>
+            </div>
+            <div className={`border-t pt-2 space-y-1 text-sm ${isDark ? "border-gray-700" : ""}`}>
+              {panierNouveau.length === 0 ? <div className="text-xs italic text-gray-400">Aucun acte choisi.</div> : panierNouveau.map((l) => (
+                <div key={l.uid} className="flex justify-between gap-2"><span>{l.designation}{l.qte > 1 ? ` × ${l.qte}` : ""}</span><span>{ligneMontant(l).toLocaleString("fr-FR")}</span></div>
+              ))}
+            </div>
+            <div className="flex justify-between items-baseline border-t pt-2">
+              <span className="font-semibold">Total</span>
+              <span className="text-2xl font-extrabold text-emerald-700">{panierTotal(panierNouveau).toLocaleString("fr-FR")} <span className="text-sm">FCFA</span></span>
+            </div>
+            <div>
+              <label className="text-xs font-medium">Mode de paiement</label>
+              <div className="grid grid-cols-3 gap-1 mt-1">
+                {["Espèces", "Mobile Money", "Assurance"].map((m) => (
+                  <button key={m} type="button" onClick={() => setModePaiement(m)} className={`px-1 py-1.5 rounded border text-xs font-medium ${modePaiement === m ? "bg-primary-600 border-primary-600 text-white" : isDark ? "border-gray-600" : "border-gray-300"}`}>{m}</button>
+                ))}
+              </div>
+            </div>
+            <button onClick={handleEnregistrerEtEncaisser} disabled={!patient.trim() || panierTotal(panierNouveau) <= 0}
+              className="w-full px-4 py-3 rounded-lg bg-emerald-600 text-white font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">
+              <Wallet className="w-5 h-5" /> Encaisser &amp; envoyer {serviceDestination === "Infirmerie" ? "à l'infirmerie" : serviceDestination === "Maternite" ? "à la maternité" : "au laboratoire"}
+            </button>
+            {(!patient.trim() || panierTotal(panierNouveau) <= 0) && (
+              <p className="text-xs text-gray-500 text-center">{!patient.trim() ? "Renseignez le nom du patient (étape 1)." : "Choisissez au moins un acte (étape 3)."}</p>
+            )}
+            {(patient || panierNouveau.length > 0) && (
+              <button type="button" onClick={resetForm} className="w-full text-xs text-gray-500 underline">Effacer le formulaire</button>
+            )}
+          </aside>
         </div>
-      </div>
+      )}
 
+      {vue === "ordres" && (nbOrdres > 0 ? (
+      <OrdresMedecin
+        consultations={consultations}
+        onUpdateConsultations={onUpdateConsultations}
+        factures={factures}
+        onUpdateFactures={onUpdateFactures}
+        actes={actes}
+        medicaments={medicaments}
+        laboExamens={laboExamens}
+        onUpdateLaboExamens={onUpdateLaboExamens}
+        agentNom={agentNom}
+        isDark={isDark}
+        onUpdateMedicaments={onUpdateMedicaments}
+        mouvements={mouvements}
+        onUpdateMouvements={onUpdateMouvements}
+      />
+
+      ) : (
+        <div className={`${carteCls} p-8 text-center text-sm text-gray-500`}><Stethoscope className="w-8 h-8 mx-auto mb-2 opacity-40" />Aucun ordre du médecin à facturer pour l'instant.</div>
+      ))}
+
+      {vue === "encaisser" && (enAttentePaiementConsult.length > 0 ? (
+        <>
+      {enAttentePaiementConsult.length > 0 && (
+        <div className={`rounded-lg border-2 border-amber-400 p-4 space-y-3 ${isDark ? "bg-gray-800" : "bg-amber-50/40"}`}>
+          <h3 className="font-bold flex items-center gap-2">
+            <Clock className="w-5 h-5 text-amber-500" /> À encaisser ({enAttentePaiementConsult.length})
+          </h3>
+          <p className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+            Patients déjà enregistrés mais dont la consultation n'est pas payée (par exemple venus sur rendez-vous avec un reçu expiré).
+          </p>
+          {enAttentePaiementConsult.map((c) => {
+            const dr = dernierRecu(factures, consultations, c.patient, c.contact, today);
+            const ouvert = encaisserId === c.id;
+            return (
+              <div key={c.id} className={`rounded border p-3 ${isDark ? "border-gray-700" : "border-gray-200 bg-white"}`}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium">{c.patient}</div>
+                    <div className={`text-xs ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+                      {c.plainte || "Consultation"}
+                      {dr ? ` · dernier reçu du ${dateCourteFr(dr.payeLe)}, expiré le ${dateCourteFr(dr.valableJusquau)}` : " · aucun reçu antérieur"}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => { setEncaisserId(ouvert ? null : c.id); setPanierEncaisser([]); }}
+                    className="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm font-medium flex items-center gap-1.5 hover:bg-emerald-700"
+                  >
+                    <Wallet className="w-4 h-4" /> {ouvert ? "Fermer" : "Encaisser"}
+                  </button>
+                </div>
+                {ouvert && (
+                  <div className="mt-3 space-y-3">
+                    <SelecteurActes actes={actes} panier={panierEncaisser} setPanier={setPanierEncaisser} isDark={isDark} />
+                    <div className="flex flex-wrap items-end justify-between gap-2">
+                      <div>
+                        <label className="text-xs font-medium">Mode de paiement</label>
+                        <select className="w-full mt-1 px-2 py-1.5 text-sm rounded border bg-transparent" value={modePaiementEncaisser} onChange={(e) => setModePaiementEncaisser(e.target.value)}>
+                          <option value="Espèces">Espèces</option>
+                          <option value="Mobile Money">Mobile Money</option>
+                          <option value="Assurance">Assurance</option>
+                        </select>
+                      </div>
+                      <button onClick={() => handleEncaisserEnAttente(c)} className="px-4 py-2 rounded bg-emerald-600 text-white font-medium flex items-center gap-2 hover:bg-emerald-700">
+                        <Wallet className="w-4 h-4" /> Encaisser {panierTotal(panierEncaisser) > 0 ? `${panierTotal(panierEncaisser).toLocaleString("fr-FR")} FCFA` : ""}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+        </>
+      ) : (
+        <div className={`${carteCls} p-8 text-center text-sm text-gray-500`}><Wallet className="w-8 h-8 mx-auto mb-2 opacity-40" />Aucun patient en attente de paiement.</div>
+      ))}
+
+      {vue === "recus" && (
       <div className={`rounded-lg border p-4 space-y-3 ${isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"}`}>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -1035,6 +1123,9 @@ export default function TabAccueilCaisse({
         )}
       </div>
 
+      )}
+
+      {vue === "acte" && (
       <div
         className={`rounded-lg border p-4 space-y-4 ${
           isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"
@@ -1119,6 +1210,10 @@ export default function TabAccueilCaisse({
         )}
       </div>
 
+      )}
+
+      {vue === "jour" && (
+        <div className={`${carteCls} p-4`}>
       <div>
         <h3 className="font-semibold flex items-center gap-2 mb-2">
           <Clock className="w-4 h-4" /> En attente (aujourd'hui)
@@ -1146,6 +1241,8 @@ export default function TabAccueilCaisse({
           </div>
         )}
       </div>
+        </div>
+      )}
       {carte && <CartePatient patient={carte.p} nouveau={carte.nouveau} onClose={() => setCarte(null)} />}
       {scanOuvert && <BarcodeScanner onScan={apresScan} onClose={() => setScanOuvert(false)} theme={theme} />}
     </div>
