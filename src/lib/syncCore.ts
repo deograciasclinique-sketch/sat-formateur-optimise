@@ -42,6 +42,11 @@ const TAILLE_MAX_FICHE = 900_000; // octets JSON (limite Firestore : 1 Mo par do
 const MAX_OPS_LOT = 400; // limite Firestore : 500 écritures par lot
 const MAX_OCTETS_LOT = 7_000_000; // limite Firestore : ~10 Mo par requête
 const MAX_SUPPRIMES = 2000; // fiches supprimées mémorisées (empêche un vieux poste de les faire revenir)
+// Période de transition : on garde AUSSI une copie de la liste complète dans le document parent
+// (« miroir »), au format d'avant, pour que les appareils pas encore mis à jour (APK, navigateurs)
+// continuent de recevoir les fiches. Seulement si la liste tient dans un document.
+const MIROIR_JUSQU_AU = Date.UTC(2026, 11, 31);
+const TAILLE_MAX_MIROIR = 800_000;
 
 // ─── Outils ──────────────────────────────────────────────────────────────
 
@@ -125,7 +130,7 @@ export function mergeThreeWay(base: any, local: any, remote: any): any {
 
 // ─── Calcul des écritures (fiche par fiche) ──────────────────────────────
 
-export type Fiche = { data: any; pos: number };
+export type Fiche = { data: any; pos: number; maj?: number };
 export type Operation = { type: "set"; docId: string; data: any; pos: number } | { type: "delete"; docId: string };
 
 /**
@@ -212,9 +217,27 @@ export function creerSync(opt: Options) {
     const m = new Map<string, Fiche>();
     docs.forEach((d) => {
       const v = d.data();
-      if (v && v.data && typeof v.data === "object") m.set(d.id, { data: opt.nettoyer(v.data), pos: typeof v.pos === "number" ? v.pos : 0 });
+      if (v && v.data && typeof v.data === "object") m.set(d.id, { data: opt.nettoyer(v.data), pos: typeof v.pos === "number" ? v.pos : 0, maj: typeof v.updatedAt === "number" ? v.updatedAt : 0 });
     });
     return m;
+  }
+
+  /** La liste du document parent a-t-elle été écrite par un appareil PAS à jour ? */
+  const ecritureAncienPoste = (parent: any) =>
+    estFormatFiches(parent) && parent.data !== undefined && parent.updatedAt !== parent.miroirLe;
+
+  /** Champs du document parent : marqueur, miroir pour les anciens postes, suppressions. */
+  function majParent(liste: any[], maintenant: number, migrer: boolean, supprimes: string[]): any {
+    const maj: any = { format: "items", updatedAt: maintenant };
+    if (migrer) maj.migreLe = maintenant;
+    if (supprimes.length) maj.supprimes = supprimes.slice(-MAX_SUPPRIMES);
+    let miroir = false;
+    if (maintenant < MIROIR_JUSQU_AU) {
+      try { miroir = JSON.stringify(liste).length <= TAILLE_MAX_MIROIR; } catch { miroir = false; }
+    }
+    if (miroir) { maj.data = liste; maj.miroirLe = maintenant; }
+    else { maj.data = opt.supprimerChamp(); maj.miroirLe = opt.supprimerChamp(); }
+    return maj;
   }
 
   /** Valeur actuelle d'une clé d'après le canal (undefined = rien à émettre). */
@@ -244,32 +267,56 @@ export function creerSync(opt: Options) {
     c.minuteur = setTimeout(() => { c.minuteur = undefined; emettre(c); }, 30);
   }
 
-  /** Ancienne grosse liste réécrite par un appareil pas à jour : on récupère ses nouvelles fiches. */
-  async function absorberAncienneListe(cle: string, c: Canal) {
-    const ancienne = c.parent?.data;
-    if (!estFormatFiches(c.parent) || !isIdList(ancienne) || !c.itemsCharges || c.absorptionEnCours) return;
-    c.absorptionEnCours = true;
+  /**
+   * Liste réécrite par un appareil PAS à jour (ancien format) : on récupère
+   *  • ses nouvelles fiches (sauf celles supprimées entre-temps) ;
+   *  • ses modifications de fiches que les appareils à jour n'ont PAS touchées depuis la dernière
+   *    copie que l'ancien poste a pu recevoir (sinon la version la plus récente l'emporte) ;
+   * puis on réécrit la copie « miroir » pour que l'ancien poste reçoive à son tour les nouveautés.
+   */
+  /** Calcul pur : fiches du cloud + ce qu'il faut reprendre de la liste d'un ancien poste. */
+  function integrerAncienneListe(parent: any, fichesCloud: Map<string, Fiche>): { fiches: Map<string, Fiche>; ops: Operation[] } {
+    const ancienne = parent?.data;
+    const fiches = new Map(fichesCloud);
+    const ops: Operation[] = [];
+    if (!ecritureAncienPoste(parent) || !isIdList(ancienne)) return { fiches, ops };
     const ids = docIds(ancienne);
-    const db = opt.db();
-    if (!db) return;
-    const lot = db.batch();
-    let n = 0;
+    const supprimees = new Set<string>(Array.isArray(parent?.supprimes) ? parent.supprimes : []);
+    let seuil: number = typeof parent?.miroirLe === "number" ? parent.miroirLe : typeof parent?.migreLe === "number" ? parent.migreLe : Infinity;
+    if (seuil === Infinity) { // migration faite avant cette version : date de migration = plus ancienne fiche
+      fichesCloud.forEach((f) => { if (typeof f.maj === "number" && f.maj > 0 && f.maj < seuil) seuil = f.maj; });
+      if (seuil === Infinity) seuil = 0;
+    }
     let max = -Infinity;
-    c.fiches.forEach((f) => { if (f.pos > max) max = f.pos; });
-    // Fiches supprimées depuis la migration : ne pas les faire revenir.
-    const supprimees = new Set<string>(Array.isArray(c.parent?.supprimes) ? c.parent.supprimes : []);
+    fiches.forEach((f) => { if (f.pos > max) max = f.pos; });
     ancienne.forEach((item, i) => {
-      if (c.fiches.has(ids[i]) || supprimees.has(ids[i])) return;
       const propre = opt.nettoyer(JSON.parse(JSON.stringify(item)));
       if (JSON.stringify(propre).length > TAILLE_MAX_FICHE) return;
-      max = max === -Infinity ? 0 : max + 1;
-      lot.set(ref(cle).collection(SOUS_COLLECTION).doc(ids[i]), { data: propre, pos: max, updatedAt: Date.now() });
-      n++;
+      const ex = fiches.get(ids[i]);
+      if (!ex) {
+        if (supprimees.has(ids[i])) return;
+        max = max === -Infinity ? 0 : max + 1;
+        ops.push({ type: "set", docId: ids[i], data: propre, pos: max });
+      } else if (!sameJson(ex.data, propre) && (ex.maj ?? 0) <= seuil) {
+        ops.push({ type: "set", docId: ids[i], data: propre, pos: ex.pos });
+      }
     });
-    lot.set(ref(cle), { format: "items", data: opt.supprimerChamp(), updatedAt: Date.now() }, { merge: true });
+    ops.forEach((op) => { if (op.type === "set") fiches.set(op.docId, { data: op.data, pos: op.pos }); });
+    return { fiches, ops };
+  }
+
+  async function absorberAncienneListe(cle: string, c: Canal) {
+    const ancienne = c.parent?.data;
+    if (!ecritureAncienPoste(c.parent) || !isIdList(ancienne) || !c.itemsCharges || c.absorptionEnCours) return;
+    const db = opt.db();
+    if (!db) return;
+    c.absorptionEnCours = true;
     try {
-      await lot.commit();
-      if (n) console.info(`[sync] ${n} fiche(s) de « ${cle} » récupérée(s) depuis un appareil non mis à jour.`);
+      const { fiches, ops } = integrerAncienneListe(c.parent, c.fiches);
+      const maintenant = Date.now();
+      const supprimes = Array.isArray(c.parent?.supprimes) ? c.parent.supprimes : [];
+      await ecrireOperations(cle, ops, majParent(assembler(fiches), maintenant, false, supprimes), maintenant);
+      if (ops.length) console.info(`[sync] ${ops.length} fiche(s) de « ${cle} » récupérée(s) depuis un appareil non mis à jour.`);
     } catch (e) {
       console.error(`[sync] Récupération de l'ancienne liste « ${cle} » impossible :`, e);
     } finally {
@@ -290,7 +337,7 @@ export function creerSync(opt: Options) {
       canal.parentCharge = true;
       canal.parent = snap.exists ? snap.data() : null;
       planifierEmission(canal);
-      if (estFormatFiches(canal.parent) && canal.parent.data !== undefined) absorberAncienneListe(cle, canal);
+      if (ecritureAncienPoste(canal.parent)) absorberAncienneListe(cle, canal);
     }, (err) => console.error(`[sync] Erreur d'écoute « ${cle} » :`, err));
     const stopItems = ref(cle).collection(SOUS_COLLECTION).onSnapshot({ includeMetadataChanges: true }, (snap) => {
       // Une première réponse venant du cache local peut être incomplète : on attend le serveur.
@@ -298,7 +345,7 @@ export function creerSync(opt: Options) {
       canal.itemsCharges = true;
       canal.fiches = lireFiches(snap.docs);
       planifierEmission(canal);
-      if (estFormatFiches(canal.parent) && canal.parent?.data !== undefined) absorberAncienneListe(cle, canal);
+      if (ecritureAncienPoste(canal.parent)) absorberAncienneListe(cle, canal);
     }, (err) => console.error(`[sync] Erreur d'écoute des fiches « ${cle} » :`, err));
     c.stop = () => { stopParent(); stopItems(); if (canal.minuteur) clearTimeout(canal.minuteur); };
     return c;
@@ -336,14 +383,14 @@ export function creerSync(opt: Options) {
     return fiches.size ? assembler(fiches) : undefined;
   }
 
-  async function ecrireOperations(cle: string, ops: Operation[], marquer: boolean, supprimesAvant: string[]) {
+  /** Écrit les fiches par lots, puis le document parent (marqueur, miroir…) dans le DERNIER lot. */
+  async function ecrireOperations(cle: string, ops: Operation[], parentMaj: any | null, maintenant: number) {
     const db = opt.db()!;
     const col = ref(cle).collection(SOUS_COLLECTION);
     let lot = db.batch();
     let nOps = 0;
     let octets = 0;
     const lots: FsBatch[] = [];
-    const maintenant = Date.now();
     for (const op of ops) {
       const taille = op.type === "set" ? JSON.stringify(op.data).length + 64 : 64;
       if (nOps >= MAX_OPS_LOT || octets + taille > MAX_OCTETS_LOT) {
@@ -357,18 +404,14 @@ export function creerSync(opt: Options) {
       nOps++;
       octets += taille;
     }
-    // Marqueur de format (migration) et liste des fiches supprimées : dans le DERNIER lot,
-    // après toutes les fiches.
-    const supprimes = ops.filter((o) => o.type === "delete").map((o) => o.docId);
-    if (marquer || supprimes.length) {
-      if (nOps >= MAX_OPS_LOT) { lots.push(lot); lot = db.batch(); nOps = 0; }
-      const maj: any = { format: "items", data: opt.supprimerChamp(), updatedAt: maintenant };
-      if (supprimes.length) maj.supprimes = Array.from(new Set([...supprimesAvant, ...supprimes])).slice(-MAX_SUPPRIMES);
-      lot.set(ref(cle), maj, { merge: true });
+    if (parentMaj) {
+      const tailleParent = JSON.stringify(parentMaj.data && !Array.isArray(parentMaj.data) ? null : parentMaj.data || null).length + 64;
+      if (nOps >= MAX_OPS_LOT || octets + tailleParent > MAX_OCTETS_LOT) { lots.push(lot); lot = db.batch(); nOps = 0; octets = 0; }
+      lot.set(ref(cle), parentMaj, { merge: true });
       nOps++;
     }
     if (nOps > 0) lots.push(lot);
-    for (const l of lots) await l.commit(); // dans l'ordre : le marqueur arrive en dernier
+    for (const l of lots) await l.commit(); // dans l'ordre : le document parent arrive en dernier
   }
 
   /** Nettoie une liste et écarte les fiches trop grosses pour un document. */
@@ -400,15 +443,28 @@ export function creerSync(opt: Options) {
     // Même en migration on compare aux fiches déjà présentes : une migration interrompue
     // est reprise proprement (fiches identiques non réécrites, restes supprimés).
     const ops = calculerOperations(actuel, propre);
-    await ecrireOperations(cle, ops, migrer, Array.isArray(parent?.supprimes) ? parent.supprimes : []);
+    const sup = ops.filter((o) => o.type === "delete").map((o) => o.docId);
+    const supprimes = Array.from(new Set([...(Array.isArray(parent?.supprimes) ? parent.supprimes : []), ...sup]));
+    // Liste complète après écriture (pour le miroir des anciens postes).
+    const apres = new Map(actuel);
+    ops.forEach((op) => { if (op.type === "set") apres.set(op.docId, { data: op.data, pos: op.pos }); else apres.delete(op.docId); });
+    const maintenant = Date.now();
+    const listeApres = assembler(apres);
+    // Le parent n'est réécrit que si nécessaire : migration, suppressions, ou miroir à rafraîchir.
+    const miroirUtile = maintenant < MIROIR_JUSQU_AU && (ops.length > 0 || ecritureAncienPoste(parent));
+    const parentMaj = migrer || sup.length || miroirUtile || (parent && parent.data !== undefined && !miroirUtile)
+      ? majParent(listeApres, maintenant, migrer, supprimes) : null;
+    await ecrireOperations(cle, ops, parentMaj, maintenant);
     // Mise à jour immédiate du canal (l'écoute confirmera ensuite).
     const c = canaux.get(cle);
     if (c) {
-      ops.forEach((op) => { if (op.type === "set") c.fiches.set(op.docId, { data: op.data, pos: op.pos }); else c.fiches.delete(op.docId); });
-      const sup = ops.filter((o) => o.type === "delete").map((o) => o.docId);
-      if (migrer || sup.length) c.parent = { ...(c.parent || {}), format: "items" };
-      if (sup.length && c.parent) c.parent.supprimes = Array.from(new Set([...(c.parent.supprimes || []), ...sup])).slice(-MAX_SUPPRIMES);
-      if (c.parent) delete c.parent.data;
+      ops.forEach((op) => { if (op.type === "set") c.fiches.set(op.docId, { data: op.data, pos: op.pos, maj: maintenant }); else c.fiches.delete(op.docId); });
+      if (parentMaj) {
+        const p: any = { ...(c.parent || {}), format: "items", updatedAt: maintenant, supprimes };
+        if (Array.isArray(parentMaj.data)) { p.data = parentMaj.data; p.miroirLe = maintenant; } else { delete p.data; delete p.miroirLe; }
+        if (migrer) p.migreLe = maintenant;
+        c.parent = p;
+      }
     }
     return propre;
   }
@@ -417,7 +473,9 @@ export function creerSync(opt: Options) {
   async function pushMerged(cle: string, local: any, base: any): Promise<any> {
     if (!opt.db()) return local;
     const { parent, fiches } = await etatCloud(cle);
-    const remote = estFormatFiches(parent) ? assembler(fiches) : parent && Object.prototype.hasOwnProperty.call(parent, "data") ? parent.data : (fiches.size ? assembler(fiches) : undefined);
+    // Une liste écrite par un ancien poste est d'abord intégrée (sinon le miroir l'écraserait).
+    const integre = integrerAncienneListe(parent, fiches).fiches;
+    const remote = estFormatFiches(parent) ? assembler(integre) : parent && Object.prototype.hasOwnProperty.call(parent, "data") ? parent.data : (fiches.size ? assembler(fiches) : undefined);
     const merged = mergeThreeWay(base, local, remote);
     if (isIdList(merged)) {
       await ecrireListe(cle, merged, parent, fiches);
