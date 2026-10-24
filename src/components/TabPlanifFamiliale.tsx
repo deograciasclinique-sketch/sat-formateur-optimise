@@ -9,6 +9,7 @@ import { generateUid, getTodayStr, safeGet, safeSet } from "../data";
 import RetraitsContraception from "./RetraitsContraception";
 import InjectablesPF from "./InjectablesPF";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
+import { lireCloudKey } from "../lib/liveSync";
 import { db, authReady } from "../lib/firebase";
 import {
   Plus,
@@ -254,8 +255,8 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
       try {
         await authReady;
         const locales = safeGet<FichePlanifFamiliale[]>("dg_planif_familiale", []);
-        const snap = await db.collection("dg_live_sync").doc("dg_planif_familiale").get();
-        const cloud: FichePlanifFamiliale[] = snap.exists && Array.isArray(snap.data()?.data) ? snap.data()!.data : [];
+        const lu = await lireCloudKey("dg_planif_familiale");
+        const cloud: FichePlanifFamiliale[] = Array.isArray(lu) ? lu : [];
         const estExemple = (p: FichePlanifFamiliale) =>
           (p.id === "PF-2026-001" && p.patient === "Fatoumata Barro") || (p.id === "PF-2026-002" && p.patient === "Mariam Ouédraogo");
         const parId = new Map<string, FichePlanifFamiliale>();
