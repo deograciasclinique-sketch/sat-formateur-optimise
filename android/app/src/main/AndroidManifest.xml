@@ -55,6 +55,10 @@
 
     <!-- Dictée vocale : autorise l'appel au service de reconnaissance vocale d'Android -->
     <queries>
+        <!-- Applications des caméras de surveillance (onglet Caméras) -->
+        <package android:name="com.ezviz" />
+        <package android:name="com.mm.android.smartlifeiot" />
+        <package android:name="com.connect.enduser" />
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>

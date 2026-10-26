@@ -28,6 +28,7 @@ const RELEASES_API = "https://api.github.com/repos/deograciasclinique-sketch/sat
 type Natif = {
   getVersion(): Promise<{ version: string; build: number }>;
   openUrl(o: { url: string }): Promise<void>;
+  openApp(o: { package: string; search?: string }): Promise<{ installed: boolean }>;
   setSecure(o: { on: boolean }): Promise<void>;
   printHtml(o: { html: string; title?: string }): Promise<void>;
   printPage(o: { title?: string }): Promise<void>;
@@ -340,3 +341,18 @@ export async function protegerEcran(on: boolean) {
 }
 
 if (NATIF) installer();
+
+/** Ouvre l'application d'une marque (APK) ; sur PC, ouvre le site de la marque. */
+export async function ouvrirApplication(pkg: string, nom: string, site: string): Promise<"app" | "store" | "web"> {
+  if (NATIF) {
+    try {
+      const r = await DG.openApp({ package: pkg, search: nom });
+      if (!r.installed) bulle(`${nom} n'est pas installée : installez-la depuis le Play Store, puis réessayez.`, 4500);
+      return r.installed ? "app" : "store";
+    } catch { /* APK plus ancienne sans openApp : on ouvre le Play Store */ }
+    window.open("https://play.google.com/store/apps/details?id=" + pkg, "_blank");
+    return "store";
+  }
+  window.open(site, "_blank", "noopener");
+  return "web";
+}

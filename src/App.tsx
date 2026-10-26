@@ -88,6 +88,7 @@ import TabActesTarifs from "./components/TabActesTarifs";
 import TabOnlineRDV from "./components/TabOnlineRDV";
 import TabDashboardGlobal from "./components/TabDashboardGlobal";
 import TabSettings from "./components/TabSettings";
+import TabCameras from "./components/TabCameras";
 import TabPlanifFamiliale from "./components/TabPlanifFamiliale";
 import ResponsableCodeSetup from "./components/ResponsableCodeSetup";
 import BandeauPharmacieGarde from "./components/BandeauPharmacieGarde";
@@ -103,6 +104,7 @@ import {
   HeartPulse,
   Heart,
   LayoutDashboard,
+  Camera,
   Users,
   Briefcase,
   FileText,
@@ -634,7 +636,8 @@ export default function App() {
           "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
           "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings",
           // Bilan mensuel : réservé au responsable du service.
-          ...(p.includes("responsable") ? ["bilan"] : []),
+          // Bilan mensuel et caméras de surveillance : réservés au responsable du service.
+          ...(p.includes("responsable") ? ["bilan", "cameras"] : []),
         ],
       };
     }
@@ -684,7 +687,7 @@ export default function App() {
       return [
         "dashboard", "accueil_caisse", "infirmier", "medecine", "repertoire", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
         "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
-        "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings", "bilan",
+        "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings", "bilan", "cameras",
       ];
     }
     return detectPosteAccess(currentUser.poste).tabs;
@@ -1680,6 +1683,7 @@ export default function App() {
           { id: "indicateurs", label: "Indicateurs Épidémio", icon: TrendingUp },
           { id: "qualite", label: "Démarche Qualité", icon: ShieldCheck },
           { id: "documents", label: "Coffre-fort Documents", icon: FileText },
+          { id: "cameras", label: "Caméras de surveillance", icon: Camera },
           { id: "settings", label: "Paramètres des Seuils", icon: Settings }
         ]
       }
@@ -2450,6 +2454,10 @@ export default function App() {
               theme={theme}
               agentNom={currentUser?.nom}
             />
+          )}
+
+          {activeTab === "cameras" && (
+            <TabCameras theme={theme} agentNom={currentUser?.nom} />
           )}
 
           {activeTab === "bilan" && (

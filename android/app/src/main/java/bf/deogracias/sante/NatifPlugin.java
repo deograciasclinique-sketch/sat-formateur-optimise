@@ -68,6 +68,35 @@ public class NatifPlugin extends Plugin {
         call.resolve(r);
     }
 
+    /** Ouvre une application installée (ex. EZVIZ, Imou Life, Hik-Connect) ; sinon sa page Play Store. */
+    @PluginMethod
+    public void openApp(PluginCall call) {
+        String pkg = call.getString("package", "");
+        String search = call.getString("search", pkg);
+        try {
+            Intent launch = pkg.isEmpty() ? null : getContext().getPackageManager().getLaunchIntentForPackage(pkg);
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getActivity().startActivity(launch);
+                JSObject r = new JSObject(); r.put("installed", true); call.resolve(r);
+                return;
+            }
+            Intent store;
+            try {
+                store = new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + pkg));
+                store.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getActivity().startActivity(store);
+            } catch (ActivityNotFoundException e) {
+                store = new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/search?q=" + Uri.encode(search) + "&c=apps"));
+                store.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getActivity().startActivity(store);
+            }
+            JSObject r = new JSObject(); r.put("installed", false); call.resolve(r);
+        } catch (Exception e) {
+            call.reject("Impossible d'ouvrir l'application : " + e.getMessage());
+        }
+    }
+
     @PluginMethod
     public void openUrl(PluginCall call) {
         try {
