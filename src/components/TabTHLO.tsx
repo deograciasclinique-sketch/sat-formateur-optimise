@@ -8,7 +8,7 @@
  * les autres appareils, grâce à la synchronisation cloud).
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import {
@@ -162,8 +162,10 @@ export default function TabTHLO({
   const [seulementAvecCas, setSeulementAvecCas] = useState(false);
   const [controle, setControle] = useState<FiltreControle | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [showConfig, setShowConfig] = useState(!config?.district);
+  // Les réglages ne s'ouvrent seuls que s'ils n'ont jamais été faits (ni district ni WhatsApp).
+  const [showConfig, setShowConfig] = useState(!config?.district && !config?.telephoneDistrict);
   const [cfgDraft, setCfgDraft] = useState<ConfigTHLO>(cfg);
+  const listeControleRef = useRef<HTMLDivElement>(null);
 
   const rapport = rapports.find((r) => r.id === semaine.id);
   const exclusions = rapport?.exclusions || [];
@@ -173,6 +175,20 @@ export default function TabTHLO({
     [semaine, consultations, pediatrie, hospitalisations, examens, exclusions.join(",")]
   );
   const verrouille = !!rapport && rapport.statut !== "Brouillon";
+
+  // --- Dossiers sans diagnostic : à corriger AVANT validation et envoi ---
+  const nbSansDiag = auto.sansDiagnostic;
+  const montrerSansDiag = () => {
+    setControle("sans_diagnostic");
+    setTimeout(() => listeControleRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+  /** true = on peut continuer ; false = il reste des dossiers sans diagnostic (liste ouverte). */
+  const verifierDiagnostics = (action: string): boolean => {
+    if (verrouille || nbSansDiag === 0) return true;
+    alert(`⚠️ ${nbSansDiag} dossier(s) de cette semaine n'ont pas de diagnostic.\n\nPosez le diagnostic (ou PS / PG) de chacun avant de ${action} : sinon ces cas manqueront dans le TLOH envoyé au District.\n\nLa liste des dossiers à corriger va s'ouvrir.`);
+    montrerSansDiag();
+    return false;
+  };
   const valeurs = valeursFinales(rapport, auto);
   const ficheA = ficheAuto(auto, valeurs);
   const fiche = ficheFinale(rapport, ficheA);
@@ -242,6 +258,7 @@ export default function TabTHLO({
   const enregistrerTexte = () => sauver({ ...baseRapport(), observations: obs.trim(), redigePar: redige.trim() });
 
   const valider = () => {
+    if (!verifierDiagnostics("valider les chiffres")) return;
     if (!semaineTerminee && !window.confirm("La semaine n'est pas terminée. Valider quand même le rapport maintenant ?")) return;
     sauver({
       ...baseRapport(), observations: obs.trim(), redigePar: redige.trim(), statut: "Validé", valideLe: new Date().toISOString(),
@@ -270,11 +287,13 @@ export default function TabTHLO({
   };
 
   const copier = async () => {
+    if (!verifierDiagnostics("copier le rapport")) return;
     try { await navigator.clipboard.writeText(texte); alert("Rapport copié : vous pouvez le coller dans WhatsApp ou un SMS."); }
     catch { alert("La copie n'a pas fonctionné sur cet appareil."); }
   };
 
   const telechargerPDF = () => {
+    if (!verifierDiagnostics("télécharger le PDF")) return;
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
     doc.setFontSize(15);
     doc.text(cfg.formationSanitaire || "CSI DEO GRACIAS", 14, 13);
@@ -529,6 +548,22 @@ export default function TabTHLO({
         )}
       </div>
 
+      {nbSansDiag > 0 && (
+        <div className={`rounded-lg border-2 p-3 flex flex-wrap items-center justify-between gap-2 ${verrouille ? "border-amber-400 bg-amber-500/10" : "border-red-400 bg-red-500/10"}`}>
+          <div className={`text-sm font-semibold flex items-center gap-2 ${verrouille ? "text-amber-700" : "text-red-700"}`}>
+            <AlertTriangle className="w-5 h-5 shrink-0" />
+            {verrouille
+              ? `${nbSansDiag} dossier(s) de cette semaine sans diagnostic ont été ajoutés après la validation : rouvrez le rapport pour les corriger.`
+              : `${nbSansDiag} dossier(s) de cette semaine sans diagnostic : à corriger avant de valider et d'envoyer le TLOH.`}
+          </div>
+          {!verrouille && (
+            <button type="button" onClick={montrerSansDiag} className="px-3 py-1.5 rounded bg-red-600 text-white text-sm font-semibold hover:bg-red-700">
+              Corriger maintenant
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           ["Dossiers de la semaine", auto.dossiers.length, "tous"],
@@ -553,7 +588,7 @@ export default function TabTHLO({
 
       {/* Liste de contrôle : chaque dossier de la semaine et ce que le TLOH en a retenu */}
       {controle && (
-        <div className={`${card} p-3`}>
+        <div ref={listeControleRef} className={`${card} p-3 scroll-mt-4`}>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div className="font-semibold">Contrôle des dossiers de la semaine</div>
             <div className="flex flex-wrap gap-1.5 text-xs">
@@ -752,7 +787,7 @@ export default function TabTHLO({
             <button onClick={valider} className="px-3 py-2 rounded bg-blue-600 text-white text-sm font-semibold flex items-center gap-1.5 hover:bg-blue-700"><Lock className="w-4 h-4" /> Valider les chiffres</button>
           )}
           {numDistrict ? (
-            <a href={`https://wa.me/${numDistrict}?text=${encodeURIComponent(texte)}`} target="_blank" rel="noopener noreferrer" onClick={() => marquerTransmis("WhatsApp")}
+            <a href={`https://wa.me/${numDistrict}?text=${encodeURIComponent(texte)}`} target="_blank" rel="noopener noreferrer" onClick={(e) => { if (!verifierDiagnostics("transmettre au District")) { e.preventDefault(); return; } marquerTransmis("WhatsApp"); }}
               className="px-3 py-2 rounded bg-[#25D366] text-white text-sm font-semibold flex items-center gap-1.5">
               <Send className="w-4 h-4" /> Transmettre au District (WhatsApp)
             </a>
@@ -762,7 +797,7 @@ export default function TabTHLO({
             </button>
           )}
           {rapport?.statut !== "Transmis" && (
-            <button onClick={() => { if (window.confirm("Marquer ce rapport comme transmis (par un autre moyen : papier, DHIS2, SMS) ?")) marquerTransmis("Autre moyen"); }} className={`px-3 py-2 rounded border text-sm font-semibold flex items-center gap-1.5 ${isDark ? "border-gray-600" : "border-gray-300"}`}>
+            <button onClick={() => { if (!verifierDiagnostics("marquer le rapport comme transmis")) return; if (window.confirm("Marquer ce rapport comme transmis (par un autre moyen : papier, DHIS2, SMS) ?")) marquerTransmis("Autre moyen"); }} className={`px-3 py-2 rounded border text-sm font-semibold flex items-center gap-1.5 ${isDark ? "border-gray-600" : "border-gray-300"}`}>
               <CheckCircle2 className="w-4 h-4" /> Déjà transmis autrement
             </button>
           )}

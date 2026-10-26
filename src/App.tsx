@@ -63,7 +63,7 @@ import TabQualite from "./components/TabQualite";
 import TabIndicateurs from "./components/TabIndicateurs";
 import TabBilanMensuel from "./components/TabBilanMensuel";
 import TabTHLO from "./components/TabTHLO";
-import { RapportTHLO, ConfigTHLO, CONFIG_THLO_DEFAUT, semainePrecedente, dateLimite, normaliserConfig, momentTransmission } from "./modules/thlo/thloData";
+import { RapportTHLO, ConfigTHLO, CONFIG_THLO_DEFAUT, semainePrecedente, dateLimite, normaliserConfig, momentTransmission, compterSemaine } from "./modules/thlo/thloData";
 import TabTaches from "./components/TabTaches";
 import TabPharmacie from "./components/TabPharmacie";
 import TabFacturation from "./components/TabFacturation";
@@ -1072,9 +1072,27 @@ export default function App() {
     const moment = momentTransmission(s, cfg).getTime();
     if (horlogeTloh < moment - 30 * 60000) return null;
     const finJour = new Date(dateLimite(s, cfg) + "T23:59:59").getTime();
-    return { semaine: s, heure: cfg.heureTransmission || "08:00", aLHeure: horlogeTloh >= moment, enRetard: horlogeTloh > finJour };
-  }, [thloConfig, thloRapports, horlogeTloh]);
+    // Dossiers de la semaine encore sans diagnostic : à corriger AVANT l'envoi.
+    let sansDiagnostic = 0;
+    if (r?.statut !== "Validé") {
+      try { sansDiagnostic = compterSemaine(s, consultations, pediatrie, hospitalisations, laboExamens, r?.exclusions || []).sansDiagnostic; } catch { /* calcul indisponible */ }
+    }
+    return { semaine: s, heure: cfg.heureTransmission || "08:00", aLHeure: horlogeTloh >= moment, enRetard: horlogeTloh > finJour, sansDiagnostic };
+  }, [thloConfig, thloRapports, horlogeTloh, consultations, pediatrie, hospitalisations, laboExamens]);
   const tlohNotifie = React.useRef<string>("");
+  // Alerte dès le début du rappel (30 min avant) s'il reste des dossiers sans diagnostic.
+  const tlohDiagNotifie = React.useRef<string>("");
+  useEffect(() => {
+    if (!tlohRappel || !isLoaded || !tlohRappel.sansDiagnostic) return;
+    const k = tlohRappel.semaine.id;
+    if (tlohDiagNotifie.current === k) return;
+    tlohDiagNotifie.current = k;
+    const n = String(tlohRappel.semaine.numero).padStart(2, "0");
+    const msg = `${tlohRappel.sansDiagnostic} dossier(s) de la semaine sans diagnostic : à corriger avant l'envoi du TLOH N° ${n}.`;
+    showToast("⚠️ TLOH : diagnostics manquants", msg, "warning");
+    sendBrowserNotification("⚠️ TLOH : diagnostics manquants", msg, `tloh-diag-${k}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tlohRappel?.semaine.id, tlohRappel?.sansDiagnostic, isLoaded]);
   useEffect(() => {
     if (!tlohRappel || !tlohRappel.aLHeure || !isLoaded) return;
     const k = tlohRappel.semaine.id;
@@ -1156,7 +1174,14 @@ export default function App() {
 
     Object.entries(liveSyncSetters.current).forEach(([key, setter]: [string, (data: any) => void]) => {
       const unsubscribe = subscribeToCloudKey(key, (remoteData) => {
-        if (!Array.isArray(remoteData) && typeof remoteData !== "number") return;
+        // Listes et nombres… et les RÉGLAGES (objets) : sans cette exception, les
+        // réglages du TLOH faits sur un poste n'arrivaient jamais sur les autres,
+        // qui gardaient les réglages par défaut (« ça se dérègle »).
+        const estReglage = key === "dg_thlo_config";
+        if (estReglage) {
+          if (!remoteData || typeof remoteData !== "object" || Array.isArray(remoteData)) return;
+          remoteData = normaliserConfig(remoteData);
+        } else if (!Array.isArray(remoteData) && typeof remoteData !== "number") return;
 
         const remoteJson = JSON.stringify(remoteData);
         // Valeur ACTUELLE à l'écran (peut contenir une saisie pas encore envoyée).
@@ -1483,8 +1508,9 @@ export default function App() {
     safeSet("dg_thlo_rapports", r);
   };
   const handleUpdateThloConfig = (c: ConfigTHLO) => {
-    setThloConfig(c);
-    safeSet("dg_thlo_config", c);
+    const n = normaliserConfig(c);
+    setThloConfig(n);
+    safeSet("dg_thlo_config", n);
   };
 
   const handleUpdateRdv = (newRdv: RendezVous[]) => {
@@ -2366,6 +2392,9 @@ export default function App() {
               <span>
                 📊 TLOH N° {String(tlohRappel.semaine.numero).padStart(2, "0")} (semaine écoulée) à transmettre au District
                 {tlohRappel.enRetard ? " — EN RETARD" : tlohRappel.aLHeure ? ` — c'est l'heure (${tlohRappel.heure})` : ` à ${tlohRappel.heure}`}
+                {tlohRappel.sansDiagnostic > 0 && (
+                  <span className="block text-red-700 mt-0.5">⚠️ {tlohRappel.sansDiagnostic} dossier(s) sans diagnostic à corriger avant l'envoi</span>
+                )}
               </span>
               <button onClick={() => setActiveTab("thlo")} className={`px-3 py-1.5 rounded-lg text-white text-xs font-bold ${tlohRappel.enRetard ? "bg-red-600" : "bg-amber-500"}`}>
                 Ouvrir le TLOH

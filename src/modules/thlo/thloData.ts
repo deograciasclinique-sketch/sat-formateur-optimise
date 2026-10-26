@@ -517,11 +517,11 @@ export const CONFIG_THLO_DEFAUT: ConfigTHLO = {
 /** Complète une configuration enregistrée avant l'ajout de l'heure de transmission. */
 export function normaliserConfig(c?: Partial<ConfigTHLO>): ConfigTHLO {
   const out: ConfigTHLO = { ...CONFIG_THLO_DEFAUT, ...(c || {}) };
-  if (!c?.heureTransmission) {
-    // Règle du cabinet : le TLOH part chaque lundi à 8h00.
-    out.jourLimite = 1;
-    out.heureTransmission = "08:00";
-  }
+  // Règle du cabinet : le TLOH part chaque lundi à 8h00 — seulement si rien
+  // n'a été réglé (un réglage déjà enregistré n'est JAMAIS remplacé).
+  if (!/^\d{1,2}:\d{2}$/.test(out.heureTransmission || "")) out.heureTransmission = "08:00";
+  const j = Number(out.jourLimite);
+  out.jourLimite = Number.isInteger(j) && j >= 1 && j <= 7 ? j : 1;
   if (!out.formationSanitaire || out.formationSanitaire === "Cabinet Privé de Soins DEO-GRACIAS") out.formationSanitaire = "CSI DEO GRACIAS";
   return out;
 }
