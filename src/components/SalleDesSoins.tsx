@@ -205,6 +205,111 @@ export function prisesAFaireAujourdhui(plans: PlanSoins[], soins: SoinRealise[])
 /* ------------------------------------------------------------------ */
 
 /** Pré-remplissage du formulaire (ex. depuis « Soins à exécuter » ou un plan). */
+/* ------------------------------------------------------------------ */
+/*  Horaires des prises et alertes (30 min avant l'heure)              */
+/* ------------------------------------------------------------------ */
+
+export const MINUTES_AVANT_ALERTE = 30;
+
+/** "HH:MM" → minutes depuis minuit. */
+const minutesBrutes = (h: string) => {
+  const [a, b] = (h || "").split(":").map((x) => parseInt(x, 10));
+  return (isNaN(a) ? 0 : a) * 60 + (isNaN(b) ? 0 : b);
+};
+/** Minutes d'un horaire de prise : « 00:00 » = minuit en fin de journée (24:00). */
+const minutesCreneau = (h: string) => { const m = minutesBrutes(h); return m === 0 ? 1440 : m; };
+
+/** Horaires d'une ligne : ceux enregistrés, sinon ceux de sa fréquence (anciens plans). */
+const horairesLigne = (l: LigneTraitement): string[] => {
+  const h = (l.horaires || []).filter((x) => /^\d{1,2}:\d{2}$/.test(x));
+  return h.length ? h : [...freqParValeur(frequenceDepuisTexte(l.frequence)).horaires];
+};
+
+export type StatutCreneau = "fait" | "a_venir" | "bientot" | "retard" | "hors_plan";
+export interface CreneauPrise {
+  plan: PlanSoins;
+  ligne: LigneTraitement;
+  date: string;
+  heure: string;
+  minutes: number;
+  fait?: { heure: string; agent: string };
+  statut: StatutCreneau;
+  ecartMinutes: number;
+}
+
+/**
+ * Horaires prévus d'un plan pour un jour donné, avec leur état.
+ * Chaque prise enregistrée « couvre » l'horaire prévu le plus proche
+ * (une prise donnée jusqu'à 30 min en avance compte pour cet horaire).
+ */
+export function creneauxDuJour(plan: PlanSoins, soins: SoinRealise[], date: string, maintenant = new Date()): CreneauPrise[] {
+  const out: CreneauPrise[] = [];
+  const jour = ecartJours(plan.dateDebut, date) + 1;
+  const estAujourdhui = date === localDate(maintenant);
+  const minNow = maintenant.getHours() * 60 + maintenant.getMinutes();
+  // Le 1er jour, les horaires d'avant le début du traitement ne comptent pas.
+  const debut = plan.createdAt ? new Date(plan.createdAt) : null;
+  const minDebut = debut && !isNaN(debut.getTime()) && localDate(debut) === date && date === plan.dateDebut
+    ? debut.getHours() * 60 + debut.getMinutes() : -1;
+
+  plan.lignes.forEach((l) => {
+    if (jour < 1 || jour > (l.dureeJours || 1)) return;
+    const horaires = horairesLigne(l);
+    if (!horaires.length) return;
+    const creneaux = horaires.map((h) => ({ heure: h, minutes: minutesCreneau(h), fait: undefined as undefined | { heure: string; agent: string } }))
+      .sort((a, b) => a.minutes - b.minutes);
+    const prises = prisesDuJour(soins, plan.id, l.id, date)
+      .map((s) => ({ heure: s.heure, agent: s.agentNom, m: minutesBrutes(s.heure) }))
+      .sort((a, b) => a.m - b.m);
+    prises.forEach((p) => {
+      const libres = creneaux.filter((c) => !c.fait);
+      if (!libres.length) return;
+      const avant = libres.filter((c) => c.minutes <= p.m + MINUTES_AVANT_ALERTE);
+      const cible = avant.length ? avant[avant.length - 1] : libres[0];
+      cible.fait = { heure: p.heure, agent: p.agent };
+    });
+    creneaux.forEach((c) => {
+      let statut: StatutCreneau;
+      const ecart = c.minutes - minNow;
+      if (c.fait) statut = "fait";
+      else if (minDebut >= 0 && c.minutes < minDebut) statut = "hors_plan";
+      else if (!estAujourdhui) statut = date > localDate(maintenant) ? "a_venir" : "retard";
+      else if (ecart <= 0) statut = "retard";
+      else if (ecart <= MINUTES_AVANT_ALERTE) statut = "bientot";
+      else statut = "a_venir";
+      out.push({ plan, ligne: l, date, heure: c.minutes === 1440 ? "00:00" : c.heure, minutes: c.minutes, fait: c.fait, statut, ecartMinutes: estAujourdhui ? ecart : 0 });
+    });
+  });
+  return out.sort((a, b) => a.minutes - b.minutes);
+}
+
+/** Groupe d'alerte : un patient, un horaire, un ou plusieurs médicaments. */
+export interface AlerteSoin {
+  cle: string;          // planId|date|heure
+  plan: PlanSoins;
+  heure: string;
+  minutes: number;
+  statut: "bientot" | "retard";
+  ecartMinutes: number;
+  lignes: LigneTraitement[];
+}
+
+/** Prises d'aujourd'hui à faire dans les 30 prochaines minutes ou en retard. */
+export function alertesSoins(plans: PlanSoins[], soins: SoinRealise[], maintenant = new Date()): AlerteSoin[] {
+  const date = localDate(maintenant);
+  const groupes = new Map<string, AlerteSoin>();
+  plans.filter((p) => p.statut === "En cours").forEach((p) => {
+    creneauxDuJour(p, soins, date, maintenant).forEach((c) => {
+      if (c.statut !== "bientot" && c.statut !== "retard") return;
+      const cle = `${p.id}|${date}|${c.heure}`;
+      const g = groupes.get(cle);
+      if (g) g.lignes.push(c.ligne);
+      else groupes.set(cle, { cle, plan: p, heure: c.heure, minutes: c.minutes, statut: c.statut, ecartMinutes: c.ecartMinutes, lignes: [c.ligne] });
+    });
+  });
+  return [...groupes.values()].sort((a, b) => a.minutes - b.minutes || a.plan.patient.localeCompare(b.plan.patient));
+}
+
 export interface PreRemplissageSoin {
   patient: string;
   contact?: string;
@@ -216,6 +321,8 @@ export interface PreRemplissageSoin {
   lignes?: { produit: string; dose?: string; voie?: string; frequence?: string; dureeJours?: number }[];
   // Mode « plan » : prises du jour d'un plan de traitement existant.
   planId?: string;
+  // Depuis une alerte : médicaments du plan à cocher (ceux de l'horaire signalé).
+  lignesACocher?: string[];
   // Texte de la prescription à rappeler en haut du formulaire.
   rappel?: string[];
 }
@@ -276,7 +383,8 @@ export function FormulaireSoin({
   // Mode plan : prises cochées (par défaut, celles qui restent à faire aujourd'hui).
   const [coches, setCoches] = useState<Record<string, boolean>>(() => {
     const o: Record<string, boolean> = {};
-    if (planExistant) etatPlan(planExistant, soins, localDate()).lignes.forEach((x) => (o[x.ligne.id] = x.active && x.reste > 0));
+    const cibles = pre?.lignesACocher && pre.lignesACocher.length ? new Set(pre.lignesACocher) : null;
+    if (planExistant) etatPlan(planExistant, soins, localDate()).lignes.forEach((x) => (o[x.ligne.id] = x.active && x.reste > 0 && (!cibles || cibles.has(x.ligne.id))));
     return o;
   });
   const [creerPlan, setCreerPlan] = useState<boolean | null>(null); // null = automatique

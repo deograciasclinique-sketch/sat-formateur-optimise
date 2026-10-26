@@ -71,6 +71,7 @@ import TabAccueilCaisse from "./components/TabAccueilCaisse";
 import { PatientRegistre, rattacherConsultations } from "./lib/patients";
 import TabInfirmier from "./components/TabInfirmier";
 import { prisesAFaireAujourdhui } from "./components/SalleDesSoins";
+import AlertesSoins from "./components/AlertesSoins";
 import TabRDV from "./components/TabRDV";
 import TabRH from "./components/TabRH";
 import TabHospitalisation from "./components/TabHospitalisation";
@@ -700,6 +701,8 @@ export default function App() {
 
   // Active Panel Route
   const [activeTab, setActiveTab] = useState<string>("dashboard");
+  // Alerte « Faire le soin » → ouvre la Salle des soins sur le bon plan.
+  const [demandeSoin, setDemandeSoin] = useState<{ planId: string; lignes: string[]; n: number } | null>(null);
 
   // Keep activeTab within allowed tabs
   useEffect(() => {
@@ -2512,6 +2515,7 @@ export default function App() {
               onUpdatePlansSoins={handleUpdatePlansSoins}
               agentNom={currentUser?.nom || ""}
               actes={actesTarifaires}
+              demandeSoin={demandeSoin}
             />
           )}
 
@@ -3045,6 +3049,19 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Alertes de la Salle des soins : 30 min avant chaque prise, sur tous les onglets */}
+      {isLoaded && currentUser && allowedTabs.includes("infirmier") && (
+        <AlertesSoins
+          plans={plansSoins}
+          soins={soins}
+          isDark={theme === "dark"}
+          onFaire={(planId, lignes) => {
+            setActiveTab("infirmier");
+            setDemandeSoin({ planId, lignes, n: Date.now() });
+          }}
+        />
+      )}
     </div>
     </SelfHealingErrorBoundary>
   );

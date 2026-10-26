@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv, Facture, SoinRealise, PlanSoins, ActeTarifaire } from "../types";
 import SalleDesSoins, { FormulaireSoin, PreRemplissageSoin, cloturerPlansComplets, prisesAFaireAujourdhui, dureeDepuisTexte } from "./SalleDesSoins";
 import { recuValide, dernierRecu, dateCourteFr } from "../lib/recuConsultation";
@@ -56,6 +56,8 @@ interface TabInfirmierProps {
   agentNom?: string;
   // Grille Actes & Tarifs (actes ajoutés par l'infirmier pendant les soins).
   actes?: ActeTarifaire[];
+  // Alerte « Faire le soin » (bandeau des alertes) : plan + médicaments à faire.
+  demandeSoin?: { planId: string; lignes: string[]; n: number } | null;
 }
 
 type ModeCloture = "transfert" | "moimeme";
@@ -89,6 +91,7 @@ export default function TabInfirmier({
   onUpdatePlansSoins,
   agentNom = "",
   actes = [],
+  demandeSoin = null,
 }: TabInfirmierProps) {
   const isDark = theme === "dark";
 
@@ -97,6 +100,16 @@ export default function TabInfirmier({
   // Formulaire « Enregistrer un soin » : pré-rempli éventuellement, et
   // consultation à clôturer une fois le soin noté (depuis « Soins à exécuter »).
   const [formSoin, setFormSoin] = useState<null | { pre: PreRemplissageSoin | null; terminerConsultationId?: string }>(null);
+  // Alerte « Faire le soin » : ouvre directement les soins du plan concerné.
+  useEffect(() => {
+    if (!demandeSoin) return;
+    const p = plansSoins.find((x) => x.id === demandeSoin.planId);
+    if (p) {
+      setVueInf("soins");
+      setFormSoin({ pre: { patient: p.patient, planId: p.id, lignesACocher: demandeSoin.lignes } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demandeSoin?.n]);
   const [dossierKey, setDossierKey] = useState<string | null>(null);
   const [rdvConstantesId, setRdvConstantesId] = useState<string | null>(null);
   const [nouveauRdv, setNouveauRdv] = useState<null | { patient?: string; contact?: string; rdvPrecedentId?: string }>(null);
