@@ -81,6 +81,7 @@ import TabAssurance from "./components/TabAssurance";
 import TabUrgences from "./components/TabUrgences";
 import TabPediatrie from "./components/TabPediatrie";
 import TabConsultation from "./components/TabConsultation";
+import TabRepertoirePatients from "./components/TabRepertoirePatients";
 import TabDocuments from "./components/TabDocuments";
 import TabActesTarifs from "./components/TabActesTarifs";
 import TabOnlineRDV from "./components/TabOnlineRDV";
@@ -135,20 +136,22 @@ import {
   Clock,
   Maximize,
   Minimize,
-  BarChart3
+  BarChart3,
+  BookUser
 } from "lucide-react";
 
 // Move static tab lists, helper maps, and configuration constants outside App to avoid recreating them on every single render
 const ALL_TABS = [
   "dashboard", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", 
   "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", 
-  "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings", "bilan"
+  "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings", "bilan", "repertoire"
 ];
 
 const getTabLabel = (id: string): string => {
   const mapping: Record<string, string> = {
     dashboard: "Dashboard Global",
     medecine: "Consultation Générale",
+    repertoire: "Répertoire des patients",
     urgences: "Triage & Urgences",
     hospit: "Hospitalisations",
     pediatrie: "Surveillance Pédiatrique",
@@ -626,7 +629,7 @@ export default function App() {
       return {
         reconnu: true,
         tabs: [
-          "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
+          "dashboard", "accueil_caisse", "infirmier", "medecine", "repertoire", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
           "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
           "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings",
           // Bilan mensuel : réservé au responsable du service.
@@ -637,17 +640,17 @@ export default function App() {
 
     const tabs = ["taches"]; // tout le monde voit les tâches
     if (p.includes("medecin") || p.includes("pediatre") || p.includes("praticien")) {
-      tabs.push("dashboard", "medecine", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs", "thlo");
+      tabs.push("dashboard", "medecine", "repertoire", "urgences", "hospit", "pediatrie", "rdv", "documents", "planif_familiale", "actes_tarifs", "thlo");
       return { reconnu: true, tabs };
     }
     if (p.includes("sage-femme") || p.includes("maternit")) {
       // Accède aussi à la Salle des Infirmiers : c'est là que se trouve le
       // circuit complet (constantes -> diagnostic/prescription -> transfert).
-      tabs.push("maternite", "infirmier", "vaccination", "rdv", "documents", "planif_familiale");
+      tabs.push("maternite", "infirmier", "repertoire", "vaccination", "rdv", "documents", "planif_familiale");
       return { reconnu: true, tabs };
     }
     if (p.includes("infirm") || p.includes("aide-soignant") || p.includes("triage")) {
-      tabs.push("infirmier", "urgences", "hospit", "vaccination", "rdv", "thlo");
+      tabs.push("infirmier", "repertoire", "urgences", "hospit", "vaccination", "rdv", "thlo");
       return { reconnu: true, tabs };
     }
     if (p.includes("labo")) {
@@ -659,7 +662,7 @@ export default function App() {
       return { reconnu: true, tabs };
     }
     if (p.includes("accueil") || p.includes("secretair") || p.includes("reception")) {
-      tabs.push("accueil_caisse", "rdv", "rdv_en_ligne", "factures", "actes_tarifs");
+      tabs.push("accueil_caisse", "repertoire", "rdv", "rdv_en_ligne", "factures", "actes_tarifs");
       return { reconnu: true, tabs };
     }
     if (p.includes("comptable") || p.includes("finance") || p.includes("caiss")) {
@@ -678,7 +681,7 @@ export default function App() {
     if (!currentUser) return [];
     if (currentUserPin === "0000") {
       return [
-        "dashboard", "accueil_caisse", "infirmier", "medecine", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
+        "dashboard", "accueil_caisse", "infirmier", "medecine", "repertoire", "urgences", "hospit", "pediatrie", "maternite", "vaccination", "planif_familiale",
         "labo", "pharma", "taches", "rdv", "rdv_en_ligne", "factures", "actes_tarifs",
         "assurances", "rh", "thlo", "indicateurs", "qualite", "documents", "settings", "bilan",
       ];
@@ -1613,6 +1616,7 @@ export default function App() {
           { id: "accueil_caisse", label: "Accueil & Caisse", icon: Wallet2 },
           { id: "infirmier", label: "Salle des Infirmiers", icon: Activity, alertCount: consultations.filter((c) => c.statut === "Attente prise en charge infirmier").length + prisesAFaireAujourdhui(plansSoins, soins) },
           { id: "medecine", label: "Consultation Générale", icon: Stethoscope },
+          { id: "repertoire", label: "Répertoire des patients", icon: BookUser },
           { id: "urgences", label: "Triage & Urgences", icon: ShieldAlert, alertCount: urgences.filter((u) => u.statut !== "Sorti(e) ou Libéré(e)").length },
           { id: "hospit", label: "Hospitalisations", icon: HeartPulse, alertCount: hospitalisations.filter((h) => h.statut === "En cours").length },
           { id: "pediatrie", label: "Surveillance Pédiatrique", icon: Activity },
@@ -2688,6 +2692,15 @@ export default function App() {
               onUpdateMouvements={handleUpdateMouvements}
               documents={documents}
               actes={actesTarifaires}
+            />
+          )}
+
+          {activeTab === "repertoire" && (
+            <TabRepertoirePatients
+              consultations={consultations}
+              patients={patients}
+              theme={theme}
+              voirClinique={allowedTabs.includes("medecine") || allowedTabs.includes("infirmier")}
             />
           )}
 
