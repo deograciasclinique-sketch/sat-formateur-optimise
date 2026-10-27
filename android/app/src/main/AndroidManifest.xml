@@ -59,6 +59,7 @@
         <package android:name="com.ezviz" />
         <package android:name="com.mm.android.smartlifeiot" />
         <package android:name="com.connect.enduser" />
+        <package android:name="com.macrovideo.v380pro" />
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>

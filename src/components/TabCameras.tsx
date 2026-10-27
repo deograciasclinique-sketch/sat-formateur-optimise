@@ -13,7 +13,7 @@ import { useCloudSyncedState } from "../lib/useCloudSyncedState";
 import { NATIF, ouvrirApplication } from "../lib/natif";
 import { logActivity } from "../lib/activityLogger";
 
-type Marque = "ezviz" | "imou" | "hik";
+type Marque = "v380" | "ezviz" | "imou" | "hik";
 
 interface CameraCfg {
   id: string;
@@ -24,12 +24,13 @@ interface CameraCfg {
 }
 
 const MARQUES: Record<Marque, { nom: string; pkg: string; site: string; pc: string }> = {
+  v380: { nom: "V380 Pro", pkg: "com.macrovideo.v380pro", site: "https://play.google.com/store/apps/details?id=com.macrovideo.v380pro", pc: "Sur PC : V380 n'a pas de site de visionnage ; regardez le direct depuis le téléphone (application V380 Pro)." },
   ezviz: { nom: "EZVIZ", pkg: "com.ezviz", site: "https://www.ezviz.com/", pc: "Sur PC : logiciel « EZVIZ Studio » (Windows), téléchargeable sur ezviz.com." },
   imou: { nom: "Imou Life", pkg: "com.mm.android.smartlifeiot", site: "https://www.imoulife.com/", pc: "Sur PC : logiciel « Imou Life » pour Windows, téléchargeable sur imoulife.com." },
   hik: { nom: "Hik-Connect", pkg: "com.connect.enduser", site: "https://www.hik-connect.com/", pc: "Sur PC : site hik-connect.com ou logiciel « iVMS-4200 » de Hikvision." },
 };
 
-const vide = (): CameraCfg => ({ id: "", nom: "", emplacement: "", marque: "ezviz", note: "" });
+const vide = (): CameraCfg => ({ id: "", nom: "", emplacement: "", marque: "v380", note: "" });
 
 export default function TabCameras({ theme = "light", agentNom }: { theme?: string; agentNom?: string }) {
   const isDark = theme === "dark";
