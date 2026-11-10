@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from "react";
-import { Consultation, Facture, FactureLigne, ActeTarifaire, Medicament, ExamenLabo, MouvementStock } from "../types";
+import { Consultation, DestinationService, Facture, FactureLigne, ActeTarifaire, Medicament, ExamenLabo, MouvementStock } from "../types";
 import OrdresMedecin from "./OrdresMedecin";
 import { generateUid, getTodayStr } from "../data";
 import { Plus, UserPlus, Wallet, ArrowRight, Clock, CheckCircle2, Trash2, ReceiptText, Search, ShieldCheck, AlertTriangle } from "lucide-react";
@@ -14,6 +14,11 @@ import CartePatient from "./CartePatient";
 import BarcodeScanner from "./BarcodeScanner";
 import { IdCard, ScanLine, X, Stethoscope, Users, Wallet2 as Wallet2Icon } from "lucide-react";
 import { complementsAFacturer } from "../lib/devisActes";
+
+const libelleDestination = (d: DestinationService) =>
+  d === "Maternite" ? "Maternité" : d === "Pediatrie" ? "Consultation enfant" : d;
+const libelleVers = (d: DestinationService) =>
+  d === "Maternite" ? "à la maternité" : d === "Laboratoire" ? "au laboratoire" : d === "Pediatrie" ? "à la consultation enfant" : "à l'infirmerie";
 
 interface TabAccueilCaisseProps {
   consultations: Consultation[];
@@ -301,7 +306,7 @@ export default function TabAccueilCaisse({
   // Orientation choisie par la secrétaire : vers l'infirmerie (circuit normal
   // de consultation générale), la maternité (CPN, etc.), ou directement le
   // laboratoire (examen demandé sans consultation médicale).
-  const [serviceDestination, setServiceDestination] = useState<"Infirmerie" | "Maternite" | "Laboratoire">("Infirmerie");
+  const [serviceDestination, setServiceDestination] = useState<DestinationService>("Infirmerie");
 
   // Facturation d'actes pour un patient déjà présent dans le circuit.
   const [rechercheExistant, setRechercheExistant] = useState("");
@@ -322,7 +327,7 @@ export default function TabAccueilCaisse({
   // --- Reçus de consultation encore valables (14 jours) -------------------
   const [rechercheRecus, setRechercheRecus] = useState("");
   const [visiteRecuId, setVisiteRecuId] = useState<string | null>(null);
-  const [visiteDestination, setVisiteDestination] = useState<"Infirmerie" | "Maternite" | "Laboratoire">("Infirmerie");
+  const [visiteDestination, setVisiteDestination] = useState<DestinationService>("Infirmerie");
   const recusValides = useMemo(() => listeRecusValides(factures, consultations, today), [factures, consultations, today]);
   const recusFiltres = useMemo(() => {
     const q = rechercheRecus.trim().toLowerCase();
@@ -379,15 +384,15 @@ export default function TabAccueilCaisse({
     [factures]
   );
 
-  const statutPourDestination = (d: "Infirmerie" | "Maternite" | "Laboratoire"): Consultation["statut"] =>
-    d === "Maternite" ? "Attente prise en charge maternité" : d === "Laboratoire" ? "Attente prise en charge laboratoire" : "Attente prise en charge infirmier";
+  const statutPourDestination = (d: DestinationService): Consultation["statut"] =>
+    d === "Maternite" ? "Attente prise en charge maternité" : d === "Laboratoire" ? "Attente prise en charge laboratoire" : d === "Pediatrie" ? "Attente prise en charge pédiatrie" : "Attente prise en charge infirmier";
 
   // Nouvelle visite couverte par un reçu encore valable : aucun paiement de
   // consultation. Les autres actes éventuels du panier sont facturés à part
   // (type "Actes", ce qui ne prolonge pas la validité du reçu).
   const creerVisiteAvecRecu = (
     recu: RecuConsultation,
-    destination: "Infirmerie" | "Maternite" | "Laboratoire",
+    destination: DestinationService,
     infos?: { patient?: string; age?: number; sexe?: "Masculin" | "Féminin"; contact?: string; commune?: string },
     panierActes: LignePanier[] = [],
     mode = "Espèces"
@@ -437,7 +442,7 @@ export default function TabAccueilCaisse({
     }
     if (nouveau) setCarte({ p: fiche, nouveau: true });
     alert(
-      `${newCons.patient} (${fiche.code}) envoyé(e) ${destination === "Maternite" ? "à la maternité" : destination === "Laboratoire" ? "au laboratoire" : "à l'infirmerie"} sans payer la consultation (reçu du ${dateCourteFr(recu.payeLe)} valable jusqu'au ${dateCourteFr(recu.valableJusquau)}).` +
+      `${newCons.patient} (${fiche.code}) envoyé(e) ${libelleVers(destination)} sans payer la consultation (reçu du ${dateCourteFr(recu.payeLe)} valable jusqu'au ${dateCourteFr(recu.valableJusquau)}).` +
       (totalActes > 0 ? `\nAutres actes encaissés : ${totalActes.toLocaleString("fr-FR")} FCFA.` : "")
     );
   };
@@ -546,6 +551,7 @@ export default function TabAccueilCaisse({
       Infirmerie: "Attente prise en charge infirmier",
       Maternite: "Attente prise en charge maternité",
       Laboratoire: "Attente prise en charge laboratoire",
+      Pediatrie: "Attente prise en charge pédiatrie",
     };
 
     const newCons: Consultation = {
@@ -859,10 +865,11 @@ export default function TabAccueilCaisse({
 
             <section className={`${carteCls} p-4`}>
               <Etape n={2} titre="Orienter le patient vers" />
-          <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
             {(
               [
                 { value: "Infirmerie", label: "Infirmerie", sous: "Prise des constantes → consultation générale" },
+                { value: "Pediatrie", label: "Consultation enfant", sous: "PCIME : nourrisson 0-2 mois ou enfant 2 mois-5 ans" },
                 { value: "Maternite", label: "Maternité", sous: "CPN ou autre suivi de grossesse" },
                 { value: "Laboratoire", label: "Laboratoire", sous: "Examen demandé directement" },
               ] as const
@@ -911,7 +918,7 @@ export default function TabAccueilCaisse({
             <div className="text-sm space-y-1">
               <div className="flex justify-between gap-2"><span className="text-gray-500">Patient</span><span className="font-semibold text-right">{patientSel ? `${patientSel.code} · ${patientSel.nom}` : patient.trim() || "—"}</span></div>
               <div className="flex justify-between gap-2"><span className="text-gray-500">Statut</span><span>{patientSel ? "Ancien patient" : patient.trim() ? "Nouveau (code créé)" : "—"}</span></div>
-              <div className="flex justify-between gap-2"><span className="text-gray-500">Vers</span><span className="font-semibold">{serviceDestination === "Maternite" ? "Maternité" : serviceDestination}</span></div>
+              <div className="flex justify-between gap-2"><span className="text-gray-500">Vers</span><span className="font-semibold">{libelleDestination(serviceDestination)}</span></div>
             </div>
             <div className={`border-t pt-2 space-y-1 text-sm ${isDark ? "border-gray-700" : ""}`}>
               {panierNouveau.length === 0 ? <div className="text-xs italic text-gray-400">Aucun acte choisi.</div> : panierNouveau.map((l) => (
@@ -932,7 +939,7 @@ export default function TabAccueilCaisse({
             </div>
             <button onClick={handleEnregistrerEtEncaisser} disabled={!patient.trim() || panierTotal(panierNouveau) <= 0}
               className="w-full px-4 py-3 rounded-lg bg-emerald-600 text-white font-bold flex items-center justify-center gap-2 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">
-              <Wallet className="w-5 h-5" /> Encaisser &amp; envoyer {serviceDestination === "Infirmerie" ? "à l'infirmerie" : serviceDestination === "Maternite" ? "à la maternité" : "au laboratoire"}
+              <Wallet className="w-5 h-5" /> Encaisser &amp; envoyer {libelleVers(serviceDestination)}
             </button>
             {(!patient.trim() || panierTotal(panierNouveau) <= 0) && (
               <p className="text-xs text-gray-500 text-center">{!patient.trim() ? "Renseignez le nom du patient (étape 1)." : "Choisissez au moins un acte (étape 3)."}</p>
@@ -1094,10 +1101,10 @@ export default function TabAccueilCaisse({
                             <div className={`rounded-lg p-3 space-y-2 ${isDark ? "bg-gray-900" : "bg-emerald-50"}`}>
                               <div className="text-sm font-medium">Envoyer {r.patient} sans payer la consultation vers :</div>
                               <div className="flex flex-wrap gap-2">
-                                {(["Infirmerie", "Maternite", "Laboratoire"] as const).map((d) => (
+                                {(["Infirmerie", "Pediatrie", "Maternite", "Laboratoire"] as const).map((d) => (
                                   <button key={d} type="button" onClick={() => setVisiteDestination(d)}
                                     className={`px-3 py-1.5 rounded-full text-sm border ${visiteDestination === d ? "bg-emerald-600 text-white border-emerald-600" : isDark ? "border-gray-600" : "border-gray-300 bg-white"}`}>
-                                    {d === "Maternite" ? "Maternité" : d}
+                                    {libelleDestination(d)}
                                   </button>
                                 ))}
                               </div>

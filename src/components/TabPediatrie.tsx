@@ -5,18 +5,68 @@
 
 import React, { useState } from "react";
 import { jsPDF } from "jspdf";
-import { FichePediatrique, Staff } from "../types";
+import { Consultation, FichePediatrique, RendezVous, Staff } from "../types";
 import { generateUid, getTodayStr } from "../data";
-import { Plus, Trash2, Search, Activity, ShieldAlert, AlertTriangle, Eye, Download, X } from "lucide-react";
+import { Plus, Trash2, Search, Activity, ShieldAlert, AlertTriangle, Eye, Download, X, UserPlus, CalendarClock, Sparkles } from "lucide-react";
+import {
+  Classement, Couleur, EMOJI, LIBELLE_GLOBAL, PliCutane, Paleur, ResultatTdr,
+  classerEnfant, classerNourrisson, couleurDeTexte, delaiSuiviJours, pire, texteClassement,
+} from "../modules/pcime/classification";
 
 interface TabPediatrieProps {
   pediatrie: FichePediatrique[];
   staff: Staff[];
   onUpdatePediatrie: (p: FichePediatrique[]) => void;
   theme?: "light" | "dark";
+  /** Dossiers ouverts par la caisse (orientation « Consultation enfant »). */
+  consultations?: Consultation[];
+  onUpdateConsultations?: (c: Consultation[]) => void;
+  /** Rendez-vous : la visite de suivi PCIME y est ajoutée. */
+  rdvs?: RendezVous[];
+  onUpdateRdvs?: (r: RendezVous[]) => void;
+  agentNom?: string;
 }
 
-export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, theme = "light" }: TabPediatrieProps) {
+const COULEUR_BADGE: Record<Couleur, string> = {
+  rouge: "bg-danger-100 text-danger-800 border-danger-200",
+  jaune: "bg-warning-100 text-warning-800 border-warning-200",
+  vert: "bg-success-100 text-success-800 border-success-200",
+};
+
+/** Suggestion automatique PCIME d'une rubrique + choix manuel pour la remplacer. */
+function ChoixClassement({ auto, valeur, onChange, options }: { auto: Classement[]; valeur: string; onChange: (v: string) => void; options?: string[] }) {
+  if (auto.length === 0 && !options) return null;
+  return (
+    <div className="space-y-1.5">
+      {auto.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 items-center">
+          <Sparkles className="w-3.5 h-3.5 text-primary-600" />
+          {auto.map((c, i) => (
+            <span key={i} className={`text-2xs font-bold px-2 py-0.5 rounded-lg border ${COULEUR_BADGE[c.couleur]} ${valeur ? "opacity-50 line-through" : ""}`}>
+              {EMOJI[c.couleur]} {c.libelle}
+            </span>
+          ))}
+        </div>
+      )}
+      {options && (
+        <select value={valeur} onChange={(e) => onChange(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none font-semibold">
+          <option value="">{auto.length ? "✓ Garder la classification automatique" : "— Classification —"}</option>
+          {options.map((o) => (
+            <option key={o} value={o}>{EMOJI[couleurDeTexte(o) || "vert"]} {o.replace(/^(Rouge|Jaune|Vert) — /, "")} (manuel)</option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
+
+const ajouterJours = (iso: string, jours: number) => {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + jours);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, theme = "light", consultations = [], onUpdateConsultations, rdvs = [], onUpdateRdvs, agentNom }: TabPediatrieProps) {
   // Load dynamic clinic profile from LocalStorage safely
   const profile = (() => {
     try {
@@ -46,7 +96,27 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
   const [pedPc, setPedPc] = useState("");
   const [pedPb, setPedPb] = useState("");
   const [pedOedemes, setPedOedemes] = useState(false);
-  const [pedPalmesPales, setPedPalmesPales] = useState(false);
+  const [paleur, setPaleur] = useState<Paleur>("aucune");
+  const [classifNutrition, setClassifNutrition] = useState("");
+
+  // --- Formulaire : nourrisson 0-2 mois ou enfant 2 mois-5 ans ---
+  const [tranche, setTranche] = useState<"0-2m" | "2m-5a">("2m-5a");
+  const [ageJours, setAgeJours] = useState("");
+  const NOURRISSON_VIDE = {
+    neSalimentePasBien: false, convulsions: false, tirageSevere: false, bougeSeulementStimule: false,
+    ombilicRougeOuPus: false, pustulesCutanees: false, ictere: false, ictereAvant24h: false, paumesPlantesJaunes: false,
+    allaitementDifficile: false, moinsDe8Tetees: false, autresAliments: false, muguet: false, poidsFaible: false,
+  };
+  const [nour, setNour] = useState(NOURRISSON_VIDE);
+  const setN = (k: keyof typeof NOURRISSON_VIDE, v: boolean) => setNour((x) => ({ ...x, [k]: v }));
+
+  // --- Lien caisse / TDR / suivi ---
+  const [consultationLiee, setConsultationLiee] = useState<Consultation | null>(null);
+  const [tdrPalu, setTdrPalu] = useState<ResultatTdr>("Non fait");
+  const [raideurNuque, setRaideurNuque] = useState(false);
+  const [gonflementRetro, setGonflementRetro] = useState(false);
+  const [programmerSuivi, setProgrammerSuivi] = useState(true);
+  const [dateControle, setDateControle] = useState("");
 
   // --- Signes Généraux de Danger (PCIME) ---
   const [dangerNePeutBoire, setDangerNePeutBoire] = useState(false);
@@ -66,10 +136,12 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
   const [diarrheePresent, setDiarrheePresent] = useState(false);
   const [diarrheeDureeJours, setDiarrheeDureeJours] = useState("");
   const [diarrheeSangSelles, setDiarrheeSangSelles] = useState(false);
-  const [diarrheeLethargiqueAgite, setDiarrheeLethargiqueAgite] = useState(false);
+  const [diarrheeLethargique, setDiarrheeLethargique] = useState(false);
+  const [diarrheeAgite, setDiarrheeAgite] = useState(false);
+  const [diarrheeBoitDifficilement, setDiarrheeBoitDifficilement] = useState(false);
   const [diarrheeYeuxEnfonces, setDiarrheeYeuxEnfonces] = useState(false);
   const [diarrheeBoitAvidement, setDiarrheeBoitAvidement] = useState(false);
-  const [diarrheePliCutane, setDiarrheePliCutane] = useState(false);
+  const [pliCutane, setPliCutane] = useState<PliCutane>("normal");
   const [classifDiarrhee, setClassifDiarrhee] = useState("");
 
   // --- Fièvre ---
@@ -115,9 +187,63 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
     setPedDateNaissance(val);
     const computed = computeAgeMoisFromDob(val);
     if (computed !== null) setPedAgeMois(String(computed));
+    const naissance = new Date(val + "T00:00:00");
+    if (val && !isNaN(naissance.getTime())) {
+      const jours = Math.max(0, Math.floor((Date.now() - naissance.getTime()) / 86400000));
+      setAgeJours(String(jours));
+      // Moins de 2 mois : formulaire nourrisson.
+      setTranche(jours < 60 ? "0-2m" : "2m-5a");
+    }
   };
 
   const auMoinsUnSigneDanger = dangerNePeutBoire || dangerVomitTout || dangerConvulsions || dangerLethargique;
+  const estNourrisson = tranche === "0-2m";
+  const num = (v: string) => (v.trim() ? parseFloat(v.replace(",", ".")) : undefined);
+
+  // --- Classification automatique PCIME (suggestion, modifiable) ---
+  const resEnfant = classerEnfant({
+    ageMois: num(pedAgeMois) ?? 12,
+    temperature: num(pedTemperature),
+    nePeutBoire: dangerNePeutBoire, vomitTout: dangerVomitTout, convulsions: dangerConvulsions, lethargique: dangerLethargique,
+    toux: touxPresent, freqRespiratoire: num(freqRespiratoire), tirageSousCostal, stridor,
+    diarrhee: diarrheePresent, diarrheeJours: num(diarrheeDureeJours), sangSelles: diarrheeSangSelles,
+    diarrheeLethargique, agiteIrritable: diarrheeAgite, yeuxEnfonces: diarrheeYeuxEnfonces,
+    boitDifficilement: diarrheeBoitDifficilement, boitAvidement: diarrheeBoitAvidement, pliCutane,
+    fievre: fievrePresent, fievreJours: num(fievreDureeJours), raideurNuque, tdr: tdrPalu, eruptionGeneralisee: fievreTypeRougeole,
+    oreilleDouleur, oreilleEcoulement, oreilleJours: num(oreilleDureeJours), gonflementRetroAuriculaire: gonflementRetro,
+    pb: num(pedPb), oedemes: pedOedemes, paleur,
+  });
+  const resNour = classerNourrisson({
+    ...nour,
+    ageJours: num(ageJours) ?? (num(pedAgeMois) !== undefined ? Math.round((num(pedAgeMois) as number) * 30.4) : undefined),
+    temperature: num(pedTemperature), poids: num(pedPoids), freqRespiratoire: num(freqRespiratoire),
+    diarrhee: diarrheePresent, diarrheeJours: num(diarrheeDureeJours), sangSelles: diarrheeSangSelles,
+    agiteIrritable: diarrheeAgite, yeuxEnfonces: diarrheeYeuxEnfonces, pliCutane,
+  });
+
+  // Classements retenus : le choix manuel du soignant remplace la suggestion de la rubrique.
+  const retenu = (manuel: string, auto: Classement[], rubrique: string): Classement[] => {
+    if (!manuel) return auto;
+    const c = couleurDeTexte(manuel) || "vert";
+    return [{ couleur: c, libelle: manuel.replace(/^(Rouge|Jaune|Vert) — /, ""), rubrique }];
+  };
+  const optionnel = (c?: Classement) => (c ? [c] : []);
+  const classementsRetenus: Classement[] = estNourrisson
+    ? resNour.tous
+    : [
+        ...optionnel(resEnfant.danger),
+        ...(touxPresent ? retenu(classifRespiratoire, optionnel(resEnfant.respiratoire), "Toux") : []),
+        ...(diarrheePresent ? retenu(classifDiarrhee, resEnfant.diarrhee, "Diarrhée") : []),
+        ...(fievrePresent ? retenu(classifFievre, resEnfant.fievre, "Fièvre") : []),
+        ...retenu(classifOreille, optionnel(resEnfant.oreille), "Oreille"),
+        ...retenu(classifNutrition, optionnel(resEnfant.nutrition), "Nutrition"),
+        ...optionnel(resEnfant.anemie),
+      ];
+  const globalAuto = pire(classementsRetenus);
+  const alertesPcime = estNourrisson ? resNour.alertes : resEnfant.alertes;
+  const delaiSuivi = delaiSuiviJours(classementsRetenus);
+  const dateControleProposee = delaiSuivi ? ajouterJours(getTodayStr(), delaiSuivi) : "";
+  const dateControleEffective = dateControle || dateControleProposee;
 
   // Nutritional MUAC Classifier
   const getNutritionStatus = (pbVal: number, hasOedemes: boolean): { status: string; color: string; label: string } => {
@@ -148,7 +274,17 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
     setPedPc("");
     setPedPb("");
     setPedOedemes(false);
-    setPedPalmesPales(false);
+    setPaleur("aucune");
+    setClassifNutrition("");
+    setTranche("2m-5a");
+    setAgeJours("");
+    setNour(NOURRISSON_VIDE);
+    setConsultationLiee(null);
+    setTdrPalu("Non fait");
+    setRaideurNuque(false);
+    setGonflementRetro(false);
+    setProgrammerSuivi(true);
+    setDateControle("");
     setDangerNePeutBoire(false);
     setDangerVomitTout(false);
     setDangerConvulsions(false);
@@ -162,10 +298,12 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
     setDiarrheePresent(false);
     setDiarrheeDureeJours("");
     setDiarrheeSangSelles(false);
-    setDiarrheeLethargiqueAgite(false);
+    setDiarrheeLethargique(false);
+    setDiarrheeAgite(false);
+    setDiarrheeBoitDifficilement(false);
     setDiarrheeYeuxEnfonces(false);
     setDiarrheeBoitAvidement(false);
-    setDiarrheePliCutane(false);
+    setPliCutane("normal");
     setClassifDiarrhee("");
     setFievrePresent(false);
     setFievreDureeJours("");
@@ -184,25 +322,59 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
   };
 
   const handleAddPediatrie = () => {
-    if (!pedPatient.trim() || !pedAgeMois || !pedPoids) {
-      alert("Veuillez saisir le nom de l'enfant, son âge (mois) et son poids.");
+    const ageSaisi = estNourrisson ? (num(ageJours) !== undefined || !!pedAgeMois) : !!pedAgeMois;
+    if (!pedPatient.trim() || !ageSaisi || !pedPoids) {
+      alert(`Veuillez saisir le nom de l'enfant, son âge (${estNourrisson ? "jours" : "mois"}) et son poids.`);
       return;
     }
 
-    const age = parseFloat(pedAgeMois) || 1;
+    const jours = num(ageJours);
+    const age = estNourrisson && jours !== undefined ? Math.round((jours / 30.44) * 10) / 10 : parseFloat(pedAgeMois) || 1;
     const poids = parseFloat(pedPoids) || 0;
     const taille = parseFloat(pedTaille) || 0;
     const pc = parseFloat(pedPc) || 0;
-    const pb = parseFloat(pedPb) || 0;
+    const pb = estNourrisson ? 0 : parseFloat(pedPb) || 0;
 
     const nutObj = getNutritionStatus(pb, pedOedemes);
+    const textes = (l: Classement[]) => l.map(texteClassement).join(" ; ") || undefined;
+    const classificationGlobaleFinale = classificationGlobale || (globalAuto ? LIBELLE_GLOBAL[globalAuto.couleur] : undefined);
+    // PS / PG : seulement si le TDR est positif (et pas de choix manuel « fièvre » contraire).
+    const classementPalu = !estNourrisson && fievrePresent && tdrPalu === "Positif"
+      ? (couleurDeTexte(classifFievre) === "rouge" ? "PG" : classifFievre ? "PS" : resEnfant.classementPalu)
+      : undefined;
+
+    const ficheId = generateUid();
+    let rdvId: string | undefined;
+    const faireRdv = programmerSuivi && !!dateControleEffective && !!onUpdateRdvs && (couleurDeTexte(classificationGlobale) || globalAuto?.couleur) !== "rouge";
+    if (faireRdv && onUpdateRdvs) {
+      const consultantNom = staff.find((x) => x.id === pedConsultant)?.nom || "";
+      const motifs = classementsRetenus.filter((c) => c.couleur === "jaune").map((c) => c.libelle);
+      const nouveauRdv: RendezVous = {
+        id: generateUid(),
+        patient: pedPatient.trim(),
+        date: dateControleEffective,
+        heure: "08:00",
+        contact: pedContact.trim(),
+        type: "Suivi",
+        praticien: consultantNom,
+        motif: `Visite de suivi PCIME${motifs.length ? ` : ${motifs.join(", ")}` : ""}`,
+        notes: `Programmé depuis la consultation enfant du ${new Date().toLocaleDateString("fr-FR")}.`,
+        statut: "Planifié",
+        createdAt: new Date().toISOString(),
+        creePar: agentNom,
+      };
+      rdvId = nouveauRdv.id;
+      onUpdateRdvs([...rdvs, nouveauRdv]);
+    }
 
     const newFiche: FichePediatrique = {
-      id: generateUid(),
+      id: ficheId,
       patient: pedPatient.trim(),
       sexe: pedSexe || undefined,
       dateNaissance: pedDateNaissance || undefined,
       ageMois: age,
+      ageJours: estNourrisson ? jours : undefined,
+      tranche,
       contact: pedContact.trim(),
       temperature: pedTemperature ? parseFloat(pedTemperature) : undefined,
       motif: pedMotif.trim(),
@@ -210,60 +382,123 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
       taille,
       pc,
       pb,
-      oedemes: pedOedemes,
-      statutNutritionnel: nutObj.status,
+      oedemes: estNourrisson ? false : pedOedemes,
+      statutNutritionnel: estNourrisson ? (resNour.alimentation?.couleur === "vert" ? "Normal" : resNour.alimentation?.libelle || "Non évalué") : nutObj.status,
       vaccinsAJour: pedVaccinsAJour,
       alimentation: pedAlimentation,
       consultant: pedConsultant,
 
-      dangerNePeutBoireOuTeter: dangerNePeutBoire,
-      dangerVomitTout: dangerVomitTout,
-      dangerConvulsions: dangerConvulsions,
-      dangerLethargiqueInconscient: dangerLethargique,
+      dangerNePeutBoireOuTeter: estNourrisson ? nour.neSalimentePasBien : dangerNePeutBoire,
+      dangerVomitTout: estNourrisson ? false : dangerVomitTout,
+      dangerConvulsions: estNourrisson ? nour.convulsions : dangerConvulsions,
+      dangerLethargiqueInconscient: estNourrisson ? nour.bougeSeulementStimule : dangerLethargique,
 
-      touxPresent,
-      touxDureeJours: touxDureeJours ? parseFloat(touxDureeJours) : undefined,
+      touxPresent: estNourrisson ? false : touxPresent,
+      touxDureeJours: !estNourrisson && touxDureeJours ? parseFloat(touxDureeJours) : undefined,
       freqRespiratoire: freqRespiratoire ? parseFloat(freqRespiratoire) : undefined,
-      tirageSousCostal,
-      stridor,
-      classificationRespiratoire: classifRespiratoire || undefined,
+      tirageSousCostal: estNourrisson ? nour.tirageSevere : tirageSousCostal,
+      stridor: estNourrisson ? false : stridor,
+      classificationRespiratoire: !estNourrisson && touxPresent ? classifRespiratoire || textes(optionnel(resEnfant.respiratoire)) : undefined,
 
       diarrheePresent,
       diarrheeDureeJours: diarrheeDureeJours ? parseFloat(diarrheeDureeJours) : undefined,
       diarrheeSangSelles,
-      diarrheeLethargiqueAgite,
+      diarrheeLethargique: estNourrisson ? undefined : diarrheeLethargique,
+      diarrheeAgiteIrritable: diarrheeAgite,
+      diarrheeLethargiqueAgite: diarrheeLethargique || diarrheeAgite,
+      diarrheeBoitDifficilement: estNourrisson ? undefined : diarrheeBoitDifficilement,
       diarrheeYeuxEnfonces,
-      diarrheeBoitAvidement,
-      diarrheePliCutanePersistant: diarrheePliCutane,
-      classificationDiarrhee: classifDiarrhee || undefined,
+      diarrheeBoitAvidement: estNourrisson ? false : diarrheeBoitAvidement,
+      pliCutane,
+      diarrheePliCutanePersistant: pliCutane !== "normal",
+      classificationDiarrhee: diarrheePresent ? (estNourrisson ? textes(resNour.diarrhee) : classifDiarrhee || textes(resEnfant.diarrhee)) : undefined,
 
-      fievrePresent,
-      fievreDureeJours: fievreDureeJours ? parseFloat(fievreDureeJours) : undefined,
-      fievreTypePalu,
-      fievreTypeRougeole,
-      classificationFievre: classifFievre || undefined,
+      fievrePresent: estNourrisson ? false : fievrePresent,
+      fievreDureeJours: !estNourrisson && fievreDureeJours ? parseFloat(fievreDureeJours) : undefined,
+      fievreTypePalu: !estNourrisson && (fievreTypePalu || tdrPalu === "Positif"),
+      fievreTypeRougeole: !estNourrisson && fievreTypeRougeole,
+      raideurNuque: !estNourrisson && raideurNuque,
+      classificationFievre: !estNourrisson && fievrePresent ? classifFievre || textes(resEnfant.fievre) : undefined,
+      tdrPalu: !estNourrisson && fievrePresent ? tdrPalu : undefined,
+      classementPalu,
 
-      oreilleDouleur,
-      oreilleEcoulement,
-      oreilleDureeJours: oreilleDureeJours ? parseFloat(oreilleDureeJours) : undefined,
-      classificationOreille: classifOreille || undefined,
+      oreilleDouleur: !estNourrisson && oreilleDouleur,
+      oreilleEcoulement: !estNourrisson && oreilleEcoulement,
+      oreilleDureeJours: !estNourrisson && oreilleDureeJours ? parseFloat(oreilleDureeJours) : undefined,
+      gonflementRetroAuriculaire: !estNourrisson && gonflementRetro,
+      classificationOreille: estNourrisson ? undefined : classifOreille || textes(optionnel(resEnfant.oreille)),
 
-      palmesPales: pedPalmesPales,
+      palmesPales: !estNourrisson && paleur !== "aucune",
+      paleurPalmaire: estNourrisson ? undefined : paleur,
+      classificationNutrition: estNourrisson ? undefined : classifNutrition || textes(optionnel(resEnfant.nutrition)),
+      classificationAnemie: estNourrisson ? undefined : textes(optionnel(resEnfant.anemie)),
+
+      nourrisson: estNourrisson
+        ? {
+            ...nour,
+            classificationInfection: textes(optionnel(resNour.infection)),
+            classificationIctere: textes(optionnel(resNour.ictere)),
+            classificationAlimentation: textes(optionnel(resNour.alimentation)),
+          }
+        : undefined,
 
       vitAAdministree,
       deparasitageFait,
 
-      classificationGlobale: classificationGlobale || (auMoinsUnSigneDanger ? "Rouge (Référence urgente)" : undefined),
+      classifications: classementsRetenus.map(texteClassement),
+      classificationGlobale: classificationGlobaleFinale,
+      classificationModifiee: !!classificationGlobale,
       conduiteATenir: pedConduiteATenir.trim(),
+
+      dateControle: faireRdv ? dateControleEffective : undefined,
+      rdvId,
+      consultationId: consultationLiee?.id,
+      codePatient: consultationLiee?.codePatient,
 
       diagnostic: pedDiagnostic.trim(),
       date: getTodayStr(),
       createdAt: new Date().toISOString()
     };
 
+    // Dossier venu de la caisse : il est clos, la fiche PCIME le remplace.
+    if (consultationLiee && onUpdateConsultations) {
+      onUpdateConsultations(
+        consultations.map((c) =>
+          c.id === consultationLiee.id ? { ...c, statut: "Terminée", plainte: c.plainte || pedMotif.trim(), diagnostic: c.diagnostic || pedDiagnostic.trim() } : c
+        )
+      );
+    }
+
     onUpdatePediatrie([newFiche, ...pediatrie]);
     resetForm();
-    alert("Fiche de consultation pédiatrique (PCIME) sauvegardée.");
+    alert(
+      `Fiche de consultation ${estNourrisson ? "nourrisson (0-2 mois)" : "enfant (PCIME)"} sauvegardée.` +
+        (rdvId ? `\nVisite de suivi programmée le ${new Date(dateControleEffective + "T00:00:00").toLocaleDateString("fr-FR")} (onglet Rendez-vous).` : "")
+    );
+  };
+
+  // Enfants envoyés par la caisse, en attente de consultation.
+  const enfantsOrientes = consultations.filter(
+    (c) => c.serviceDestination === "Pediatrie" && c.statut === "Attente prise en charge pédiatrie"
+  );
+
+  const handlePrendreEnCharge = (c: Consultation) => {
+    resetForm();
+    setConsultationLiee(c);
+    setPedPatient(c.patient);
+    setPedContact(c.contact || "");
+    const sx = (c.sexe || "").toUpperCase();
+    setPedSexe(sx.startsWith("M") ? "Masculin" : sx.startsWith("F") ? "Féminin" : "");
+    // L'âge saisi à la caisse est en années.
+    if (c.age > 0) {
+      const mois = Math.round(c.age * 12);
+      setPedAgeMois(String(mois));
+      setTranche(mois < 2 ? "0-2m" : "2m-5a");
+      if (mois < 2) setAgeJours(String(Math.round(c.age * 365)));
+    }
+    if (c.vitals?.temperature) setPedTemperature(String(c.vitals.temperature));
+    if (c.vitals?.poids) setPedPoids(String(c.vitals.poids));
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleDeletePed = (id: string) => {
@@ -297,10 +532,11 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
     doc.setFont("Helvetica", "bold");
     doc.setFontSize(10.5);
     doc.setTextColor(13, 148, 136);
-    doc.text("FICHE DE CONSULTATION PÉDIATRIQUE (PCIME)", pageWidth / 2, y + 6, { align: "center" });
+    doc.text(p.tranche === "0-2m" ? "FICHE PCIME — NOURRISSON DE 0 À 2 MOIS" : "FICHE DE CONSULTATION PÉDIATRIQUE (PCIME)", pageWidth / 2, y + 6, { align: "center" });
     y += 16;
 
     const drawRow = (label: string, value: string) => {
+      if (y > 275) { doc.addPage(); y = margin; }
       doc.setFont("Helvetica", "bold");
       doc.setFontSize(8.5);
       doc.setTextColor(70, 70, 70);
@@ -325,7 +561,7 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
 
     drawRow("Nom de l'enfant :", p.patient);
     drawRow("Sexe / Date de naissance :", `${p.sexe || "—"} / ${p.dateNaissance ? new Date(p.dateNaissance).toLocaleDateString("fr-FR") : "—"}`);
-    drawRow("Âge :", `${p.ageMois} mois`);
+    drawRow("Âge :", p.tranche === "0-2m" && p.ageJours !== undefined ? `${p.ageJours} jours` : `${p.ageMois} mois`);
     drawRow("Contact parent :", p.contact || "—");
     drawRow("Température :", p.temperature ? `${p.temperature} °C` : "—");
     drawRow("Motif de consultation :", p.motif || "—");
@@ -333,8 +569,29 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
     drawSectionTitle("MESURES ANTHROPOMÉTRIQUES");
     drawRow("Poids / Taille :", `${p.poids} kg / ${p.taille || "—"} cm`);
     drawRow("Périmètre crânien / MUAC (PB) :", `${p.pc || "—"} cm / ${p.pb || "—"} cm`);
-    drawRow("Oedèmes / Pâleur palmaire :", `${p.oedemes ? "Oui" : "Non"} / ${p.palmesPales ? "Oui" : "Non"}`);
-    drawRow("Statut nutritionnel :", p.statutNutritionnel);
+    if (p.tranche !== "0-2m") {
+      drawRow("Oedèmes / Pâleur palmaire :", `${p.oedemes ? "Oui" : "Non"} / ${p.paleurPalmaire === "severe" ? "Sévère" : p.paleurPalmaire === "legere" ? "Légère" : p.palmesPales ? "Oui" : "Non"}`);
+      drawRow("Classification nutrition :", p.classificationNutrition || p.statutNutritionnel);
+      if (p.classificationAnemie) drawRow("Anémie :", p.classificationAnemie);
+    } else {
+      drawRow("Statut nutritionnel :", p.statutNutritionnel);
+    }
+
+    if (p.tranche === "0-2m" && p.nourrisson) {
+      const n = p.nourrisson;
+      const oui = (l: [boolean, string][]) => l.filter(([b]) => b).map(([, t]) => t).join(", ") || "Aucun";
+      drawSectionTitle("NOURRISSON 0-2 MOIS — INFECTION BACTÉRIENNE");
+      drawRow("Signes de gravité :", oui([[n.neSalimentePasBien, "Ne s'alimente pas bien"], [n.convulsions, "Convulsions"], [n.tirageSevere, "Tirage sous-costal marqué"], [n.bougeSeulementStimule, "Ne bouge que stimulé / pas du tout"]]));
+      drawRow("Fréquence respiratoire :", p.freqRespiratoire ? `${p.freqRespiratoire} /min` : "—");
+      drawRow("Signes locaux :", oui([[n.ombilicRougeOuPus, "Ombilic rouge ou purulent"], [n.pustulesCutanees, "Pustules cutanées"]]));
+      drawRow("Classification :", n.classificationInfection || "—");
+      drawSectionTitle("ICTÈRE");
+      drawRow("Signes :", oui([[n.ictere, "Ictère"], [n.ictereAvant24h, "Apparu avant 24 h de vie"], [n.paumesPlantesJaunes, "Paumes / plantes jaunes"]]));
+      drawRow("Classification :", n.classificationIctere || "—");
+      drawSectionTitle("ALIMENTATION ET POIDS");
+      drawRow("Problèmes :", oui([[n.allaitementDifficile, "Mauvaise prise du sein / succion inefficace"], [n.moinsDe8Tetees, "Moins de 8 tétées / 24 h"], [n.autresAliments, "Reçoit d'autres aliments ou liquides"], [n.muguet, "Muguet"], [n.poidsFaible, "Poids faible pour l'âge"]]));
+      drawRow("Classification :", n.classificationAlimentation || "—");
+    }
 
     if (p.dangerNePeutBoireOuTeter || p.dangerVomitTout || p.dangerConvulsions || p.dangerLethargiqueInconscient) {
       drawSectionTitle("⚠ SIGNES GÉNÉRAUX DE DANGER");
@@ -356,21 +613,22 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
     if (p.diarrheePresent) {
       drawSectionTitle("DIARRHÉE");
       drawRow("Durée / Sang dans selles :", `${p.diarrheeDureeJours || "—"} j / ${p.diarrheeSangSelles ? "Oui" : "Non"}`);
-      drawRow("Léthargique-agité / Yeux enfoncés :", `${p.diarrheeLethargiqueAgite ? "Oui" : "Non"} / ${p.diarrheeYeuxEnfonces ? "Oui" : "Non"}`);
-      drawRow("Boit avidement / Pli cutané persist. :", `${p.diarrheeBoitAvidement ? "Oui" : "Non"} / ${p.diarrheePliCutanePersistant ? "Oui" : "Non"}`);
+      drawRow("Léthargique / Agité / Yeux enfoncés :", `${(p.diarrheeLethargique ?? p.diarrheeLethargiqueAgite) ? "Oui" : "Non"} / ${p.diarrheeAgiteIrritable ? "Oui" : "Non"} / ${p.diarrheeYeuxEnfonces ? "Oui" : "Non"}`);
+      drawRow("Boit avidement / Pli cutané :", `${p.diarrheeBoitAvidement ? "Oui" : "Non"} / ${p.pliCutane === "tres_lent" ? "Très lentement" : p.pliCutane === "lent" ? "Lentement" : p.diarrheePliCutanePersistant ? "Persistant" : "Normal"}`);
       drawRow("Classification :", p.classificationDiarrhee || "—");
     }
 
     if (p.fievrePresent) {
       drawSectionTitle("FIÈVRE");
       drawRow("Durée / Type suspecté :", `${p.fievreDureeJours || "—"} j / ${[p.fievreTypePalu ? "Palu" : "", p.fievreTypeRougeole ? "Rougeole" : ""].filter(Boolean).join(", ") || "—"}`);
+      drawRow("TDR paludisme / Classement :", `${p.tdrPalu || "—"}${p.classementPalu ? ` / ${p.classementPalu === "PG" ? "Paludisme grave (PG)" : "Paludisme simple (PS)"}` : ""}`);
       drawRow("Classification :", p.classificationFievre || "—");
     }
 
     if (p.oreilleDouleur || p.oreilleEcoulement) {
       drawSectionTitle("PROBLÈME D'OREILLE");
       drawRow("Douleur / Écoulement :", `${p.oreilleDouleur ? "Oui" : "Non"} / ${p.oreilleEcoulement ? "Oui" : "Non"}`);
-      drawRow("Durée / Classification :", `${p.oreilleDureeJours || "—"} j / ${p.classifOreille || p.classificationOreille || "—"}`);
+      drawRow("Durée / Classification :", `${p.oreilleDureeJours || "—"} j / ${p.classificationOreille || "—"}`);
     }
 
     drawSectionTitle("VACCINATION & COMPLÉMENTS");
@@ -391,8 +649,10 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
     doc.text(`CLASSIFICATION GLOBALE : ${p.classificationGlobale || "Non renseignée"}`, margin + 2, y + 5.5);
     y += 12;
 
+    if (p.classifications?.length) drawRow("Classements PCIME :", p.classifications.join("\n"));
     drawRow("Diagnostic :", p.diagnostic);
     drawRow("Conduite à tenir :", p.conduiteATenir || "—");
+    if (p.dateControle) drawRow("Visite de suivi :", new Date(p.dateControle + "T00:00:00").toLocaleDateString("fr-FR"));
     y += 8;
     const doctorStaff = staff.find((s) => s.id === p.consultant);
     drawRow("Consultant :", doctorStaff ? doctorStaff.nom : "—");
@@ -418,8 +678,39 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
 
   const cardBase = theme === "dark" ? "bg-stone-900 border-stone-800" : "bg-white border-stone-200";
 
+  const chk = "rounded-lg text-primary-600 focus:ring-primary-500";
+  const lblChk = "flex items-center gap-1.5 text-xs font-medium text-stone-700 cursor-pointer";
+
   return (
     <div className="space-y-6">
+      {/* Enfants orientés par la caisse, en attente de consultation */}
+      {enfantsOrientes.length > 0 && (
+        <div className="bg-primary-50 border border-primary-200 rounded-2xl p-5 shadow-xs space-y-3">
+          <h3 className="text-base font-serif font-bold text-primary-900 flex items-center gap-2">
+            <UserPlus className="w-5 h-5" /> Enfants envoyés par le secrétariat ({enfantsOrientes.length})
+          </h3>
+          <div className="space-y-2">
+            {enfantsOrientes.map((c) => (
+              <div key={c.id} className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-white border rounded-xl p-3 ${consultationLiee?.id === c.id ? "border-primary-500 ring-1 ring-primary-500" : "border-primary-200"}`}>
+                <div>
+                  <div className="font-bold text-stone-800">{c.patient}</div>
+                  <div className="text-xs text-stone-500">
+                    {c.contact || "Sans contact"} · {c.age > 0 ? (c.age < 1 ? `${Math.round(c.age * 12)} mois` : `${c.age} an${c.age >= 2 ? "s" : ""}`) : "âge non saisi"}
+                  </div>
+                </div>
+                {consultationLiee?.id === c.id ? (
+                  <span className="text-xs font-bold text-primary-700">En cours de consultation ↓</span>
+                ) : (
+                  <button type="button" onClick={() => handlePrendreEnCharge(c)} className="px-4 py-2 text-xs font-bold bg-primary-600 hover:bg-primary-700 text-white rounded-lg transition-all">
+                    Prendre en charge (préremplir la fiche)
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* KPI Row */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className={`${cardBase} border rounded-2xl p-5 shadow-xs border-t-4 border-t-primary-600`}>
@@ -467,6 +758,21 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
             Nouvelle Consultation Pédiatrique (PCIME)
           </h3>
 
+          <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-stone-100">
+            {([["0-2m", "Nourrisson 0-2 mois"], ["2m-5a", "Enfant 2 mois-5 ans"]] as const).map(([v, l]) => (
+              <button key={v} type="button" onClick={() => setTranche(v)}
+                className={`text-xs font-bold py-2 rounded-lg transition-all ${tranche === v ? "bg-white text-primary-700 shadow-xs" : "text-stone-500 hover:text-stone-700"}`}>
+                {l}
+              </button>
+            ))}
+          </div>
+          {consultationLiee && (
+            <div className="text-xs bg-primary-50 border border-primary-200 rounded-lg p-2 flex items-center justify-between gap-2">
+              <span>Dossier caisse : <strong>{consultationLiee.patient}</strong>{consultationLiee.codePatient ? ` (${consultationLiee.codePatient})` : ""}</span>
+              <button type="button" onClick={() => setConsultationLiee(null)} className="text-stone-400 hover:text-stone-600" title="Détacher"><X className="w-4 h-4" /></button>
+            </div>
+          )}
+
           {/* 1. Identification */}
           <div className="space-y-3">
             <h4 className="text-xs font-bold uppercase tracking-wider text-primary-700">1. Identification</h4>
@@ -507,14 +813,32 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Âge de l'enfant (Mois) *</label>
-                <input
-                  type="number"
-                  placeholder="Ex: 18"
-                  value={pedAgeMois}
-                  onChange={(e) => setPedAgeMois(e.target.value)}
-                  className="w-full text-xs border border-stone-200 rounded-lg px-3 py-1.5 bg-stone-50 focus:bg-white focus:outline-none"
-                />
+                {estNourrisson ? (
+                  <>
+                    <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Âge (jours) *</label>
+                    <input
+                      type="number"
+                      placeholder="Ex: 21"
+                      value={ageJours}
+                      onChange={(e) => setAgeJours(e.target.value)}
+                      className="w-full text-xs border border-stone-200 rounded-lg px-3 py-1.5 bg-stone-50 focus:bg-white focus:outline-none"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Âge de l'enfant (Mois) *</label>
+                    <input
+                      type="number"
+                      placeholder="Ex: 18"
+                      value={pedAgeMois}
+                      onChange={(e) => setPedAgeMois(e.target.value)}
+                      className="w-full text-xs border border-stone-200 rounded-lg px-3 py-1.5 bg-stone-50 focus:bg-white focus:outline-none"
+                    />
+                    {!!pedAgeMois && parseFloat(pedAgeMois) < 2 && (
+                      <button type="button" onClick={() => setTranche("0-2m")} className="text-2xs text-primary-700 underline mt-0.5">Moins de 2 mois : fiche nourrisson</button>
+                    )}
+                  </>
+                )}
               </div>
               <div>
                 <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Téléphone Parent</label>
@@ -553,6 +877,88 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
             </div>
           </div>
 
+          {estNourrisson && (
+            <>
+              {/* N1. Infection bactérienne grave possible */}
+              <div className={`space-y-2 p-3 rounded-xl border ${resNour.infection?.couleur === "rouge" ? "bg-danger-50 border-danger-300" : "bg-stone-50 border-stone-100"}`}>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-danger-800 flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" /> 2. Maladie grave / infection bactérienne
+                </h4>
+                <label className={lblChk}><input type="checkbox" checked={nour.neSalimentePasBien} onChange={(e) => setN("neSalimentePasBien", e.target.checked)} className={chk} />Ne s'alimente pas bien (ne tète pas)</label>
+                <label className={lblChk}><input type="checkbox" checked={nour.convulsions} onChange={(e) => setN("convulsions", e.target.checked)} className={chk} />Convulsions</label>
+                <label className={lblChk}><input type="checkbox" checked={nour.tirageSevere} onChange={(e) => setN("tirageSevere", e.target.checked)} className={chk} />Tirage sous-costal marqué</label>
+                <label className={lblChk}><input type="checkbox" checked={nour.bougeSeulementStimule} onChange={(e) => setN("bougeSeulementStimule", e.target.checked)} className={chk} />Ne bouge que si on le stimule, ou ne bouge pas</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-2xs uppercase font-semibold text-stone-500 block mb-0.5">Fréq. respiratoire (/min)</label>
+                    <input type="number" value={freqRespiratoire} onChange={(e) => setFreqRespiratoire(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1 bg-white focus:outline-none" />
+                  </div>
+                  <div className="text-2xs text-stone-500 self-end pb-1">Rapide si ≥ 60/min · fièvre ≥ 37,5 °C ou &lt; 35,5 °C = gravité</div>
+                </div>
+                <label className={lblChk}><input type="checkbox" checked={nour.ombilicRougeOuPus} onChange={(e) => setN("ombilicRougeOuPus", e.target.checked)} className={chk} />Ombilic rouge ou qui suinte du pus</label>
+                <label className={lblChk}><input type="checkbox" checked={nour.pustulesCutanees} onChange={(e) => setN("pustulesCutanees", e.target.checked)} className={chk} />Pustules cutanées</label>
+                <ChoixClassement auto={resNour.infection ? [resNour.infection] : []} valeur="" onChange={() => {}} />
+              </div>
+
+              {/* N2. Ictère */}
+              <div className="space-y-2 p-3 rounded-xl border border-stone-100 bg-stone-50">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-primary-700">3. Ictère (jaunisse)</h4>
+                <label className={lblChk}><input type="checkbox" checked={nour.ictere} onChange={(e) => setN("ictere", e.target.checked)} className={chk} />Ictère (peau ou yeux jaunes)</label>
+                {(nour.ictere || nour.paumesPlantesJaunes) && (
+                  <>
+                    <label className={lblChk}><input type="checkbox" checked={nour.ictereAvant24h} onChange={(e) => setN("ictereAvant24h", e.target.checked)} className={chk} />Apparu dans les 24 premières heures de vie</label>
+                    <label className={lblChk}><input type="checkbox" checked={nour.paumesPlantesJaunes} onChange={(e) => setN("paumesPlantesJaunes", e.target.checked)} className={chk} />Paumes des mains ou plantes des pieds jaunes</label>
+                  </>
+                )}
+                <ChoixClassement auto={resNour.ictere ? [resNour.ictere] : []} valeur="" onChange={() => {}} />
+              </div>
+
+              {/* N3. Diarrhée */}
+              <div className="space-y-2 p-3 rounded-xl border border-stone-100 bg-stone-50">
+                <label className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-primary-700 cursor-pointer">
+                  <input type="checkbox" checked={diarrheePresent} onChange={(e) => setDiarrheePresent(e.target.checked)} className={chk} />
+                  4. Diarrhée
+                </label>
+                {diarrheePresent && (
+                  <div className="space-y-2 pl-1">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-2xs uppercase font-semibold text-stone-500 block mb-0.5">Durée (jours)</label>
+                        <input type="number" value={diarrheeDureeJours} onChange={(e) => setDiarrheeDureeJours(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1 bg-white focus:outline-none" />
+                      </div>
+                      <label className={`${lblChk} self-end pb-1.5`}><input type="checkbox" checked={diarrheeSangSelles} onChange={(e) => setDiarrheeSangSelles(e.target.checked)} className={chk} />Sang dans les selles</label>
+                    </div>
+                    <label className={lblChk}><input type="checkbox" checked={diarrheeAgite} onChange={(e) => setDiarrheeAgite(e.target.checked)} className={chk} />Agité, irritable</label>
+                    <label className={lblChk}><input type="checkbox" checked={diarrheeYeuxEnfonces} onChange={(e) => setDiarrheeYeuxEnfonces(e.target.checked)} className={chk} />Yeux enfoncés</label>
+                    <div>
+                      <label className="text-2xs uppercase font-semibold text-stone-500 block mb-0.5">Pli cutané</label>
+                      <select value={pliCutane} onChange={(e) => setPliCutane(e.target.value as PliCutane)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1 bg-white focus:outline-none">
+                        <option value="normal">S'efface immédiatement</option>
+                        <option value="lent">S'efface lentement</option>
+                        <option value="tres_lent">S'efface très lentement (&gt; 2 s)</option>
+                      </select>
+                    </div>
+                    <p className="text-2xs text-stone-500">« Ne bouge que stimulé » (rubrique 2) compte aussi pour la déshydratation sévère.</p>
+                    <ChoixClassement auto={resNour.diarrhee} valeur="" onChange={() => {}} />
+                  </div>
+                )}
+              </div>
+
+              {/* N4. Alimentation */}
+              <div className="space-y-2 p-3 rounded-xl border border-stone-100 bg-stone-50">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-primary-700">5. Alimentation et poids</h4>
+                <label className={lblChk}><input type="checkbox" checked={nour.allaitementDifficile} onChange={(e) => setN("allaitementDifficile", e.target.checked)} className={chk} />Mauvaise prise du sein ou succion inefficace</label>
+                <label className={lblChk}><input type="checkbox" checked={nour.moinsDe8Tetees} onChange={(e) => setN("moinsDe8Tetees", e.target.checked)} className={chk} />Moins de 8 tétées par 24 heures</label>
+                <label className={lblChk}><input type="checkbox" checked={nour.autresAliments} onChange={(e) => setN("autresAliments", e.target.checked)} className={chk} />Reçoit d'autres aliments ou liquides</label>
+                <label className={lblChk}><input type="checkbox" checked={nour.muguet} onChange={(e) => setN("muguet", e.target.checked)} className={chk} />Muguet (plaques blanches dans la bouche)</label>
+                <label className={lblChk}><input type="checkbox" checked={nour.poidsFaible} onChange={(e) => setN("poidsFaible", e.target.checked)} className={chk} />Poids faible pour l'âge (courbe)</label>
+                <ChoixClassement auto={resNour.alimentation ? [resNour.alimentation] : []} valeur="" onChange={() => {}} />
+              </div>
+            </>
+          )}
+
+          {!estNourrisson && (
+            <>
           {/* 2. Signes Généraux de Danger */}
           <div className={`space-y-2 p-3 rounded-xl border ${auMoinsUnSigneDanger ? "bg-danger-50 border-danger-300" : "bg-stone-50 border-stone-100"}`}>
             <h4 className="text-xs font-bold uppercase tracking-wider text-danger-800 flex items-center gap-1.5">
@@ -605,12 +1011,8 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
                   <input type="checkbox" checked={stridor} onChange={(e) => setStridor(e.target.checked)} className="rounded-lg text-primary-600 focus:ring-primary-500" />
                   Stridor chez un enfant calme
                 </label>
-                <select value={classifRespiratoire} onChange={(e) => setClassifRespiratoire(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none font-semibold">
-                  <option value="">— Classification —</option>
-                  <option value="Rouge — Pneumonie grave / Maladie très grave">🔴 Pneumonie grave / Maladie très grave</option>
-                  <option value="Jaune — Pneumonie">🟡 Pneumonie</option>
-                  <option value="Vert — Pas de pneumonie, toux ou rhume">🟢 Pas de pneumonie (toux/rhume)</option>
-                </select>
+                <ChoixClassement auto={resEnfant.respiratoire ? [resEnfant.respiratoire] : []} valeur={classifRespiratoire} onChange={setClassifRespiratoire}
+                  options={["Rouge — Pneumonie grave ou maladie très grave", "Jaune — Pneumonie", "Vert — Pas de pneumonie : toux ou rhume"]} />
               </div>
             )}
           </div>
@@ -633,28 +1035,24 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
                     Sang dans les selles
                   </label>
                 </div>
-                <label className="flex items-center gap-1.5 text-xs font-medium text-stone-700 cursor-pointer">
-                  <input type="checkbox" checked={diarrheeLethargiqueAgite} onChange={(e) => setDiarrheeLethargiqueAgite(e.target.checked)} className="rounded-lg text-primary-600 focus:ring-primary-500" />
-                  Léthargique ou agité(e) / irritable
-                </label>
+                <label className={lblChk}><input type="checkbox" checked={diarrheeLethargique} onChange={(e) => setDiarrheeLethargique(e.target.checked)} className={chk} />Léthargique ou inconscient</label>
+                <label className={lblChk}><input type="checkbox" checked={diarrheeAgite} onChange={(e) => setDiarrheeAgite(e.target.checked)} className={chk} />Agité(e), irritable</label>
                 <label className="flex items-center gap-1.5 text-xs font-medium text-stone-700 cursor-pointer">
                   <input type="checkbox" checked={diarrheeYeuxEnfonces} onChange={(e) => setDiarrheeYeuxEnfonces(e.target.checked)} className="rounded-lg text-primary-600 focus:ring-primary-500" />
                   Yeux enfoncés
                 </label>
-                <label className="flex items-center gap-1.5 text-xs font-medium text-stone-700 cursor-pointer">
-                  <input type="checkbox" checked={diarrheeBoitAvidement} onChange={(e) => setDiarrheeBoitAvidement(e.target.checked)} className="rounded-lg text-primary-600 focus:ring-primary-500" />
-                  Boit avidement, assoiffé
-                </label>
-                <label className="flex items-center gap-1.5 text-xs font-medium text-stone-700 cursor-pointer">
-                  <input type="checkbox" checked={diarrheePliCutane} onChange={(e) => setDiarrheePliCutane(e.target.checked)} className="rounded-lg text-primary-600 focus:ring-primary-500" />
-                  Pli cutané s'efface lentement / très lentement
-                </label>
-                <select value={classifDiarrhee} onChange={(e) => setClassifDiarrhee(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none font-semibold">
-                  <option value="">— Classification (déshydratation) —</option>
-                  <option value="Rouge — Déshydratation sévère">🔴 Déshydratation sévère</option>
-                  <option value="Jaune — Déshydratation modérée">🟡 Déshydratation modérée (Plan B)</option>
-                  <option value="Vert — Pas de déshydratation">🟢 Pas de déshydratation (Plan A)</option>
-                </select>
+                <label className={lblChk}><input type="checkbox" checked={diarrheeBoitDifficilement} onChange={(e) => setDiarrheeBoitDifficilement(e.target.checked)} className={chk} />Incapable de boire ou boit difficilement</label>
+                <label className={lblChk}><input type="checkbox" checked={diarrheeBoitAvidement} onChange={(e) => setDiarrheeBoitAvidement(e.target.checked)} className={chk} />Boit avidement, assoiffé</label>
+                <div>
+                  <label className="text-2xs uppercase font-semibold text-stone-500 block mb-0.5">Pli cutané</label>
+                  <select value={pliCutane} onChange={(e) => setPliCutane(e.target.value as PliCutane)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1 bg-white focus:outline-none">
+                    <option value="normal">S'efface immédiatement</option>
+                    <option value="lent">S'efface lentement</option>
+                    <option value="tres_lent">S'efface très lentement (&gt; 2 s)</option>
+                  </select>
+                </div>
+                <ChoixClassement auto={resEnfant.diarrhee} valeur={classifDiarrhee} onChange={setClassifDiarrhee}
+                  options={["Rouge — Déshydratation sévère (Plan C)", "Jaune — Signes évidents de déshydratation (Plan B)", "Vert — Pas de déshydratation (Plan A)"]} />
               </div>
             )}
           </div>
@@ -683,12 +1081,25 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
                   <input type="checkbox" checked={fievreTypeRougeole} onChange={(e) => setFievreTypeRougeole(e.target.checked)} className="rounded-lg text-primary-600 focus:ring-primary-500" />
                   Éruption cutanée généralisée (suspicion Rougeole)
                 </label>
-                <select value={classifFievre} onChange={(e) => setClassifFievre(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none font-semibold">
-                  <option value="">— Classification —</option>
-                  <option value="Rouge — Maladie fébrile très grave / Paludisme grave">🔴 Maladie fébrile très grave / Palu grave</option>
-                  <option value="Jaune — Paludisme simple">🟡 Paludisme simple</option>
-                  <option value="Vert — Fièvre, palu peu probable">🟢 Fièvre, palu peu probable</option>
-                </select>
+                <label className={lblChk}><input type="checkbox" checked={raideurNuque} onChange={(e) => setRaideurNuque(e.target.checked)} className={chk} />Raideur de la nuque</label>
+                <div>
+                  <label className="text-2xs uppercase font-semibold text-stone-500 block mb-0.5">TDR paludisme</label>
+                  <div className="grid grid-cols-3 gap-1">
+                    {(["Positif", "Négatif", "Non fait"] as const).map((r) => (
+                      <button key={r} type="button" onClick={() => setTdrPalu(r)}
+                        className={`text-xs font-bold py-1.5 rounded-lg border ${tdrPalu === r ? (r === "Positif" ? "bg-danger-600 border-danger-600 text-white" : r === "Négatif" ? "bg-success-600 border-success-600 text-white" : "bg-stone-600 border-stone-600 text-white") : "bg-white border-stone-200 text-stone-600"}`}>
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                  {tdrPalu === "Positif" && (
+                    <p className="text-2xs font-semibold text-stone-600 mt-1">
+                      Compté au TLOH comme {(couleurDeTexte(classifFievre) === "rouge" || (!classifFievre && resEnfant.classementPalu === "PG")) ? "paludisme grave (PG)" : "paludisme simple (PS)"}.
+                    </p>
+                  )}
+                </div>
+                <ChoixClassement auto={resEnfant.fievre} valeur={classifFievre} onChange={setClassifFievre}
+                  options={["Rouge — Maladie fébrile très grave / paludisme grave", "Jaune — Paludisme simple (TDR positif)", "Vert — Fièvre : pas de paludisme (TDR négatif)"]} />
               </div>
             )}
           </div>
@@ -706,25 +1117,25 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
                 Écoulement auriculaire
               </label>
             </div>
-            {(oreilleDouleur || oreilleEcoulement) && (
+            <label className={lblChk}><input type="checkbox" checked={gonflementRetro} onChange={(e) => setGonflementRetro(e.target.checked)} className={chk} />Gonflement douloureux derrière l'oreille</label>
+            {(oreilleDouleur || oreilleEcoulement || gonflementRetro) && (
               <div className="space-y-2 pl-1">
                 <div>
                   <label className="text-2xs uppercase font-semibold text-stone-500 block mb-0.5">Durée de l'écoulement (jours)</label>
                   <input type="number" value={oreilleDureeJours} onChange={(e) => setOreilleDureeJours(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1 bg-white focus:outline-none" />
                 </div>
-                <select value={classifOreille} onChange={(e) => setClassifOreille(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none font-semibold">
-                  <option value="">— Classification —</option>
-                  <option value="Rouge — Mastoïdite">🔴 Mastoïdite</option>
-                  <option value="Jaune — Infection aiguë/chronique de l'oreille">🟡 Infection aiguë / chronique</option>
-                  <option value="Vert — Pas d'infection">🟢 Pas d'infection de l'oreille</option>
-                </select>
+                <ChoixClassement auto={resEnfant.oreille ? [resEnfant.oreille] : []} valeur={classifOreille} onChange={setClassifOreille}
+                  options={["Rouge — Mastoïdite", "Jaune — Infection aiguë de l'oreille", "Jaune — Infection chronique de l'oreille", "Vert — Pas d'infection de l'oreille"]} />
               </div>
             )}
           </div>
 
+            </>
+          )}
+
           {/* 7. Mesures anthropométriques & nutrition */}
           <div className="space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-primary-700">7. Croissance & État Nutritionnel</h4>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-primary-700">{estNourrisson ? 6 : 7}. Croissance & État Nutritionnel</h4>
             <div className="grid grid-cols-3 gap-2 bg-stone-50 p-3 rounded-xl border border-stone-100">
               <div>
                 <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Poids (kg) *</label>
@@ -740,6 +1151,7 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
               </div>
             </div>
 
+            {!estNourrisson && (
             <div className="grid grid-cols-2 gap-3 bg-danger-50/50 p-3 rounded-xl border border-danger-100">
               <div>
                 <label className="text-xs uppercase font-semibold tracking-wider text-danger-900 block mb-1">MUAC (PB) (cm) *</label>
@@ -750,10 +1162,12 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
                   <input type="checkbox" checked={pedOedemes} onChange={(e) => setPedOedemes(e.target.checked)} className="rounded-lg text-danger-600 focus:ring-danger-500" />
                   Oedèmes (+ bilateral)
                 </label>
-                <label className="flex items-center gap-1.5 text-xs font-bold text-danger-900 cursor-pointer">
-                  <input type="checkbox" checked={pedPalmesPales} onChange={(e) => setPedPalmesPales(e.target.checked)} className="rounded-lg text-danger-600 focus:ring-danger-500" />
-                  Pâleur palmaire
-                </label>
+                <label className="text-2xs uppercase font-bold text-danger-900">Pâleur palmaire</label>
+                <select value={paleur} onChange={(e) => setPaleur(e.target.value as Paleur)} className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1 bg-white focus:outline-none">
+                  <option value="aucune">Pas de pâleur</option>
+                  <option value="legere">Pâleur légère</option>
+                  <option value="severe">Pâleur sévère</option>
+                </select>
               </div>
               <div className="col-span-2 pt-1">
                 <span className="text-2xs uppercase font-bold tracking-wider text-stone-500 dark:text-stone-400 block mb-1">Indice nutritionnel automatique</span>
@@ -761,12 +1175,17 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
                   {getNutritionStatus(parseFloat(pedPb) || 0, pedOedemes).label}
                 </span>
               </div>
+              <div className="col-span-2">
+                <ChoixClassement auto={[resEnfant.nutrition, resEnfant.anemie].filter((x): x is Classement => !!x)} valeur={classifNutrition} onChange={setClassifNutrition}
+                  options={["Rouge — Malnutrition aiguë sévère compliquée (CREN interne)", "Jaune — Malnutrition aiguë sévère sans complication (CRENAS)", "Jaune — Malnutrition aiguë modérée", "Vert — Pas de malnutrition aiguë"]} />
+              </div>
             </div>
+            )}
           </div>
 
           {/* 8. Vaccination, vitamine A, alimentation */}
           <div className="space-y-2">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-primary-700">8. Vaccination & Alimentation</h4>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-primary-700">{estNourrisson ? 7 : 8}. Vaccination & Alimentation</h4>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Alimentation enfant</label>
@@ -806,11 +1225,26 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
 
           {/* 9. Conclusion */}
           <div className="space-y-2 border-t border-stone-100 pt-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-primary-700">9. Conclusion</h4>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-primary-700">{estNourrisson ? 8 : 9}. Conclusion</h4>
             <div>
               <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">Classification globale</label>
+              {globalAuto && (
+                <div className={`mb-2 rounded-lg border p-2 ${COULEUR_BADGE[globalAuto.couleur]} ${classificationGlobale ? "opacity-60" : ""}`}>
+                  <div className="text-xs font-bold flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5" /> Suggestion PCIME : {EMOJI[globalAuto.couleur]} {LIBELLE_GLOBAL[globalAuto.couleur]}</div>
+                  <ul className="mt-1 text-2xs font-semibold space-y-0.5">
+                    {classementsRetenus.filter((c) => c.couleur !== "vert" || classementsRetenus.every((x) => x.couleur === "vert")).map((c, k) => (
+                      <li key={k}>{EMOJI[c.couleur]} {c.rubrique} : {c.libelle}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {alertesPcime.length > 0 && (
+                <ul className="mb-2 text-2xs font-semibold text-warning-800 bg-warning-50 border border-warning-200 rounded-lg p-2 space-y-0.5">
+                  {alertesPcime.map((a, k) => <li key={k}>⚠ {a}</li>)}
+                </ul>
+              )}
               <select value={classificationGlobale} onChange={(e) => setClassificationGlobale(e.target.value)} className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold">
-                <option value="">— Choisir —</option>
+                <option value="">{globalAuto ? "✓ Garder la suggestion automatique" : "— Choisir —"}</option>
                 <option value="Rouge (Référence urgente)">🔴 Rouge — Référence urgente</option>
                 <option value="Jaune (Traitement ambulatoire)">🟡 Jaune — Traitement ambulatoire</option>
                 <option value="Vert (Traitement à domicile)">🟢 Vert — Traitement / conseils à domicile</option>
@@ -834,6 +1268,34 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
                 className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none h-16 resize-none"
               />
             </div>
+            <p className="text-2xs text-stone-500 italic">
+              La classification automatique suit les tableaux PCIME : c'est une aide, le soignant décide. Les doses restent celles du guide national.
+            </p>
+          </div>
+
+          {/* 10. Visite de suivi */}
+          <div className="space-y-2 p-3 rounded-xl border border-stone-100 bg-stone-50">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-primary-700 flex items-center gap-1.5"><CalendarClock className="w-3.5 h-3.5" /> {estNourrisson ? 9 : 10}. Visite de suivi</h4>
+            {(couleurDeTexte(classificationGlobale) || globalAuto?.couleur) === "rouge" ? (
+              <p className="text-xs text-danger-700 font-semibold">Enfant à référer en urgence : pas de rendez-vous de suivi au centre.</p>
+            ) : (
+              <>
+                <label className={lblChk}>
+                  <input type="checkbox" checked={programmerSuivi} onChange={(e) => setProgrammerSuivi(e.target.checked)} className={chk} disabled={!onUpdateRdvs} />
+                  Programmer un rendez-vous de suivi
+                </label>
+                {programmerSuivi && (
+                  <div className="grid grid-cols-2 gap-2 items-end">
+                    <input type="date" value={dateControleEffective} min={getTodayStr()} onChange={(e) => setDateControle(e.target.value)}
+                      className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none" />
+                    <span className="text-2xs text-stone-500">
+                      {delaiSuivi ? `Suivi PCIME conseillé à J+${delaiSuivi}${dateControle && dateControle !== dateControleProposee ? " (date modifiée)" : ""}` : "Aucun suivi requis par la PCIME — choisissez une date si besoin."}
+                    </span>
+                  </div>
+                )}
+                {programmerSuivi && !dateControleEffective && <p className="text-2xs text-stone-500">Sans date, aucun rendez-vous ne sera créé.</p>}
+              </>
+            )}
           </div>
 
           <button
@@ -902,7 +1364,8 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
                         </td>
                         <td className="p-3 text-center font-bold text-stone-700">
                           <div>{p.sexe === "Masculin" ? "M" : p.sexe === "Féminin" ? "F" : "—"}</div>
-                          <div className="font-mono text-stone-500 dark:text-stone-400">{p.ageMois} mois</div>
+                          <div className="font-mono text-stone-500 dark:text-stone-400">{p.tranche === "0-2m" && p.ageJours !== undefined ? `${p.ageJours} j` : `${p.ageMois} mois`}</div>
+                          {p.tranche === "0-2m" && <div className="text-2xs font-bold text-primary-700">Nourrisson</div>}
                         </td>
                         <td className="p-3 text-center">
                           <div className="font-bold text-stone-900 font-mono">{p.poids} kg</div>
@@ -940,6 +1403,10 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
                         </td>
                         <td className="p-3 text-stone-600 font-medium max-w-[150px] truncate" title={p.diagnostic}>
                           <div>{p.diagnostic || "—"}</div>
+                          {p.tdrPalu && p.tdrPalu !== "Non fait" && (
+                            <div className={`text-2xs font-bold ${p.tdrPalu === "Positif" ? "text-danger-700" : "text-success-700"}`}>TDR {p.tdrPalu}{p.classementPalu ? ` · ${p.classementPalu}` : ""}</div>
+                          )}
+                          {p.dateControle && <div className="text-2xs font-semibold text-primary-700">Suivi le {new Date(p.dateControle + "T00:00:00").toLocaleDateString("fr-FR")}</div>}
                           <div className="text-2xs text-stone-500 dark:text-stone-400 font-semibold uppercase mt-0.5">By: {doc ? doc.nom : "Pédiatrie"}</div>
                         </td>
                         <td className="p-3 text-center">
@@ -983,7 +1450,7 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
             <div className="flex-1 overflow-y-auto p-6 space-y-4 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div><span className="text-stone-500 dark:text-stone-400 font-semibold">Sexe :</span> {selectedFiche.sexe || "—"}</div>
-                <div><span className="text-stone-500 dark:text-stone-400 font-semibold">Âge :</span> {selectedFiche.ageMois} mois</div>
+                <div><span className="text-stone-500 dark:text-stone-400 font-semibold">Âge :</span> {selectedFiche.tranche === "0-2m" && selectedFiche.ageJours !== undefined ? `${selectedFiche.ageJours} jours (nourrisson)` : `${selectedFiche.ageMois} mois`}</div>
                 <div><span className="text-stone-500 dark:text-stone-400 font-semibold">Température :</span> {selectedFiche.temperature ? `${selectedFiche.temperature} °C` : "—"}</div>
                 <div><span className="text-stone-500 dark:text-stone-400 font-semibold">Motif :</span> {selectedFiche.motif || "—"}</div>
               </div>
@@ -1000,9 +1467,28 @@ export default function TabPediatrie({ pediatrie, staff, onUpdatePediatrie, them
                 </div>
               )}
 
+              {!!selectedFiche.classifications?.length && (
+                <div className="space-y-1">
+                  <span className="text-stone-500 dark:text-stone-400 font-semibold block">Classements PCIME :</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedFiche.classifications.map((t, k) => (
+                      <span key={k} className={`px-2 py-0.5 rounded-lg border font-semibold ${COULEUR_BADGE[couleurDeTexte(t) || "vert"]}`}>{t}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(selectedFiche.tdrPalu || selectedFiche.dateControle) && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div><span className="text-stone-500 dark:text-stone-400 font-semibold">TDR paludisme :</span> {selectedFiche.tdrPalu || "—"}{selectedFiche.classementPalu ? ` (${selectedFiche.classementPalu})` : ""}</div>
+                  <div><span className="text-stone-500 dark:text-stone-400 font-semibold">Visite de suivi :</span> {selectedFiche.dateControle ? new Date(selectedFiche.dateControle + "T00:00:00").toLocaleDateString("fr-FR") : "—"}</div>
+                </div>
+              )}
+
               {selectedFiche.classificationGlobale && (
                 <div className="bg-primary-50 border border-primary-100 rounded-xl p-3">
                   <span className="font-bold text-primary-800">Classification globale : </span>{selectedFiche.classificationGlobale}
+                  {selectedFiche.classificationModifiee && <span className="text-2xs text-stone-500"> (modifiée par le soignant)</span>}
                 </div>
               )}
 

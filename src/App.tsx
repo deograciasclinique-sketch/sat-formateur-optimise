@@ -1027,6 +1027,7 @@ export default function App() {
         "Attente prise en charge infirmier": { titre: "Nouveau patient — Infirmerie", icone: "🩺" },
         "Attente prise en charge maternité": { titre: "Nouvelle patiente — Maternité", icone: "🤰" },
         "Attente prise en charge laboratoire": { titre: "Nouveau patient — Laboratoire", icone: "🧪" },
+        "Attente prise en charge pédiatrie": { titre: "Nouvel enfant — Consultation PCIME", icone: "👶" },
         "Attente consultation médecin": { titre: "Dossier transféré — Consultation", icone: "👨‍⚕️" },
       };
 
@@ -2689,6 +2690,11 @@ export default function App() {
               staff={staff}
               onUpdatePediatrie={handleUpdatePediatrie}
               theme={theme}
+              consultations={consultations}
+              onUpdateConsultations={handleUpdateConsultations}
+              rdvs={rdv}
+              onUpdateRdvs={handleUpdateRdv}
+              agentNom={currentUser?.nom}
             />
           )}
 

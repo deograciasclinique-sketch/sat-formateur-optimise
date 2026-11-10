@@ -629,6 +629,26 @@ export interface PatientUrgence {
   createdAt: string;
 }
 
+export interface SignesNourrissonFiche {
+  neSalimentePasBien: boolean;
+  convulsions: boolean;
+  tirageSevere: boolean;
+  bougeSeulementStimule: boolean;
+  ombilicRougeOuPus: boolean;
+  pustulesCutanees: boolean;
+  ictere: boolean;
+  ictereAvant24h: boolean;
+  paumesPlantesJaunes: boolean;
+  allaitementDifficile: boolean;
+  moinsDe8Tetees: boolean;
+  autresAliments: boolean;
+  muguet: boolean;
+  poidsFaible: boolean;
+  classificationInfection?: string;
+  classificationIctere?: string;
+  classificationAlimentation?: string;
+}
+
 export interface FichePediatrique {
   id: string;
   patient: string;
@@ -695,6 +715,37 @@ export interface FichePediatrique {
   classificationGlobale?: string;
   conduiteATenir?: string;
 
+  // --- Ajouts PCIME (classification automatique, nourrisson, TDR, suivi) ---
+  /** Formulaire utilisé : nourrisson 0-2 mois ou enfant 2 mois-5 ans (absent = 2m-5a). */
+  tranche?: "0-2m" | "2m-5a";
+  ageJours?: number;
+  /** Signes détaillés (enfant 2 mois-5 ans) nécessaires à la classification automatique. */
+  diarrheeLethargique?: boolean;
+  diarrheeAgiteIrritable?: boolean;
+  diarrheeBoitDifficilement?: boolean;
+  pliCutane?: "normal" | "lent" | "tres_lent";
+  raideurNuque?: boolean;
+  gonflementRetroAuriculaire?: boolean;
+  paleurPalmaire?: "aucune" | "legere" | "severe";
+  classificationNutrition?: string;
+  classificationAnemie?: string;
+  /** Signes du nourrisson 0-2 mois (formulaire PCIME nourrisson). */
+  nourrisson?: SignesNourrissonFiche;
+  /** Tous les classements retenus, ex. « Jaune — Pneumonie ». */
+  classifications?: string[];
+  /** La classification globale a été modifiée à la main par le soignant. */
+  classificationModifiee?: boolean;
+  /** TDR paludisme fait en consultation (compté dans le TLOH et le bilan mensuel). */
+  tdrPalu?: "Positif" | "Négatif" | "Non fait";
+  /** Paludisme simple / grave, compté dans le TLOH comme pour les consultations. */
+  classementPalu?: "PS" | "PG";
+  /** Visite de suivi programmée (crée un rendez-vous). */
+  dateControle?: string;
+  rdvId?: string;
+  /** Dossier ouvert par la caisse (orientation « Consultation enfant »). */
+  consultationId?: string;
+  codePatient?: string;
+
   diagnostic: string;
   date: string;
   createdAt: string;
@@ -712,6 +763,10 @@ export interface LigneOrdonnance {
   quantitePrescrite?: number;
 }
 
+// Service vers lequel le secrétariat oriente un patient à l'accueil.
+// "Pediatrie" = consultation enfant PCIME (0-2 mois ou 2 mois-5 ans).
+export type DestinationService = "Infirmerie" | "Maternite" | "Laboratoire" | "Pediatrie";
+
 // Circuit du dossier patient : secrétariat (paiement consultation) -> infirmier
 // (constantes + état civil) -> médecin (diagnostic + prescription) -> secrétariat
 // (paiement des actes prescrits, si besoin) -> infirmier (soins) et/ou labo.
@@ -720,6 +775,7 @@ export type StatutConsultation =
   | "Attente prise en charge infirmier" // consultation payée, en attente de l'infirmier
   | "Attente prise en charge maternité" // orienté par le secrétariat vers la maternité (CPN, etc.)
   | "Attente prise en charge laboratoire" // orienté par le secrétariat directement vers le labo
+  | "Attente prise en charge pédiatrie" // enfant orienté par le secrétariat vers la consultation PCIME
   | "Attente consultation médecin"    // constantes prises, en attente du médecin
   | "Consultation en cours"           // consultation commencée, laissée ouverte (résultats attendus) — à clore plus tard
   | "Transféré vers un autre service" // l'infirmier/la sage-femme oriente le patient ailleurs qu'au médecin
@@ -806,7 +862,7 @@ export interface Consultation {
   // (CPN ou autre suivi de grossesse), ou Laboratoire (examen demandé
   // directement, sans passer par une consultation médicale). Absent =
   // Infirmerie (comportement d'origine, avant l'ajout de cette fonctionnalité).
-  serviceDestination?: "Infirmerie" | "Maternite" | "Laboratoire";
+  serviceDestination?: DestinationService;
   // Montant de la consultation (fixé au secrétariat avant paiement).
   montantConsultation?: number;
   // Visite non facturée car le patient a un reçu de consultation encore

@@ -88,6 +88,8 @@ export default function TabBilanMensuel(props: Props) {
       return premiere.get(k) === jourDe(c.date) && !c.ancienConsultant;
     };
 
+    const tdrPalu = (e: ExamenLabo) => demandeTdrPalu(e.analyses || (e as any).examen) || !!(e as any).tdrPalu;
+
     // Paludisme : un patient compté une fois par mois (classement du médecin, sinon diagnostic).
     const palu = (grave: boolean) => {
       const vus = new Set<string>();
@@ -103,10 +105,33 @@ export default function TabBilanMensuel(props: Props) {
         vus.add(k);
         v[m]++;
       });
+      // Consultations enfant (PCIME) classées PS / PG après un TDR positif.
+      pediatrie.forEach((p) => {
+        const m = moisDe(p.date, annee);
+        if (m < 0) return;
+        const ids = p.classementPalu ? [p.classementPalu === "PG" ? "palu_grave" : "palu_simple"] : maladiesDansTexte(p.diagnostic || "").map((x) => x.id);
+        if (!ids.includes(grave ? "palu_grave" : "palu_simple")) return;
+        const k = `${m}|${p.codePatient || normNom(p.patient)}`;
+        if (vus.has(k)) return;
+        vus.add(k);
+        v[m]++;
+      });
       return v;
     };
 
-    const tdrPalu = (e: ExamenLabo) => demandeTdrPalu(e.analyses || (e as any).examen) || !!(e as any).tdrPalu;
+    // TDR paludisme : laboratoire + TDR faits en consultation enfant (sans
+    // recompter un enfant qui a aussi un TDR au labo le même jour).
+    const tdrLabo = examens
+      .filter((e) => tdrPalu(e) && ((e as any).tdrPalu === "Positif" || (e as any).tdrPalu === "Négatif"))
+      .map((e) => ({ date: e.dateResultat || e.dateDemande, patient: e.patient, res: (e as any).tdrPalu as string }));
+    const dejaLabo = new Set(tdrLabo.map((t) => `${normNom(t.patient)}|${jourDe(t.date)}`));
+    const tdrTous = [
+      ...tdrLabo,
+      ...pediatrie
+        .filter((p) => (p.tdrPalu === "Positif" || p.tdrPalu === "Négatif") && !dejaLabo.has(`${normNom(p.patient)}|${jourDe(p.date)}`))
+        .map((p) => ({ date: p.date, patient: p.patient, res: p.tdrPalu as string })),
+    ];
+
     const recettes = compter(factures, annee, (f) => f.date, () => true, (f) => Number(f.montantPaye ?? f.total) || 0);
     const depensesM = compter(depenses, annee, (d) => d.date, () => true, (d) => Number(d.montant) || 0);
     const injections = pf.injectables.flatMap((c: any) => (c.injections || []) as any[]);
@@ -132,8 +157,8 @@ export default function TabBilanMensuel(props: Props) {
         titre: "Paludisme et laboratoire",
         lignes: [
           { label: "Examens de laboratoire demandés", valeurs: compter(examens, annee, (e) => e.dateDemande) },
-          { label: "TDR paludisme réalisés", valeurs: compter(examens, annee, (e) => e.dateResultat || e.dateDemande, (e) => tdrPalu(e) && ((e as any).tdrPalu === "Positif" || (e as any).tdrPalu === "Négatif")) },
-          { label: "TDR paludisme positifs", valeurs: compter(examens, annee, (e) => e.dateResultat || e.dateDemande, (e) => tdrPalu(e) && (e as any).tdrPalu === "Positif"), sous: true },
+          { label: "TDR paludisme réalisés", valeurs: compter(tdrTous, annee, (t) => t.date) },
+          { label: "TDR paludisme positifs", valeurs: compter(tdrTous, annee, (t) => t.date, (t) => t.res === "Positif"), sous: true },
           { label: "Paludisme simple (PS)", valeurs: palu(false) },
           { label: "Paludisme grave (PG)", valeurs: palu(true) },
         ],

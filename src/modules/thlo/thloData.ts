@@ -264,7 +264,11 @@ export function compterSemaine(
     details.push({ ...c, cle });
   };
 
-  consultations.filter((c) => dansSemaine(c.date)).forEach((c) => {
+  // Dossier de caisse orienté vers la consultation enfant : la fiche PCIME
+  // qui en découle est comptée (dans la boucle Pédiatrie), pas le dossier.
+  const consultationsDeFichesPed = new Set(pediatrie.map((p) => p.consultationId).filter(Boolean) as string[]);
+
+  consultations.filter((c) => dansSemaine(c.date) && !consultationsDeFichesPed.has(c.id)).forEach((c) => {
     nb++;
     // Le diagnostic final (de sortie) prime sur le diagnostic de présomption.
     const diag = [c.diagnosticFinal, c.diagnostic].find((x) => !diagnosticVide(x)) || "";
@@ -298,14 +302,22 @@ export function compterSemaine(
   pediatrie.filter((p) => dansSemaine(p.date)).forEach((p) => {
     nb++;
     const age = typeof p.ageMois === "number" ? p.ageMois / 12 : undefined;
-    const mp = maladiesDansTexte(p.diagnostic);
-    if (!(p.diagnostic || "").trim()) sansDiag++;
+    const texte = diagnosticVide(p.diagnostic) ? "" : p.diagnostic;
+    let mp = maladiesDansTexte(texte);
+    // Comme pour les consultations : le classement PS / PG (TDR positif) prime sur le texte.
+    if (p.classementPalu) {
+      mp = mp.filter((m) => m.id !== "palu_simple" && m.id !== "palu_grave");
+      const m = MALADIES_THLO.find((x) => x.id === (p.classementPalu === "PG" ? "palu_grave" : "palu_simple"));
+      if (m) mp.push(m);
+    }
+    if (!texte.trim() && !p.classementPalu) sansDiag++;
+    const texteAffiche = p.classementPalu ? `Classé ${p.classementPalu} (TDR +)${texte ? ` · ${texte}` : ""}` : texte;
     dossiers.push({
-      id: p.id, patient: p.patient, date: jourDe(p.date), source: "Pédiatrie", texte: p.diagnostic || "",
-      maladies: mp.map((m) => m.nom), etat: mp.length ? "compte" : !(p.diagnostic || "").trim() ? "sans_diagnostic" : "hors_liste",
+      id: p.id, patient: p.patient, date: jourDe(p.date), source: "Pédiatrie", texte: texteAffiche,
+      maladies: mp.map((m) => m.nom), etat: mp.length ? "compte" : !texte.trim() ? "sans_diagnostic" : "hors_liste",
     });
     mp.forEach((m) =>
-      ajouter({ maladieId: m.id, patient: p.patient, date: p.date, tranche: trancheAge(age), ageInconnu: age === undefined, source: "Pédiatrie", texte: p.diagnostic, refId: p.id })
+      ajouter({ maladieId: m.id, patient: p.patient, date: p.date, tranche: trancheAge(age), ageInconnu: age === undefined, source: "Pédiatrie", texte: texteAffiche, refId: p.id }, p.codePatient)
     );
   });
 
@@ -381,6 +393,16 @@ export function compterSemaine(
     }
   });
 
+  // TDR faits en consultation enfant (PCIME). Ignoré si le même enfant a déjà
+  // un TDR au laboratoire le même jour, pour ne pas le compter deux fois.
+  pediatrie.forEach((p) => {
+    if (p.tdrPalu !== "Positif" && p.tdrPalu !== "Négatif") return;
+    if (!dansSemaine(p.date)) return;
+    const k = nomTrie(p.patient);
+    if (palu.some((t) => nomTrie(t.patient) === k && jourDe(t.date) === jourDe(p.date))) return;
+    palu.push({ type: "palu", patient: p.patient, date: jourDe(p.date), resultat: p.tdrPalu, examenId: `ped:${p.id}` });
+  });
+
   const classes = new Set(
     details.filter((d) => !d.deces && (d.maladieId === "palu_simple" || d.maladieId === "palu_grave")).map((d) => nomTrie(d.patient))
   );
@@ -389,6 +411,7 @@ export function compterSemaine(
   const debutLarge = new Date(semaine.debut + "T00:00:00"); debutLarge.setDate(debutLarge.getDate() - 7);
   const dl = isoDate(debutLarge);
   consultations.filter((c) => c.classementPalu && jourDe(c.date) >= dl && jourDe(c.date) <= semaine.fin).forEach((c) => classes.add(nomTrie(c.patient)));
+  pediatrie.filter((p) => p.classementPalu && jourDe(p.date) >= dl && jourDe(p.date) <= semaine.fin).forEach((p) => classes.add(nomTrie(p.patient)));
   const vus = new Set<string>();
   const paluNonClasses = palu.filter((t) => {
     const k = nomTrie(t.patient);
