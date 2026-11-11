@@ -2741,6 +2741,8 @@ export default function App() {
               actes={actesTarifaires}
               rdvs={rdv}
               onUpdateRdvs={handleUpdateRdv}
+              ficheReferences={ficheReferences}
+              onUpdateFicheReferences={handleUpdateFicheReferences}
             />
           )}
 
