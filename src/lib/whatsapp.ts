@@ -64,6 +64,14 @@ export function buildConsultationWhatsAppMessage(c: Consultation, clinicName = "
       lines.push(`Service : ${c.referenceService}`);
     }
   }
+  if (c.conseils) {
+    lines.push("");
+    lines.push(`Conseils : ${c.conseils}`);
+  }
+  if (c.dateControle) {
+    lines.push("");
+    lines.push(`Visite de contrôle : le ${new Date(c.dateControle + "T00:00:00").toLocaleDateString("fr-FR")}`);
+  }
   // Pharmacie(s) de garde du moment, pour acheter les médicaments prescrits.
   if (c.ordonnance && c.ordonnance.length > 0) {
     // Ville choisie pour ce patient sur la consultation, sinon la ville du cabinet.

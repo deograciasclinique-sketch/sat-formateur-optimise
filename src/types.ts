@@ -876,9 +876,24 @@ export interface Consultation {
     glycemie: number;
     taille?: number;
     imc?: number;
+    frequenceRespiratoire?: number;
+    saturationO2?: number;
   };
   plainte: string;
+  // --- Anamnèse : histoire de la maladie ---
+  /** Date de début des symptômes (exigée au registre par le guide SIMR). */
+  dateDebutSymptomes?: string;
+  /** Évolution des symptômes depuis le début. */
+  histoireMaladie?: string;
+  /** Traitements reçus avant de venir (automédication, tradipraticien, autre centre…). */
+  traitementsAvantVenue?: string[];
+  traitementsAvantVenueDetail?: string;
   antecedentsPatient?: AntecedentsPatient;
+  /** Conseils / éducation donnés au patient. */
+  conseils?: string;
+  /** Visite de contrôle programmée (crée un rendez-vous). */
+  dateControle?: string;
+  rdvControleId?: string;
   // Consultation laissée en cours (statut « Consultation en cours ») : qui l'a ouverte, quand,
   // et dernière mise à jour (un collègue peut la compléter et la clore).
   enCoursDepuis?: string;
