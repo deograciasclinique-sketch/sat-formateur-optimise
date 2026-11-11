@@ -10,7 +10,7 @@ import AntecedentsEditeur, { ANTECEDENTS_VIDES, antecedentsRenseignes, resumeAnt
 import { jsPDF } from "jspdf";
 import { logActivity } from "../lib/activityLogger";
 import { interpreterDengue, dengueComplet } from "../modules/thlo/tdr";
-import { AntecedentsPatient, Consultation, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
+import { AntecedentsPatient, Consultation, RendezVous, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { blocGardeHtml, lirePharmaciesLocal, texteGardeZone, nomZone, zoneCabinet } from "../lib/pharmacies";
@@ -19,6 +19,19 @@ import CameraCapture from "./CameraCapture";
 import EpidemioAssistant from "./EpidemioAssistant";
 import { ConduiteATenirEditor, ConduiteATenirListe, catASoinsInfirmiers, conduiteEnLignes, PrescInjectable, enListeCAT } from "./ConduiteATenir";
 import { MDODiseaseOverview } from "../modules/epidemio/mdoData";
+
+/** Résumé de l'histoire de la maladie (début, évolution, traitements reçus avant la venue). */
+export function texteHistoire(c: Consultation): string {
+  const parts: string[] = [];
+  if (c.dateDebutSymptomes) {
+    const j = Math.round((new Date((c.date || c.dateDebutSymptomes) + "T00:00:00").getTime() - new Date(c.dateDebutSymptomes + "T00:00:00").getTime()) / 86400000);
+    parts.push(`Début des symptômes : ${new Date(c.dateDebutSymptomes + "T00:00:00").toLocaleDateString("fr-FR")}${j >= 0 ? ` (J${j})` : ""}`);
+  }
+  if (c.histoireMaladie) parts.push(`Évolution : ${c.histoireMaladie}`);
+  if (c.traitementsAvantVenue?.length)
+    parts.push(`Traitements avant la venue : ${c.traitementsAvantVenue.join(", ")}${c.traitementsAvantVenueDetail ? ` (${c.traitementsAvantVenueDetail})` : ""}`);
+  return parts.join("\n");
+}
 
 interface TabConsultationProps {
   isLoading?: boolean;
@@ -31,6 +44,8 @@ interface TabConsultationProps {
   currentUser?: Staff | null;
   laboExamens?: ExamenLabo[];
   rdvs?: any[];
+  /** Pour créer le rendez-vous de la visite de contrôle. */
+  onUpdateRdvs?: (rdvs: RendezVous[]) => void;
   onUpdateLaboExamens?: (examens: ExamenLabo[]) => void;
   // Cahier des charges points 1-3 : la décision d'hospitalisation/mise en
   // observation/admission aux urgences se prend en Consultation Générale, et
@@ -65,6 +80,7 @@ export default function TabConsultation({
   onUpdateLaboExamens,
   isLoading,
   rdvs = [],
+  onUpdateRdvs,
   hospitalisations = [],
   onUpdateHospitalisations,
   urgences = [],
@@ -150,6 +166,8 @@ export default function TabConsultation({
   const [vTa, setVTa] = useState("");
   const [vPouls, setVPouls] = useState("");
   const [vGlycemie, setVGlycemie] = useState("");
+  const [vFr, setVFr] = useState("");
+  const [vSpo2, setVSpo2] = useState("");
 
   // Live BMI / IMC calculation
   const weightVal = parseFloat(vPoids) || 0;
@@ -177,6 +195,14 @@ export default function TabConsultation({
 
   // Clinical states
   const [consPlainte, setConsPlainte] = useState("");
+  // Anamnèse : histoire de la maladie
+  const [consDateDebut, setConsDateDebut] = useState("");
+  const [consHistoire, setConsHistoire] = useState("");
+  const [consTraitAvant, setConsTraitAvant] = useState<string[]>([]);
+  const [consTraitAvantDetail, setConsTraitAvantDetail] = useState("");
+  // Fin de consultation : conseils et visite de contrôle
+  const [consConseils, setConsConseils] = useState("");
+  const [consDateControle, setConsDateControle] = useState("");
   const [consExamen, setConsExamen] = useState("");
   const [consAntecedents, setConsAntecedents] = useState<AntecedentsPatient>(ANTECEDENTS_VIDES);
   // Dernière visite du même patient (nom ou téléphone) où les antécédents ont été notés.
@@ -742,7 +768,15 @@ export default function TabConsultation({
     setVTa("");
     setVPouls("");
     setVGlycemie("");
+    setVFr("");
+    setVSpo2("");
     setConsPlainte("");
+    setConsDateDebut("");
+    setConsHistoire("");
+    setConsTraitAvant([]);
+    setConsTraitAvantDetail("");
+    setConsConseils("");
+    setConsDateControle("");
     setConsExamen("");
     setConsAntecedents(ANTECEDENTS_VIDES);
     setConsDiagnostic("");
@@ -786,7 +820,15 @@ export default function TabConsultation({
     setVTa(c.vitals?.tensionArterielle || "");
     setVPouls(c.vitals?.pouls ? String(c.vitals.pouls) : "");
     setVGlycemie(c.vitals?.glycemie ? String(c.vitals.glycemie) : "");
+    setVFr(c.vitals?.frequenceRespiratoire ? String(c.vitals.frequenceRespiratoire) : "");
+    setVSpo2(c.vitals?.saturationO2 ? String(c.vitals.saturationO2) : "");
     setConsPlainte(c.plainte || "");
+    setConsDateDebut(c.dateDebutSymptomes || "");
+    setConsHistoire(c.histoireMaladie || "");
+    setConsTraitAvant(c.traitementsAvantVenue || []);
+    setConsTraitAvantDetail(c.traitementsAvantVenueDetail || "");
+    setConsConseils(c.conseils || "");
+    setConsDateControle(c.dateControle || "");
     setConsExamen(c.examenPhysique || "");
     setConsAntecedents(c.antecedentsPatient ? { ...ANTECEDENTS_VIDES, ...c.antecedentsPatient } : ANTECEDENTS_VIDES);
     setConsDiagnostic(c.diagnostic || "");
@@ -1008,9 +1050,18 @@ export default function TabConsultation({
         pouls: parseFloat(vPouls) || 0,
         glycemie: parseFloat(vGlycemie) || 0,
         taille: heightNum || undefined,
-        imc: savedImc
+        imc: savedImc,
+        frequenceRespiratoire: parseFloat(vFr) || undefined,
+        saturationO2: parseFloat(vSpo2) || undefined,
       },
       plainte: consPlainte.trim(),
+      dateDebutSymptomes: consDateDebut || undefined,
+      histoireMaladie: consHistoire.trim() || undefined,
+      traitementsAvantVenue: consTraitAvant.length ? consTraitAvant : undefined,
+      traitementsAvantVenueDetail: consTraitAvantDetail.trim() || undefined,
+      conseils: consConseils.trim() || undefined,
+      dateControle: consDateControle || undefined,
+      rdvControleId: pendingSource?.rdvControleId,
       antecedentsPatient: antecedentsRenseignes(consAntecedents) ? consAntecedents : undefined,
       examenPhysique: consExamen.trim(),
       diagnostic: consDiagnostic.trim(),
@@ -1160,6 +1211,37 @@ export default function TabConsultation({
       }
     }
 
+    // Visite de contrôle : crée (ou met à jour) le rendez-vous correspondant.
+    let rdvSuffix = "";
+    if (onUpdateRdvs && newCons.dateControle) {
+      const existant = newCons.rdvControleId ? (rdvs as RendezVous[]).find((r) => r.id === newCons.rdvControleId) : undefined;
+      const motifRdv = `Visite de contrôle${newCons.diagnosticFinal || newCons.diagnostic ? ` : ${newCons.diagnosticFinal || newCons.diagnostic}` : ""}`;
+      if (existant) {
+        if (existant.date !== newCons.dateControle) {
+          onUpdateRdvs((rdvs as RendezVous[]).map((r) => (r.id === existant.id ? { ...r, date: newCons.dateControle!, motif: motifRdv } : r)));
+        }
+      } else {
+        const nouveauRdv: RendezVous = {
+          id: generateUid(),
+          patient: newCons.patient,
+          date: newCons.dateControle,
+          heure: "08:00",
+          contact: newCons.contact,
+          type: "Suivi",
+          praticien: medecinNomForDecision,
+          motif: motifRdv,
+          notes: `Programmé en consultation générale le ${new Date().toLocaleDateString("fr-FR")}.`,
+          statut: "Planifié",
+          createdAt: new Date().toISOString(),
+          consultationId: newCons.id,
+          creePar: currentUser?.nom,
+        };
+        newCons.rdvControleId = nouveauRdv.id;
+        onUpdateRdvs([...(rdvs as RendezVous[]), nouveauRdv]);
+      }
+      rdvSuffix = `\nVisite de contrôle programmée le ${new Date(newCons.dateControle + "T00:00:00").toLocaleDateString("fr-FR")} (onglet Rendez-vous).`;
+    }
+
     if (pendingSource) {
       onUpdateConsultations(consultations.map((c) => (c.id === newCons.id ? newCons : c)));
     } else {
@@ -1182,7 +1264,7 @@ export default function TabConsultation({
       ? "\n⚠️ Stock insuffisant pour : " + stockShortfallWarnings.join(" ")
       : "";
 
-    alert("Consultation enregistrée avec succès pour : " + newCons.patient + decisionSuffix + shortfallSuffix);
+    alert("Consultation enregistrée avec succès pour : " + newCons.patient + decisionSuffix + rdvSuffix + shortfallSuffix);
 
     const waLink = getConsultationWhatsAppLink(newCons);
     if (waLink && window.confirm("Envoyer le résumé de cette consultation au patient sur WhatsApp ?")) {
@@ -1531,10 +1613,12 @@ export default function TabConsultation({
       { l: "IMC", v: cons.vitals.imc ? `${cons.vitals.imc}` : "—", color: cons.vitals.imc ? (cons.vitals.imc < 18.5 ? [217, 119, 6] : cons.vitals.imc < 25 ? [5, 150, 105] : cons.vitals.imc < 30 ? [249, 115, 22] : [225, 29, 72]) : [30, 41, 59] },
       { l: "TENSION (TA)", v: cons.vitals.tensionArterielle || "—", color: [30, 41, 59] },
       { l: "POULS", v: cons.vitals.pouls ? `${cons.vitals.pouls} bpm` : "—", color: [30, 41, 59] },
-      { l: "GLYCÉMIE", v: cons.vitals.glycemie ? `${cons.vitals.glycemie} g/L` : "—", color: [30, 41, 59] }
+      { l: "GLYCÉMIE", v: cons.vitals.glycemie ? `${cons.vitals.glycemie} g/L` : "—", color: [30, 41, 59] },
+      { l: "FR", v: cons.vitals.frequenceRespiratoire ? `${cons.vitals.frequenceRespiratoire}/min` : "—", color: [30, 41, 59] },
+      { l: "SpO2", v: cons.vitals.saturationO2 ? `${cons.vitals.saturationO2} %` : "—", color: cons.vitals.saturationO2 && cons.vitals.saturationO2 < 94 ? [225, 29, 72] : [30, 41, 59] }
     ];
 
-    const boxWidth = contentWidth / 7;
+    const boxWidth = contentWidth / vitalsList.length;
     vitalsList.forEach((vit, idx) => {
       const boxX = margin + (idx * boxWidth);
       doc.setFillColor(lightBgColor[0], lightBgColor[1], lightBgColor[2]);
@@ -1558,6 +1642,8 @@ export default function TabConsultation({
     // Clinical Details
     drawSectionHeader("3. Description Clinique & Examen");
     drawTextBlock("MOTIF DE CONSULTATION / PLAINTES :", cons.plainte);
+    const histoirePdf = texteHistoire(cons);
+    if (histoirePdf) drawTextBlock("HISTOIRE DE LA MALADIE :", histoirePdf);
     if (antecedentsRenseignes(cons.antecedentsPatient)) drawTextBlock("ANTÉCÉDENTS DU PATIENT :", resumeAntecedents(cons.antecedentsPatient));
     drawTextBlock("EXAMEN PHYSIQUE CLINIQUE :", cons.examenPhysique || "Non spécifié");
 
@@ -1617,6 +1703,9 @@ export default function TabConsultation({
       });
       y += 4;
     }
+
+    if (cons.conseils) drawTextBlock("CONSEILS AU PATIENT :", cons.conseils);
+    if (cons.dateControle) drawTextBlock("VISITE DE CONTRÔLE :", `Le ${new Date(cons.dateControle + "T00:00:00").toLocaleDateString("fr-FR")}`);
 
     // Prescription Section
     drawSectionHeader("5. Prescription / Traitement Ordonné");
@@ -2203,7 +2292,7 @@ export default function TabConsultation({
               <span className="text-xs uppercase font-semibold tracking-wider text-primary-800 flex items-center gap-1">
                 <Activity className="w-3.5 h-3.5 text-primary-600" /> Constantes physiologiques à l'admission
               </span>
-              <div className="grid grid-cols-6 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 <div>
                   <label className="text-2xs uppercase font-bold text-stone-500">T°C (°C)</label>
                   <input
@@ -2267,6 +2356,26 @@ export default function TabConsultation({
                     className="w-full text-xs border border-stone-200 rounded-lg p-1 bg-white text-center font-bold font-mono"
                   />
                 </div>
+                <div>
+                  <label className="text-2xs uppercase font-bold text-stone-500">FR (/min)</label>
+                  <input
+                    type="number"
+                    placeholder="18"
+                    value={vFr}
+                    onChange={(e) => setVFr(e.target.value)}
+                    className="w-full text-xs border border-stone-200 rounded-lg p-1 bg-white text-center font-bold font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="text-2xs uppercase font-bold text-stone-500">SpO₂ (%)</label>
+                  <input
+                    type="number"
+                    placeholder="98"
+                    value={vSpo2}
+                    onChange={(e) => setVSpo2(e.target.value)}
+                    className={`w-full text-xs border rounded-lg p-1 bg-white text-center font-bold font-mono ${vSpo2 && parseFloat(vSpo2) < 94 ? "border-danger-400 text-danger-700" : "border-stone-200"}`}
+                  />
+                </div>
               </div>
 
               {/* Dynamic IMC live evaluation widget */}
@@ -2323,6 +2432,49 @@ export default function TabConsultation({
                 onChange={(e) => setConsPlainte(e.target.value)}
                 className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none h-16 resize-none"
               />
+            </div>
+
+            {/* Anamnèse : histoire de la maladie */}
+            <div className="bg-stone-50 p-3 rounded-xl border border-stone-150 space-y-2">
+              <span className="text-xs uppercase font-semibold tracking-wider text-primary-800 block">Histoire de la maladie</span>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+                <div>
+                  <label className="text-2xs uppercase font-bold text-stone-500 block mb-0.5">Début des symptômes</label>
+                  <input type="date" value={consDateDebut} max={consDate || getTodayStr()} onChange={(e) => setConsDateDebut(e.target.value)}
+                    className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none" />
+                </div>
+                <div className="sm:col-span-2 text-2xs text-stone-500 pb-1.5">
+                  {consDateDebut ? (() => {
+                    const j = Math.round((new Date((consDate || getTodayStr()) + "T00:00:00").getTime() - new Date(consDateDebut + "T00:00:00").getTime()) / 86400000);
+                    return j >= 0 ? `Malade depuis ${j} jour${j > 1 ? "s" : ""}${j >= 14 ? " — symptômes prolongés (penser TB si toux, bilan si fièvre)" : j >= 7 ? " — plus de 7 jours" : ""}.` : "Date postérieure à la consultation.";
+                  })() : "Exigée au registre (guide SIMR) — sert aussi aux définitions de cas du TLOH."}
+                </div>
+              </div>
+              <textarea
+                placeholder="Évolution : mode de début, aggravation, signes associés…"
+                value={consHistoire}
+                onChange={(e) => setConsHistoire(e.target.value)}
+                className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none h-12 resize-none"
+              />
+              <div>
+                <label className="text-2xs uppercase font-bold text-stone-500 block mb-1">Traitements reçus avant de venir</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {["Aucun", "Automédication", "Tradipraticien", "Autre centre de santé", "Antipaludique", "Antibiotique"].map((t) => {
+                    const actif = consTraitAvant.includes(t);
+                    return (
+                      <button key={t} type="button"
+                        onClick={() => setConsTraitAvant(t === "Aucun" ? (actif ? [] : ["Aucun"]) : actif ? consTraitAvant.filter((x) => x !== t) : [...consTraitAvant.filter((x) => x !== "Aucun"), t])}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium border ${actif ? "bg-primary-600 border-primary-600 text-white" : "bg-white border-stone-200 text-stone-600"}`}>
+                        {t}
+                      </button>
+                    );
+                  })}
+                </div>
+                {consTraitAvant.some((t) => t !== "Aucun") && (
+                  <input type="text" placeholder="Lesquels ? (produit, dose, depuis quand)" value={consTraitAvantDetail} onChange={(e) => setConsTraitAvantDetail(e.target.value)}
+                    className="w-full mt-1.5 text-xs border border-stone-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none" />
+                )}
+              </div>
             </div>
 
             <AntecedentsEditeur
@@ -2788,6 +2940,28 @@ export default function TabConsultation({
                 Décrivez ce qui doit être fait après le diagnostic : traitement par voie orale, produits injectables avec leur posologie, soins infirmiers à réaliser (pansement, nébulisation…), surveillance, examens, conseils. Les injectables et les soins infirmiers apparaîtront dans la salle infirmier.
               </p>
               <ConduiteATenirEditor items={consCAT} onChange={setConsCAT} medicaments={medicaments} onAjouterOrdonnance={injectableVersOrdonnance} />
+            </div>
+
+            {/* Conseils et visite de contrôle */}
+            <div className="bg-stone-50 p-3 rounded-xl border border-stone-150 space-y-2">
+              <span className="text-xs uppercase font-semibold tracking-wider text-primary-800 block">Conseils au patient & visite de contrôle</span>
+              <textarea
+                placeholder="Ex : bien prendre le traitement jusqu'au bout, boire beaucoup, dormir sous moustiquaire, revenir si la fièvre persiste après 3 jours…"
+                value={consConseils}
+                onChange={(e) => setConsConseils(e.target.value)}
+                className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-white focus:outline-none h-14 resize-none"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-2xs uppercase font-bold text-stone-500">Revoir le patient le</label>
+                <input type="date" value={consDateControle} min={getTodayStr()} onChange={(e) => setConsDateControle(e.target.value)}
+                  className="text-xs border border-stone-200 rounded-lg px-2 py-1 bg-white focus:outline-none" />
+                {[2, 3, 7, 14].map((j) => (
+                  <button key={j} type="button" onClick={() => { const d = new Date(); d.setDate(d.getDate() + j); setConsDateControle(d.toISOString().slice(0, 10)); }}
+                    className="px-2 py-0.5 rounded-full text-2xs font-bold border border-stone-200 bg-white text-stone-600 hover:border-primary-400">J+{j}</button>
+                ))}
+                {consDateControle && <button type="button" onClick={() => setConsDateControle("")} className="text-2xs text-stone-400 underline">Pas de contrôle</button>}
+              </div>
+              {consDateControle && <p className="text-2xs text-stone-500">Un rendez-vous « Suivi » sera créé dans l'onglet Rendez-vous.</p>}
             </div>
 
             {/* Décision de Consultation Générale (cahier des charges, points 1-3) */}
@@ -3478,7 +3652,7 @@ export default function TabConsultation({
                 {/* Vitals Section */}
                 <div>
                   <h3 className="text-xs font-bold uppercase tracking-wider text-primary-800 border-b pb-1 mb-3">2. Constantes Physiologiques à l'admission</h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2.5 text-center">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-9 gap-2.5 text-center">
                     <div className={`${theme === "dark" ? "bg-stone-800" : "bg-stone-50"} p-2.5 rounded-xl border ${theme === "dark" ? "border-stone-700" : "border-stone-100"}`}>
                       <span className="text-2xs font-bold text-stone-450 uppercase">Température</span>
                       <p className="text-xs sm:text-sm font-semibold text-danger-600 mt-0.5 font-mono">{selectedConsultation.vitals.temperature ? `${selectedConsultation.vitals.temperature} °C` : "—"}</p>
@@ -3510,6 +3684,14 @@ export default function TabConsultation({
                     <div className={`${theme === "dark" ? "bg-stone-800" : "bg-stone-50"} p-2.5 rounded-xl border ${theme === "dark" ? "border-stone-700" : "border-stone-100"}`}>
                       <span className="text-2xs font-bold text-stone-450 uppercase font-sans">Glycémie</span>
                       <p className={`text-xs sm:text-sm font-semibold mt-0.5 font-mono ${theme === "dark" ? "text-white" : "text-stone-800"}`}>{selectedConsultation.vitals.glycemie ? `${selectedConsultation.vitals.glycemie} g/L` : "—"}</p>
+                    </div>
+                    <div className={`${theme === "dark" ? "bg-stone-800" : "bg-stone-50"} p-2.5 rounded-xl border ${theme === "dark" ? "border-stone-700" : "border-stone-100"}`}>
+                      <span className="text-2xs font-bold text-stone-450 uppercase font-sans">Fréq. resp.</span>
+                      <p className={`text-xs sm:text-sm font-semibold mt-0.5 font-mono ${theme === "dark" ? "text-white" : "text-stone-800"}`}>{selectedConsultation.vitals.frequenceRespiratoire ? `${selectedConsultation.vitals.frequenceRespiratoire}/min` : "—"}</p>
+                    </div>
+                    <div className={`${theme === "dark" ? "bg-stone-800" : "bg-stone-50"} p-2.5 rounded-xl border ${theme === "dark" ? "border-stone-700" : "border-stone-100"}`}>
+                      <span className="text-2xs font-bold text-stone-450 uppercase font-sans">SpO₂</span>
+                      <p className={`text-xs sm:text-sm font-semibold mt-0.5 font-mono ${theme === "dark" ? "text-white" : "text-stone-800"}`}>{selectedConsultation.vitals.saturationO2 ? `${selectedConsultation.vitals.saturationO2} %` : "—"}</p>
                     </div>
                   </div>
 
@@ -3564,6 +3746,11 @@ export default function TabConsultation({
                         theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-stone-50 border-stone-100 text-stone-700"
                       }`}>
                         "{selectedConsultation.plainte}"
+                      </p>
+                    )}
+                    {texteHistoire(selectedConsultation) && (
+                      <p className={`mt-2 text-xs p-3 rounded-xl border whitespace-pre-line ${theme === "dark" ? "bg-stone-800 border-stone-700 text-stone-200" : "bg-white border-stone-100 text-stone-700"}`}>
+                        {texteHistoire(selectedConsultation)}
                       </p>
                     )}
                   </div>

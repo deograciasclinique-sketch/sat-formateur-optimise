@@ -175,6 +175,8 @@ export default function TabInfirmier({
           glycemie: constantes.glycemie || 0,
           taille: constantes.taille,
           imc: constantes.imc,
+          frequenceRespiratoire: constantes.frequenceRespiratoire,
+          saturationO2: constantes.saturationO2,
         },
         plainte: [`Venu sur rendez-vous (${rdv.type})`, rdv.motif].filter(Boolean).join(" — "),
         observations: [
@@ -251,6 +253,8 @@ export default function TabInfirmier({
   const [ta, setTa] = useState("");
   const [pouls, setPouls] = useState("");
   const [glycemie, setGlycemie] = useState("");
+  const [freqResp, setFreqResp] = useState("");
+  const [spo2, setSpo2] = useState("");
   const [plainte, setPlainte] = useState("");
 
   const praticiensFiltres = useMemo(() => {
@@ -352,6 +356,8 @@ export default function TabInfirmier({
     setTa(c.vitals?.tensionArterielle || "");
     setPouls(c.vitals?.pouls ? String(c.vitals.pouls) : "");
     setGlycemie(c.vitals?.glycemie ? String(c.vitals.glycemie) : "");
+    setFreqResp(c.vitals?.frequenceRespiratoire ? String(c.vitals.frequenceRespiratoire) : "");
+    setSpo2(c.vitals?.saturationO2 ? String(c.vitals.saturationO2) : "");
     setPlainte(c.plainte || "");
     // Réinitialisation de la partie "conclusion de la consultation"
     setModeCloture("transfert");
@@ -431,6 +437,8 @@ export default function TabInfirmier({
         glycemie: parseFloat(glycemie) || 0,
         taille: heightNum || undefined,
         imc,
+        frequenceRespiratoire: parseFloat(freqResp) || undefined,
+        saturationO2: parseFloat(spo2) || undefined,
       },
     };
   };
@@ -1070,6 +1078,14 @@ export default function TabInfirmier({
                 <div>
                   <label className="text-xs">Glycémie</label>
                   <input type="number" className="w-full mt-1 px-2 py-1.5 rounded border bg-transparent" value={glycemie} onChange={(e) => setGlycemie(e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-xs">Fréq. respiratoire (/min)</label>
+                  <input type="number" className="w-full mt-1 px-2 py-1.5 rounded border bg-transparent" value={freqResp} onChange={(e) => setFreqResp(e.target.value)} placeholder="18" />
+                </div>
+                <div>
+                  <label className="text-xs">SpO₂ (%)</label>
+                  <input type="number" className="w-full mt-1 px-2 py-1.5 rounded border bg-transparent" value={spo2} onChange={(e) => setSpo2(e.target.value)} placeholder="98" />
                 </div>
               </div>
             </div>

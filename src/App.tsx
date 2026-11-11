@@ -2739,6 +2739,8 @@ export default function App() {
               onUpdateMouvements={handleUpdateMouvements}
               documents={documents}
               actes={actesTarifaires}
+              rdvs={rdv}
+              onUpdateRdvs={handleUpdateRdv}
             />
           )}
 
