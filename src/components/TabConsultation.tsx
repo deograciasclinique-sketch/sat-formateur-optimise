@@ -14,8 +14,8 @@ import { AntecedentsPatient, Consultation, FicheReference, RendezVous, LigneOrdo
 import { generateUid, getTodayStr } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { imprimerRegistreConsultation, lignesRegistre } from "../lib/registreConsultation";
-import { SYMPTOMES_DOMINANTS, DIAGNOSTICS, alertePaludismeNomenclature, estDansNomenclature, PLAN_EXAMEN_GDT, PAGE_ORDINOGRAMME, protocolePour } from "../modules/nomenclature/gdt";
-import GdtPanneau, { ouvrirGdtExterne } from "./GdtPanneau";
+import { SYMPTOMES_DOMINANTS, DIAGNOSTICS, alertePaludismeNomenclature, estDansNomenclature, PLAN_EXAMEN_GDT, PAGE_ORDINOGRAMME, pagePdf, referencesPour } from "../modules/nomenclature/gdt";
+import GdtPanneau, { CibleDoc, ouvrirDocExterne } from "./GdtPanneau";
 import { NATIF } from "../lib/natif";
 import { blocGardeHtml, lirePharmaciesLocal, texteGardeZone, nomZone, zoneCabinet } from "../lib/pharmacies";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
@@ -33,15 +33,19 @@ function AlerteNomenclature({ texte }: { texte: string }) {
   return <p className="text-2xs text-success-700 mt-1">✓ Appellation de la nomenclature du GDT</p>;
 }
 
-/** Lien vers le protocole de traitement du GDT correspondant au diagnostic. */
-function BoutonProtocole({ diagnostic, onOuvrir }: { diagnostic: string; onOuvrir: (page: number, titre: string) => void }) {
-  const p = protocolePour(diagnostic);
-  if (!p) return null;
+/** Liens vers le protocole du GDT et la directive du programme correspondant au diagnostic. */
+function BoutonsReferences({ diagnostic, onOuvrir }: { diagnostic: string; onOuvrir: (c: CibleDoc) => void }) {
+  const refs = referencesPour(diagnostic);
+  if (!refs.length) return null;
   return (
-    <button type="button" onClick={() => onOuvrir(p.page, p.titre)}
-      className="mt-1 text-2xs font-bold text-primary-700 bg-primary-50 border border-primary-200 rounded-lg px-2 py-1 hover:bg-primary-100">
-      📖 Protocole du GDT : {p.titre} (p. {p.page})
-    </button>
+    <div className="flex flex-wrap gap-1.5 mt-1">
+      {refs.map((r) => (
+        <button key={r.titre} type="button" onClick={() => onOuvrir({ docId: r.docId, page: r.page, titre: r.section })}
+          className="text-2xs font-bold text-primary-700 bg-primary-50 border border-primary-200 rounded-lg px-2 py-1 hover:bg-primary-100">
+          📖 {r.titre}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -228,9 +232,9 @@ export default function TabConsultation({
   // Impression du registre de consultation (colonnes 1 à 17)
   const [regDebut, setRegDebut] = useState(getTodayStr());
   const [regFin, setRegFin] = useState(getTodayStr());
-  // Lecture du GDT pendant la consultation (page imprimée ; 0 = sommaire)
-  const [gdt, setGdt] = useState<{ page: number; titre: string } | null>(null);
-  const ouvrirGdt = (page: number, titre: string) => (NATIF ? ouvrirGdtExterne(page || undefined) : setGdt({ page, titre }));
+  // Lecture des documents de référence (GDT, directives palu, guide TB, charte) pendant la consultation
+  const [docOuvert, setDocOuvert] = useState<CibleDoc | null>(null);
+  const ouvrirDoc = (c: CibleDoc) => (NATIF ? ouvrirDocExterne(c) : setDocOuvert(c));
   // GDT : symptôme dominant, porte d'entrée, référence
   const [consSymptomeDominant, setConsSymptomeDominant] = useState("");
   const [consPorteEntree, setConsPorteEntree] = useState("");
@@ -2516,12 +2520,12 @@ export default function TabConsultation({
             </div>
 
             {/* GDT étape 2 : symptôme dominant (ordinogramme) */}
-            {gdt && <GdtPanneau page={gdt.page} titre={gdt.titre} onChangePage={(page, titre) => setGdt({ page, titre })} onClose={() => setGdt(null)} />}
+            {docOuvert && <GdtPanneau cible={docOuvert} onChange={setDocOuvert} onClose={() => setDocOuvert(null)} />}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
                 <div className="flex items-center justify-between gap-2 mb-0.5">
                   <label className="text-2xs uppercase font-bold text-stone-500">Symptôme dominant (ordinogramme du GDT)</label>
-                  <button type="button" onClick={() => ouvrirGdt(0, "Sommaire")} className="text-2xs font-bold text-primary-700 hover:underline whitespace-nowrap">📖 GDT</button>
+                  <button type="button" onClick={() => ouvrirDoc({ docId: "gdt", page: 2, titre: "Sommaire" })} className="text-2xs font-bold text-primary-700 hover:underline whitespace-nowrap">📚 Documents de référence</button>
                 </div>
                 <select value={consSymptomeDominant} onChange={(e) => setConsSymptomeDominant(e.target.value)}
                   className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-stone-50 focus:bg-white focus:outline-none">
@@ -2533,7 +2537,7 @@ export default function TabConsultation({
                   ))}
                 </select>
                 {consSymptomeDominant && PAGE_ORDINOGRAMME[consSymptomeDominant] && (
-                  <button type="button" onClick={() => ouvrirGdt(PAGE_ORDINOGRAMME[consSymptomeDominant], consSymptomeDominant)}
+                  <button type="button" onClick={() => ouvrirDoc({ docId: "gdt", page: pagePdf(PAGE_ORDINOGRAMME[consSymptomeDominant]), titre: `Ordinogramme — ${consSymptomeDominant}` })}
                     className="mt-1 text-2xs font-bold text-primary-700 bg-primary-50 border border-primary-200 rounded-lg px-2 py-1 hover:bg-primary-100">
                     📖 Voir l'ordinogramme « {consSymptomeDominant} » (p. {PAGE_ORDINOGRAMME[consSymptomeDominant]})
                   </button>
@@ -2558,7 +2562,7 @@ export default function TabConsultation({
                 <div className="sm:col-span-2 text-2xs text-stone-500 pb-1.5">
                   {consDateDebut ? (() => {
                     const j = Math.round((new Date((consDate || getTodayStr()) + "T00:00:00").getTime() - new Date(consDateDebut + "T00:00:00").getTime()) / 86400000);
-                    return j >= 0 ? `Malade depuis ${j} jour${j > 1 ? "s" : ""}${j >= 14 ? " — symptômes prolongés (penser TB si toux, bilan si fièvre)" : j >= 7 ? " — plus de 7 jours" : ""}.` : "Date postérieure à la consultation.";
+                    return j >= 0 ? `Malade depuis ${j} jour${j > 1 ? "s" : ""}${j > 14 ? " — plus de 14 jours : si toux, cas présumé de tuberculose (guide TB 2025) → crachats" : j >= 7 ? " — plus de 7 jours (fièvre prolongée : bilan)" : ""}.` : "Date postérieure à la consultation.";
                   })() : "Exigée au registre (guide SIMR) — sert aussi aux définitions de cas du TLOH."}
                 </div>
               </div>
@@ -2737,7 +2741,7 @@ export default function TabConsultation({
                 {DIAGNOSTICS.flatMap((g) => g.items).map((d) => <option key={d} value={d} />)}
               </datalist>
               <AlerteNomenclature texte={consDiagnostic} />
-              <BoutonProtocole diagnostic={consDiagnostic} onOuvrir={ouvrirGdt} />
+              <BoutonsReferences diagnostic={consDiagnostic} onOuvrir={ouvrirDoc} />
               <p className="text-xs text-stone-500 dark:text-stone-400 italic mt-1">
                 Le diagnostic final / de sortie pourra être ajouté plus tard depuis le dossier (bouton "Modifier"), une fois les résultats du laboratoire disponibles.
               </p>
@@ -3051,7 +3055,7 @@ export default function TabConsultation({
                 className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
               />
               <AlerteNomenclature texte={consDiagnosticFinal} />
-              {protocolePour(consDiagnosticFinal)?.titre !== protocolePour(consDiagnostic)?.titre && <BoutonProtocole diagnostic={consDiagnosticFinal} onOuvrir={ouvrirGdt} />}
+              {JSON.stringify(referencesPour(consDiagnosticFinal)) !== JSON.stringify(referencesPour(consDiagnostic)) && <BoutonsReferences diagnostic={consDiagnosticFinal} onOuvrir={ouvrirDoc} />}
               <p className="text-xs text-stone-500 dark:text-stone-400 italic mt-1">
                 Si les résultats du labo ne sont pas encore disponibles, laisse ce champ vide : tu pourras le compléter plus tard depuis le dossier (bouton "Modifier").
               </p>
