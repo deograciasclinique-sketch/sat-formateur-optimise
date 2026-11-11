@@ -13,6 +13,7 @@ import { interpreterDengue, dengueComplet } from "../modules/thlo/tdr";
 import { AntecedentsPatient, Consultation, RendezVous, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
+import { imprimerRegistreConsultation, lignesRegistre } from "../lib/registreConsultation";
 import { blocGardeHtml, lirePharmaciesLocal, texteGardeZone, nomZone, zoneCabinet } from "../lib/pharmacies";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
@@ -195,6 +196,9 @@ export default function TabConsultation({
 
   // Clinical states
   const [consPlainte, setConsPlainte] = useState("");
+  // Impression du registre de consultation (colonnes 1 à 17)
+  const [regDebut, setRegDebut] = useState(getTodayStr());
+  const [regFin, setRegFin] = useState(getTodayStr());
   // Anamnèse : histoire de la maladie
   const [consDateDebut, setConsDateDebut] = useState("");
   const [consHistoire, setConsHistoire] = useState("");
@@ -1708,7 +1712,7 @@ export default function TabConsultation({
     if (cons.dateControle) drawTextBlock("VISITE DE CONTRÔLE :", `Le ${new Date(cons.dateControle + "T00:00:00").toLocaleDateString("fr-FR")}`);
 
     // Prescription Section
-    drawSectionHeader("5. Prescription / Traitement Ordonné");
+    drawSectionHeader("5. Traitement (14) / Ordonnance");
     
     if (!cons.ordonnance || cons.ordonnance.length === 0) {
       doc.setFont("Helvetica", "oblique");
@@ -1765,7 +1769,7 @@ export default function TabConsultation({
         doc.addPage();
         y = 20;
       }
-      drawSectionHeader("6. Examens de Laboratoire Transférés");
+      drawSectionHeader("6. Examens paracliniques (12) et résultats (13)");
       cons.labResults.forEach((lr) => {
         if (y > pageHeight - 35) {
           doc.addPage();
@@ -2678,7 +2682,7 @@ export default function TabConsultation({
             <div className="pt-3 border-t border-stone-100 space-y-2">
               <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 flex items-center gap-1.5">
                 <FlaskConical className="w-3.5 h-3.5 text-primary-600" />
-                Prescrire un ou plusieurs examens au laboratoire
+                Examens paracliniques (12) — prescrire au laboratoire
               </label>
 
               <SelecteurBilans choix={bilansChoisis} onChange={setBilansChoisis} catalogue={examensCatalogue} />
@@ -2768,7 +2772,7 @@ export default function TabConsultation({
             <div className="pt-3 border-t border-stone-100 space-y-2">
               <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 flex items-center gap-1.5">
                 <FlaskConical className="w-3.5 h-3.5 text-primary-600" />
-                🔬 Transférer depuis le laboratoire vers cette consultation
+                🔬 Résultats des examens paracliniques (13) — transférer depuis le laboratoire
               </label>
 
               {consPatient.trim() ? (
@@ -2914,7 +2918,7 @@ export default function TabConsultation({
             {/* Diagnostic de certitude / final, après examens du labo */}
             <div className="pt-3 border-t border-stone-100">
               <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">
-                Diagnostic de Certitude / Final
+                Diagnostic de Certitude / Final (11 — retenu au registre s'il est rempli)
                 {tempLabResults.length > 0 && (
                   <span className="text-danger-600 ml-1">* (obligatoire : examen labo lié à cette consultation)</span>
                 )}
@@ -3021,7 +3025,7 @@ export default function TabConsultation({
         <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4 self-start">
           <h3 className="text-base font-serif font-bold text-stone-900 border-b border-stone-100 pb-3 flex items-center gap-2">
             <FileText className="w-5 h-5 text-primary-700" />
-            Rédiger l'Ordonnance Médicale
+            Traitement (14) — Rédiger l'Ordonnance Médicale
           </h3>
 
           {(() => {
@@ -3239,6 +3243,18 @@ export default function TabConsultation({
             <FileText className="w-5 h-5 text-primary-700" />
             Registre Général des Consultation Médicales Archivées
           </h3>
+
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="font-semibold text-stone-600">Imprimer le registre (1-17) du</span>
+            <input type="date" value={regDebut} onChange={(e) => setRegDebut(e.target.value)} className="border border-stone-200 rounded-lg px-2 py-1 bg-stone-50" />
+            <span>au</span>
+            <input type="date" value={regFin} min={regDebut} onChange={(e) => setRegFin(e.target.value)} className="border border-stone-200 rounded-lg px-2 py-1 bg-stone-50" />
+            <button type="button"
+              onClick={() => imprimerRegistreConsultation(lignesRegistre(consultations, laboExamens || [], staff, regDebut, regFin), regDebut, regFin, profile.name)}
+              className="px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-700 text-white font-bold flex items-center gap-1">
+              <Printer className="w-3.5 h-3.5" /> Imprimer
+            </button>
+          </div>
 
           <div className="relative w-full md:w-64">
             <Search className="w-4 h-4 text-stone-500 dark:text-stone-400 absolute left-3 top-2.5" />
