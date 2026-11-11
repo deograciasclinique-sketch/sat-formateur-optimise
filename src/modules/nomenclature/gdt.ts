@@ -197,3 +197,95 @@ export function protocolePour(diagnostic: string) {
   if (!t) return undefined;
   return PROTOCOLES_GDT.find((p) => p.motsCles.test(t));
 }
+
+/* ------------------------------------------------------------------ */
+/*  Bibliothèque des documents de référence du Ministère               */
+/* ------------------------------------------------------------------ */
+
+export interface SectionDoc { titre: string; page: number } // page du fichier PDF
+export interface DocReference { id: string; titre: string; court: string; fichier: string; sections: SectionDoc[] }
+
+export const BIBLIOTHEQUE: DocReference[] = [
+  {
+    id: "gdt",
+    titre: "Guide de diagnostic et de traitement des affections prioritaires au premier échelon (GDT), 4e édition, 2024",
+    court: "GDT 2024",
+    fichier: GDT_PDF,
+    sections: [
+      { titre: "Sommaire", page: 2 },
+      { titre: "Étapes de la consultation curative", page: pagePdf(14) },
+      ...SYMPTOMES_DOMINANTS.flatMap((g) => g.items.map((i) => ({ titre: `Ordinogramme — ${i}`, page: pagePdf(PAGE_ORDINOGRAMME[i]) }))),
+      ...PROTOCOLES_GDT.map((p) => ({ titre: `${p.page >= 236 ? "Geste / CAT" : "Protocole"} — ${p.titre}`, page: pagePdf(p.page) })),
+    ],
+  },
+  {
+    id: "palu",
+    titre: "Directives nationales de prise en charge du paludisme (novembre 2021)",
+    court: "Directives paludisme 2021",
+    fichier: "/gdt/Directives_paludisme_2021.pdf",
+    sections: [
+      { titre: "Sommaire", page: 2 },
+      { titre: "Définition et classification des cas (simple / grave)", page: 9 },
+      { titre: "Diagnostic (TDR, goutte épaisse) et diagnostic différentiel", page: 10 },
+      { titre: "Traitement du paludisme simple (ACT, posologies)", page: 11 },
+      { titre: "Paludisme simple chez la femme enceinte", page: 14 },
+      { titre: "Traitement du paludisme grave", page: 14 },
+      { titre: "Prévention (CPS, TPI, MILDA)", page: 21 },
+      { titre: "Annexe — posologie de l'artésunate injectable", page: 34 },
+      { titre: "Annexe — quinine : diagramme et posologie", page: 39 },
+      { titre: "Annexe — échelles de conscience (Glasgow, Blantyre)", page: 46 },
+    ],
+  },
+  {
+    id: "tb",
+    titre: "Guide technique de lutte contre la tuberculose — PNT (2025)",
+    court: "Guide TB 2025",
+    fichier: "/gdt/Guide_technique_TB_2025.pdf",
+    sections: [
+      { titre: "Sommaire", page: 2 },
+      { titre: "Définitions de cas (cas présumé : toux > 14 jours…)", page: 28 },
+      { titre: "Classification des cas", page: 30 },
+      { titre: "Diagnostic de la tuberculose pulmonaire", page: 36 },
+      { titre: "Prélèvement et examen des crachats", page: 43 },
+      { titre: "Algorithmes de diagnostic bactériologique", page: 50 },
+      { titre: "Traitement : régimes thérapeutiques", page: 59 },
+      { titre: "Cas particuliers (grossesse, diabète, VIH…)", page: 61 },
+      { titre: "Surveillance de l'observance", page: 64 },
+      { titre: "Surveillance de la tolérance", page: 67 },
+    ],
+  },
+  {
+    id: "charte",
+    titre: "Charte de qualité des services publics de santé (arrêté de 2018)",
+    court: "Charte de qualité 2018",
+    fichier: "/gdt/Charte_qualite_services_sante_2018.pdf",
+    sections: [
+      { titre: "Arrêté d'adoption", page: 1 },
+      { titre: "Préambule", page: 4 },
+      { titre: "Ch. I — Dispositions générales et définitions", page: 5 },
+      { titre: "Ch. II — Principes et valeurs de qualité", page: 8 },
+      { titre: "Ch. III — Droits de l'usager : accès, information, consentement", page: 9 },
+      { titre: "Ch. III — Confidentialité et devoirs de l'usager", page: 10 },
+      { titre: "Ch. IV — Règles de conduite du personnel de santé", page: 11 },
+      { titre: "Ch. V — Rapports administration / agents", page: 13 },
+      { titre: "Ch. VI — Application, suivi-évaluation", page: 14 },
+    ],
+  },
+];
+
+export const docRef = (id: string) => BIBLIOTHEQUE.find((d) => d.id === id) || BIBLIOTHEQUE[0];
+
+/** Toutes les références utiles pour un diagnostic : protocole du GDT + directive du programme. */
+export function referencesPour(diagnostic: string): { docId: string; page: number; titre: string; section: string }[] {
+  const t = norm(diagnostic);
+  if (!t) return [];
+  const r: { docId: string; page: number; titre: string; section: string }[] = [];
+  const p = protocolePour(diagnostic);
+  if (p) r.push({ docId: "gdt", page: pagePdf(p.page), titre: `GDT : ${p.titre} (p. ${p.page})`, section: `${p.page >= 236 ? "Geste / CAT" : "Protocole"} — ${p.titre}` });
+  if (/palu/.test(t)) {
+    const grave = /grave/.test(t);
+    r.push({ docId: "palu", page: grave ? 14 : 11, titre: `Directives paludisme 2021 : traitement ${grave ? "du paludisme grave" : "du paludisme simple"}`, section: grave ? "Traitement du paludisme grave" : "Traitement du paludisme simple (ACT, posologies)" });
+  }
+  if (/tubercul/.test(t)) r.push({ docId: "tb", page: 59, titre: "Guide TB 2025 : régimes thérapeutiques", section: "Traitement : régimes thérapeutiques" });
+  return r;
+}

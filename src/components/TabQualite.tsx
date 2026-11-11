@@ -6,6 +6,9 @@
 import React, { useState } from "react";
 import { logActivity } from "../lib/activityLogger";
 import TabQualiteActivityLog from "./TabQualiteActivityLog";
+import GdtPanneau, { CibleDoc, ouvrirDocExterne } from "./GdtPanneau";
+import { BIBLIOTHEQUE } from "../modules/nomenclature/gdt";
+import { NATIF } from "../lib/natif";
 import { Audit, ActionCorrective, Incident, Consultation } from "../types";
 import { QUALITY_CRITERIA, QualityCriterion, generateUid, getTodayStr, getTodayFr } from "../data";
 import { Award, CheckCircle, AlertOctagon, Plus, Trash2, Calendar, ClipboardCheck, Wrench, ShieldAlert, Database, Upload, Download, FileText, Sliders, RefreshCw, FileCheck, History } from "lucide-react";
@@ -31,6 +34,9 @@ export default function TabQualite({
 }: TabQualiteProps) {
   const [activeSubTab, setActiveSubTab] = useState<"audit" | "actions" | "incidents" | "journal" | "admin">("audit");
   const [auditScores, setAuditScores] = useState<Record<string, number>>({});
+  // Documents de référence du Ministère (Charte de qualité, GDT, directives…)
+  const [docOuvert, setDocOuvert] = useState<CibleDoc | null>(null);
+  const ouvrirDoc = (c: CibleDoc) => (NATIF ? ouvrirDocExterne(c) : setDocOuvert(c));
   const [saveMsg, setSaveMsg] = useState(false);
 
   // Corrective action form states
@@ -660,6 +666,20 @@ export default function TabQualite({
 
   return (
     <div className="space-y-6">
+      {docOuvert && <GdtPanneau cible={docOuvert} onChange={setDocOuvert} onClose={() => setDocOuvert(null)} />}
+      {/* Documents de référence du Ministère */}
+      <div className="bg-white border border-stone-200 rounded-2xl p-4 shadow-xs">
+        <div className="text-xs font-bold uppercase tracking-wider text-primary-800 mb-2">📚 Documents de référence du Ministère de la Santé</div>
+        <div className="flex flex-wrap gap-2">
+          {BIBLIOTHEQUE.map((d) => (
+            <button key={d.id} type="button" onClick={() => ouvrirDoc({ docId: d.id, page: d.sections[0].page })}
+              title={d.titre}
+              className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-primary-200 bg-primary-50 text-primary-800 hover:bg-primary-100">
+              {d.court}
+            </button>
+          ))}
+        </div>
+      </div>
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-white border border-stone-200 rounded-2xl p-5 shadow-xs border-t-4 border-t-success-600">
