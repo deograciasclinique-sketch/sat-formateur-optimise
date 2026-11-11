@@ -90,8 +90,13 @@ export function lignesRegistre(
         adresse: [c.commune, c.villageSecteur, c.contact].filter(Boolean).join(" · "),
         zone: c.zoneResidence || "",
         modeEntree: c.modeEntree || "",
-        signes: c.plainte || "",
-        diagnostic: c.diagnosticFinal || c.diagnostic || "",
+        // GDT étape 5 : symptôme dominant, porte d'entrée, diagnostic présomptif, traitement.
+        signes: c.symptomeDominant
+          ? `${c.symptomeDominant}${c.porteEntree ? ` (${c.porteEntree})` : ""}${c.plainte ? ` — ${c.plainte}` : ""}`
+          : c.plainte || "",
+        diagnostic: c.diagnosticFinal && c.diagnosticFinal !== c.diagnostic
+          ? `${c.diagnostic || ""}${c.diagnostic ? " → " : ""}retenu : ${c.diagnosticFinal}`
+          : c.diagnostic || c.diagnosticFinal || "",
         examens: ex.map(nomExamen).join(" ; "),
         resultats: ex.map((e) => `${nomExamen(e)} : ${resultatExamen(e)}`).join(" ; "),
         traitement: traitement.join(" ; "),
@@ -100,6 +105,7 @@ export function lignesRegistre(
           issue,
           c.mdoDeclare ? `MDO déclarée : ${c.mdoDeclare}` : "",
           c.dateControle ? `Contrôle le ${new Date(c.dateControle + "T00:00:00").toLocaleDateString("fr-FR")}` : "",
+          c.referenceEtatClinique ? `État : ${c.referenceEtatClinique}` : "",
           c.observations || "",
         ].filter(Boolean).join(" · "),
         prestataire: prest ? `${prest.nom}${prest.poste ? ` (${prest.poste})` : ""}` : "",

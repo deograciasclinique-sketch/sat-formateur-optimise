@@ -880,6 +880,14 @@ export interface Consultation {
     saturationO2?: number;
   };
   plainte: string;
+  /** Symptôme dominant choisi parmi les ordinogrammes du GDT (étape 2). */
+  symptomeDominant?: string;
+  /** Porte d'entrée retenue dans l'ordinogramme (étape 5 du GDT), ex. « entrée 1 : choc hémorragique ». */
+  porteEntree?: string;
+  /** Référence : état du patient et traitement donné avant le transfert. */
+  referenceEtatClinique?: "Stable" | "Sérieux" | "Critique" | "Urgence vitale";
+  referenceTraitementPrealable?: string;
+  ficheReferenceId?: string;
   // --- Anamnèse : histoire de la maladie ---
   /** Date de début des symptômes (exigée au registre par le guide SIMR). */
   dateDebutSymptomes?: string;

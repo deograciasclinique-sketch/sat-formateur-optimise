@@ -3,7 +3,7 @@ import { Pathology } from './clinicalTypes';
 export const INFECTIOUS_PATHOLOGIES: Pathology[] = [
   {
     id: 'paludisme-simple',
-    name: 'Paludisme Simple à Plasmodium falciparum',
+    name: 'Paludisme simple',
     synonyms: ['Accès palustre simple', 'Malaria non compliquée'],
     category: 'Infectieuse & Parasitaire',
     definition: 'Infection parasitaire érythrocytaire à Plasmodium falciparum sans signe de défaillance vitale, confirmée biologiquement.',
@@ -80,7 +80,7 @@ export const INFECTIOUS_PATHOLOGIES: Pathology[] = [
   },
   {
     id: 'paludisme-grave',
-    name: 'Paludisme Grave (Accès Pernicieux)',
+    name: 'Paludisme grave',
     synonyms: ['Neuropaludisme', 'Severe Malaria'],
     category: 'Infectieuse & Parasitaire',
     definition: 'Infection à Plasmodium falciparum compliquée d’au moins un signe clinique ou biologique de défaillance vitale (critères OMS).',
@@ -302,7 +302,7 @@ export const INFECTIOUS_PATHOLOGIES: Pathology[] = [
       optional: ['Glycorachie et protéinorachie', 'NFS (hyperleucocytose à polynucléaires)', 'Hémoculture']
     },
     differentialDiagnoses: [
-      { name: 'Neuropaludisme / Paludisme grave', distinguishingFeatures: 'Goutte épaisse/TDR positif, ponction lombaire montre un LCR clair normotendu.' },
+      { name: 'Paludisme grave (forme neurologique)', distinguishingFeatures: 'Goutte épaisse/TDR positif, ponction lombaire montre un LCR clair normotendu.' },
       { name: 'Hémorragie méningée', distinguishingFeatures: 'Apyrétique au début, céphalée brutale "en coup de tonnerre", LCR uniformément hémorragique incoagulable.' },
       { name: 'Méningisme fébrile sur pneumonie ou otite', distinguishingFeatures: 'Nuque souple en torsion latérale, LCR clair normal.' }
     ],

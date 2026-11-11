@@ -10,16 +10,26 @@ import AntecedentsEditeur, { ANTECEDENTS_VIDES, antecedentsRenseignes, resumeAnt
 import { jsPDF } from "jspdf";
 import { logActivity } from "../lib/activityLogger";
 import { interpreterDengue, dengueComplet } from "../modules/thlo/tdr";
-import { AntecedentsPatient, Consultation, RendezVous, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
+import { AntecedentsPatient, Consultation, FicheReference, RendezVous, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { imprimerRegistreConsultation, lignesRegistre } from "../lib/registreConsultation";
+import { SYMPTOMES_DOMINANTS, DIAGNOSTICS, alertePaludismeNomenclature, estDansNomenclature, PLAN_EXAMEN_GDT } from "../modules/nomenclature/gdt";
 import { blocGardeHtml, lirePharmaciesLocal, texteGardeZone, nomZone, zoneCabinet } from "../lib/pharmacies";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
 import EpidemioAssistant from "./EpidemioAssistant";
 import { ConduiteATenirEditor, ConduiteATenirListe, catASoinsInfirmiers, conduiteEnLignes, PrescInjectable, enListeCAT } from "./ConduiteATenir";
 import { MDODiseaseOverview } from "../modules/epidemio/mdoData";
+
+/** Rappel de la nomenclature du GDT sous un champ diagnostic. */
+function AlerteNomenclature({ texte }: { texte: string }) {
+  if (!texte.trim()) return null;
+  const palu = alertePaludismeNomenclature(texte);
+  if (palu) return <p className="text-2xs font-semibold text-warning-800 bg-warning-50 border border-warning-200 rounded-lg px-2 py-1 mt-1">⚠ {palu}</p>;
+  if (!estDansNomenclature(texte)) return <p className="text-2xs text-stone-500 mt-1">Hors liste du GDT : vérifiez l'appellation (la liste s'ouvre en tapant).</p>;
+  return <p className="text-2xs text-success-700 mt-1">✓ Appellation de la nomenclature du GDT</p>;
+}
 
 /** Résumé de l'histoire de la maladie (début, évolution, traitements reçus avant la venue). */
 export function texteHistoire(c: Consultation): string {
@@ -45,6 +55,9 @@ interface TabConsultationProps {
   currentUser?: Staff | null;
   laboExamens?: ExamenLabo[];
   rdvs?: any[];
+  /** Fiche de référence créée quand la décision est « Référer » (GDT, étape 4). */
+  ficheReferences?: FicheReference[];
+  onUpdateFicheReferences?: (refs: FicheReference[]) => void;
   /** Pour créer le rendez-vous de la visite de contrôle. */
   onUpdateRdvs?: (rdvs: RendezVous[]) => void;
   onUpdateLaboExamens?: (examens: ExamenLabo[]) => void;
@@ -82,6 +95,8 @@ export default function TabConsultation({
   isLoading,
   rdvs = [],
   onUpdateRdvs,
+  ficheReferences = [],
+  onUpdateFicheReferences,
   hospitalisations = [],
   onUpdateHospitalisations,
   urgences = [],
@@ -199,6 +214,11 @@ export default function TabConsultation({
   // Impression du registre de consultation (colonnes 1 à 17)
   const [regDebut, setRegDebut] = useState(getTodayStr());
   const [regFin, setRegFin] = useState(getTodayStr());
+  // GDT : symptôme dominant, porte d'entrée, référence
+  const [consSymptomeDominant, setConsSymptomeDominant] = useState("");
+  const [consPorteEntree, setConsPorteEntree] = useState("");
+  const [consRefEtat, setConsRefEtat] = useState<NonNullable<Consultation["referenceEtatClinique"]>>("Stable");
+  const [consRefTraitement, setConsRefTraitement] = useState("");
   // Anamnèse : histoire de la maladie
   const [consDateDebut, setConsDateDebut] = useState("");
   const [consHistoire, setConsHistoire] = useState("");
@@ -775,6 +795,10 @@ export default function TabConsultation({
     setVFr("");
     setVSpo2("");
     setConsPlainte("");
+    setConsSymptomeDominant("");
+    setConsPorteEntree("");
+    setConsRefEtat("Stable");
+    setConsRefTraitement("");
     setConsDateDebut("");
     setConsHistoire("");
     setConsTraitAvant([]);
@@ -827,6 +851,10 @@ export default function TabConsultation({
     setVFr(c.vitals?.frequenceRespiratoire ? String(c.vitals.frequenceRespiratoire) : "");
     setVSpo2(c.vitals?.saturationO2 ? String(c.vitals.saturationO2) : "");
     setConsPlainte(c.plainte || "");
+    setConsSymptomeDominant(c.symptomeDominant || "");
+    setConsPorteEntree(c.porteEntree || "");
+    setConsRefEtat(c.referenceEtatClinique || "Stable");
+    setConsRefTraitement(c.referenceTraitementPrealable || "");
     setConsDateDebut(c.dateDebutSymptomes || "");
     setConsHistoire(c.histoireMaladie || "");
     setConsTraitAvant(c.traitementsAvantVenue || []);
@@ -1059,6 +1087,8 @@ export default function TabConsultation({
         saturationO2: parseFloat(vSpo2) || undefined,
       },
       plainte: consPlainte.trim(),
+      symptomeDominant: consSymptomeDominant || undefined,
+      porteEntree: consPorteEntree.trim() || undefined,
       dateDebutSymptomes: consDateDebut || undefined,
       histoireMaladie: consHistoire.trim() || undefined,
       traitementsAvantVenue: consTraitAvant.length ? consTraitAvant : undefined,
@@ -1067,7 +1097,8 @@ export default function TabConsultation({
       dateControle: consDateControle || undefined,
       rdvControleId: pendingSource?.rdvControleId,
       antecedentsPatient: antecedentsRenseignes(consAntecedents) ? consAntecedents : undefined,
-      examenPhysique: consExamen.trim(),
+      // Lignes du plan d'examen du GDT laissées vides : retirées.
+      examenPhysique: consExamen.split("\n").filter((l) => !/:\s*$/.test(l)).join("\n").trim(),
       diagnostic: consDiagnostic.trim(),
       diagnosticFinal: consDiagnosticFinal.trim() || undefined,
       conduiteATenir: consCAT.length ? consCAT : undefined,
@@ -1082,6 +1113,9 @@ export default function TabConsultation({
       agentCode: currentUser?.codeEntree || "0000",
       decision: consDecision,
       referenceService: consDecision === "Référer vers un autre service" ? consReferenceService.trim() : undefined,
+      referenceEtatClinique: consDecision === "Référer vers un autre service" ? consRefEtat : undefined,
+      referenceTraitementPrealable: consDecision === "Référer vers un autre service" ? consRefTraitement.trim() || undefined : undefined,
+      ficheReferenceId: pendingSource?.ficheReferenceId,
       consignesInfirmier: consDecision === "Renvoi en salle infirmière" ? consConsignesInf.trim() : undefined,
       // Dossier repris depuis la salle infirmier/maternité : une fois le
       // médecin passé, il repasse par le circuit paiement des actes / clôture
@@ -1215,6 +1249,32 @@ export default function TabConsultation({
       }
     }
 
+    // Référence (GDT, étape 4) : fiche de référence / contre-référence, comptée au bilan mensuel.
+    if (newCons.decision === "Référer vers un autre service" && onUpdateFicheReferences && !newCons.ficheReferenceId) {
+      const fiche: FicheReference = {
+        id: generateUid(),
+        patient: newCons.patient,
+        age: newCons.age || undefined,
+        sexe: newCons.sexe,
+        contact: newCons.contact,
+        serviceActuel: "Consultation générale",
+        structureDestination: newCons.referenceService || "À préciser",
+        motifTransfert: [newCons.diagnosticFinal || newCons.diagnostic, newCons.symptomeDominant ? `Symptôme dominant : ${newCons.symptomeDominant}` : ""].filter(Boolean).join(" — "),
+        etatClinique: newCons.referenceEtatClinique || "Stable",
+        observationsCliniques: [
+          `T° ${newCons.vitals.temperature || "—"} · TA ${newCons.vitals.tensionArterielle || "—"} · Pouls ${newCons.vitals.pouls || "—"}${newCons.vitals.frequenceRespiratoire ? ` · FR ${newCons.vitals.frequenceRespiratoire}` : ""}${newCons.vitals.saturationO2 ? ` · SpO2 ${newCons.vitals.saturationO2} %` : ""}`,
+          newCons.examenPhysique ? `Examen : ${newCons.examenPhysique}` : "",
+          newCons.referenceTraitementPrealable ? `Traitement avant référence : ${newCons.referenceTraitementPrealable}` : "",
+        ].filter(Boolean).join("\n"),
+        medecinReferent: medecinNomForDecision,
+        dateReference: newCons.date || getTodayStr(),
+        heureReference: nowTime,
+        createdAt: new Date().toISOString(),
+      };
+      newCons.ficheReferenceId = fiche.id;
+      onUpdateFicheReferences([fiche, ...ficheReferences]);
+    }
+
     // Visite de contrôle : crée (ou met à jour) le rendez-vous correspondant.
     let rdvSuffix = "";
     if (onUpdateRdvs && newCons.dateControle) {
@@ -1261,7 +1321,7 @@ export default function TabConsultation({
     } else if (newCons.decision === "Admission aux urgences") {
       decisionSuffix = "\nUn dossier a été créé automatiquement dans le module Urgences.";
     } else if (newCons.decision === "Référer vers un autre service" && newCons.referenceService) {
-      decisionSuffix = `\nPatient référé vers : ${newCons.referenceService}.`;
+      decisionSuffix = `\nPatient référé vers : ${newCons.referenceService}.${newCons.ficheReferenceId ? " Fiche de référence créée (onglet Hospitalisations → fiches de référence, à imprimer)." : ""}`;
     }
 
     const shortfallSuffix = stockShortfallWarnings.length > 0
@@ -2438,6 +2498,27 @@ export default function TabConsultation({
               />
             </div>
 
+            {/* GDT étape 2 : symptôme dominant (ordinogramme) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className="text-2xs uppercase font-bold text-stone-500 block mb-0.5">Symptôme dominant (ordinogramme du GDT)</label>
+                <select value={consSymptomeDominant} onChange={(e) => setConsSymptomeDominant(e.target.value)}
+                  className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-stone-50 focus:bg-white focus:outline-none">
+                  <option value="">— Choisir —</option>
+                  {SYMPTOMES_DOMINANTS.map((g) => (
+                    <optgroup key={g.section} label={g.section}>
+                      {g.items.map((i) => <option key={i} value={i}>{i}</option>)}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-2xs uppercase font-bold text-stone-500 block mb-0.5">Porte d'entrée retenue</label>
+                <input type="text" placeholder="Ex : entrée 2 — fièvre sans signe de gravité" value={consPorteEntree} onChange={(e) => setConsPorteEntree(e.target.value)}
+                  className="w-full text-xs border border-stone-200 rounded-lg px-2 py-1.5 bg-stone-50 focus:bg-white focus:outline-none" />
+              </div>
+            </div>
+
             {/* Anamnèse : histoire de la maladie */}
             <div className="bg-stone-50 p-3 rounded-xl border border-stone-150 space-y-2">
               <span className="text-xs uppercase font-semibold tracking-wider text-primary-800 block">Histoire de la maladie</span>
@@ -2502,11 +2583,16 @@ export default function TabConsultation({
                   {isDictating === "examen" ? "Arrêter" : "Dicter"}
                 </button>
               </div>
+              {!consExamen.trim() && (
+                <button type="button" onClick={() => setConsExamen(PLAN_EXAMEN_GDT)} className="text-2xs font-bold text-primary-700 underline mb-1">
+                  Insérer le plan d'examen du GDT (tête aux pieds)
+                </button>
+              )}
               <textarea
                 placeholder="Ex: Conjonctives sub-ictériques, gorge propre, abdomen souple, poumons libres..."
                 value={consExamen}
                 onChange={(e) => setConsExamen(e.target.value)}
-                className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none h-16 resize-none"
+                className={`w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none resize-y ${consExamen.includes("\n") ? "h-40" : "h-16"}`}
               />
             </div>
 
@@ -2614,11 +2700,16 @@ export default function TabConsultation({
               </div>
               <input
                 type="text"
-                placeholder="Ex: Paludisme d'allure simple à Plasmodium"
+                placeholder="Tapez pour choisir dans la nomenclature du GDT (ex : Paludisme simple)"
+                list="nomenclature-gdt"
                 value={consDiagnostic}
                 onChange={(e) => setConsDiagnostic(e.target.value)}
                 className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
               />
+              <datalist id="nomenclature-gdt">
+                {DIAGNOSTICS.flatMap((g) => g.items).map((d) => <option key={d} value={d} />)}
+              </datalist>
+              <AlerteNomenclature texte={consDiagnostic} />
               <p className="text-xs text-stone-500 dark:text-stone-400 italic mt-1">
                 Le diagnostic final / de sortie pourra être ajouté plus tard depuis le dossier (bouton "Modifier"), une fois les résultats du laboratoire disponibles.
               </p>
@@ -2925,11 +3016,13 @@ export default function TabConsultation({
               </label>
               <input
                 type="text"
-                placeholder="Ex: Paludisme simple confirmé (GE positive) — à remplir une fois le diagnostic confirmé"
+                placeholder="Ex : Paludisme simple (TDR positif) — à remplir une fois le diagnostic confirmé"
+                list="nomenclature-gdt"
                 value={consDiagnosticFinal}
                 onChange={(e) => setConsDiagnosticFinal(e.target.value)}
                 className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none font-bold"
               />
+              <AlerteNomenclature texte={consDiagnosticFinal} />
               <p className="text-xs text-stone-500 dark:text-stone-400 italic mt-1">
                 Si les résultats du labo ne sont pas encore disponibles, laisse ce champ vide : tu pourras le compléter plus tard depuis le dossier (bouton "Modifier").
               </p>
@@ -2999,13 +3092,26 @@ export default function TabConsultation({
                 </div>
               )}
               {consDecision === "Référer vers un autre service" && (
-                <input
-                  type="text"
-                  placeholder="Ex: Maternité, CMA, Chirurgie..."
-                  value={consReferenceService}
-                  onChange={(e) => setConsReferenceService(e.target.value)}
-                  className="w-full mt-2 text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
-                />
+                <div className="mt-2 space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Structure / service de destination (ex : CMA, CHR, Chirurgie…)"
+                    value={consReferenceService}
+                    onChange={(e) => setConsReferenceService(e.target.value)}
+                    className="w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none"
+                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <select value={consRefEtat} onChange={(e) => setConsRefEtat(e.target.value as typeof consRefEtat)}
+                      className="text-xs border border-stone-200 rounded-lg px-2 py-2 bg-stone-50 focus:outline-none">
+                      {(["Stable", "Sérieux", "Critique", "Urgence vitale"] as const).map((e) => <option key={e} value={e}>État : {e}</option>)}
+                    </select>
+                    <input type="text" placeholder="Traitement donné avant la référence (voie veineuse, 1re dose…)" value={consRefTraitement} onChange={(e) => setConsRefTraitement(e.target.value)}
+                      className="sm:col-span-2 text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:outline-none" />
+                  </div>
+                  <p className="text-2xs text-info-700 bg-info-50 border border-info-100 rounded-lg px-2.5 py-1.5">
+                    Une fiche de référence / contre-référence est créée à l'enregistrement (GDT, étape 4) ; elle s'imprime depuis l'onglet Hospitalisations.
+                  </p>
+                </div>
               )}
               {(consDecision === "Hospitalisation" || consDecision === "Mise en observation") && (
                 <p className="text-2xs text-info-700 bg-info-50 border border-info-100 rounded-lg px-2.5 py-1.5 mt-2">
