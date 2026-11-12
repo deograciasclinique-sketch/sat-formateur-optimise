@@ -14,9 +14,15 @@
      stone    → reste la neutre native Tailwind (pas d'alias)
    ========================================================================== */
 @theme {
-  /* --- Taille de texte manquante entre 10px et 12px (labels/badges) --- */
-  --text-2xs: 0.6875rem; /* 11px */
-  --text-2xs--line-height: 1rem;
+  /* --- Tailles de texte agrandies pour la lisibilité (demande du cabinet) ---
+     2xs : 11 → 13 px · xs : 12 → 14 px · sm : 14 → 15 px.
+     Le réglage « Aa » de l'en-tête agrandit encore toute l'interface (html). */
+  --text-2xs: 0.8125rem; /* 13px */
+  --text-2xs--line-height: 1.125rem;
+  --text-xs: 0.875rem; /* 14px */
+  --text-xs--line-height: 1.25rem;
+  --text-sm: 0.9375rem; /* 15px */
+  --text-sm--line-height: 1.375rem;
 
   /* --- primary (alias de teal) --- */
   --color-primary-50: var(--color-teal-50);
@@ -184,3 +190,9 @@
   }
 }
 
+
+
+/* Réglage « Aa » (taille du texte) : appliqué à la racine, tout suit (rem). */
+html[data-taille-texte="grand"] { font-size: 112.5%; }
+html[data-taille-texte="tres-grand"] { font-size: 125%; }
+@media print { html[data-taille-texte] { font-size: 100%; } }

@@ -269,6 +269,18 @@ export default function App() {
     };
   }, []);
 
+  // Taille du texte (réglage par poste, gardé sur cet appareil)
+  const TAILLES_TEXTE = ["normal", "grand", "tres-grand"] as const;
+  const [tailleTexte, setTailleTexte] = useState<(typeof TAILLES_TEXTE)[number]>(() => {
+    try { const v = localStorage.getItem("dg_taille_texte"); return (TAILLES_TEXTE as readonly string[]).includes(v || "") ? (v as any) : "normal"; } catch { return "normal"; }
+  });
+  useEffect(() => {
+    if (tailleTexte === "normal") document.documentElement.removeAttribute("data-taille-texte");
+    else document.documentElement.setAttribute("data-taille-texte", tailleTexte);
+    try { localStorage.setItem("dg_taille_texte", tailleTexte); } catch { /* stockage indisponible */ }
+  }, [tailleTexte]);
+  const changerTailleTexte = () => setTailleTexte((t) => TAILLES_TEXTE[(TAILLES_TEXTE.indexOf(t) + 1) % TAILLES_TEXTE.length]);
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().then(() => {
@@ -2323,11 +2335,24 @@ export default function App() {
               </div>
             </div>
 
-            <div className="text-right hidden md:block">
+            <div className="text-right hidden xl:block">
               <div className="text-xs font-semibold text-stone-800">{patientsActifsCount} malades</div>
               <div className="text-xs text-stone-500 dark:text-stone-400 font-bold uppercase tracking-wider">Urgences & Obs en cours</div>
             </div>
             
+            <button
+              onClick={changerTailleTexte}
+              className={`px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer font-bold leading-none ${
+                theme === "dark"
+                  ? "bg-stone-800 border-stone-700 hover:bg-stone-700 text-stone-300 hover:text-white"
+                  : "bg-stone-50 border-stone-200 hover:bg-stone-100 text-stone-600 hover:text-stone-900"
+              }`}
+              title={`Taille du texte : ${tailleTexte === "normal" ? "normale" : tailleTexte === "grand" ? "grande" : "très grande"} (cliquer pour changer)`}
+            >
+              <span className="text-sm">A</span><span className={tailleTexte === "normal" ? "text-xs" : tailleTexte === "grand" ? "text-base" : "text-lg"}>a</span>
+              {tailleTexte !== "normal" && <span className="ml-0.5 text-2xs text-primary-600">{tailleTexte === "grand" ? "+" : "++"}</span>}
+            </button>
+
             <button
               onClick={toggleFullscreen}
               className={`p-2 rounded-lg border transition-all cursor-pointer ${
