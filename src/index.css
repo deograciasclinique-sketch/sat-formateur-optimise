@@ -196,3 +196,73 @@
 html[data-taille-texte="grand"] { font-size: 112.5%; }
 html[data-taille-texte="tres-grand"] { font-size: 125%; }
 @media print { html[data-taille-texte] { font-size: 100%; } }
+
+/* ---------------------------------------------------------------------------
+   Consultation générale — présentation « pas à pas » (.qx)
+   Même contenu que le formulaire complet ; seul l'habillage change :
+   libellés en minuscules lisibles, cases de saisie aérées, focus visible.
+   (CSS hors @layer : passe devant les utilitaires Tailwind des champs.)
+   --------------------------------------------------------------------------- */
+.qx .uppercase { text-transform: none; letter-spacing: 0; }
+.qx label { color: var(--color-stone-700); font-weight: 600; }
+.qx input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+.qx select,
+.qx textarea {
+  background-color: #fff;
+  border: 1px solid var(--color-stone-200);
+  border-radius: 0.875rem;
+  padding: 0.65rem 0.9rem;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  transition: border-color .15s, box-shadow .15s;
+}
+.qx input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):hover,
+.qx select:hover,
+.qx textarea:hover { border-color: var(--color-stone-300); }
+.qx input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):focus,
+.qx select:focus,
+.qx textarea:focus {
+  outline: none;
+  border-color: var(--color-teal-500);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--color-teal-200) 55%, transparent);
+}
+.qx input[type="checkbox"], .qx input[type="radio"] { accent-color: var(--color-teal-600); }
+/* sous-blocs (constantes, anamnèse…) : surfaces douces au lieu de cadres gris */
+.qx .bg-stone-50 { background-color: color-mix(in oklch, var(--color-teal-50) 45%, var(--color-stone-50)); }
+.qx .rounded-xl { border-radius: 1.25rem; }
+/* carte déjà encadrée placée dans le panneau : on retire son cadre */
+.qx-plat > .bg-white { border: 0; box-shadow: none; padding: 0; }
+.qx-plat > .bg-white > h3:first-child { display: none; }
+
+.qx-btn-suivant {
+  display: inline-flex; align-items: center; gap: .75rem;
+  padding: .7rem 1.1rem .7rem 1.25rem; border-radius: 9999px;
+  background: var(--color-teal-700); color: #fff; font-weight: 600; font-size: .9375rem;
+  transition: background-color .15s;
+}
+.qx-btn-suivant:hover { background: var(--color-teal-800); }
+.qx-btn-retour {
+  display: inline-flex; align-items: center; gap: .5rem;
+  padding: .6rem 1rem; border-radius: 9999px;
+  color: var(--color-stone-600); font-weight: 600; font-size: .875rem;
+}
+.qx-btn-retour:hover { background: var(--color-stone-100); color: var(--color-stone-900); }
+.qx-btn-suivant:focus-visible, .qx-btn-retour:focus-visible { outline: 2px solid var(--color-teal-500); outline-offset: 2px; }
+
+/* L'étape qui s'ouvre arrive en douceur (réponse au clic « Continuer »). */
+.qx-panneau { animation: qx-entree .28s ease-out; }
+@keyframes qx-entree { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .qx-panneau { animation: none; } }
+
+/* Thème sombre */
+.dark .qx-panneau { background-color: var(--color-stone-900); border-color: var(--color-stone-800); }
+.dark .qx input:not([type="checkbox"]):not([type="radio"]),
+.dark .qx select, .dark .qx textarea { background-color: var(--color-stone-950); border-color: var(--color-stone-700); color: var(--color-stone-100); }
+.dark .qx label { color: var(--color-stone-300); }
+
+/* Téléphone : grilles de 3-4 colonnes ramenées à 2, bouton « Continuer » sans sous-titre */
+@media (max-width: 640px) {
+  .qx .grid-cols-4, .qx .grid-cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qx .grid-cols-3 > .col-span-2 { grid-column: span 2 / span 2; }
+  .qx-btn-suivant .text-2xs { display: none; }
+}

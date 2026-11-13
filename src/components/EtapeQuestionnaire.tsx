@@ -2,15 +2,25 @@
  * Présentation « questionnaire pas à pas » de la consultation générale.
  *
  * Le contenu (les champs) reste exactement le même que le formulaire complet :
- * chaque bloc est simplement enveloppé dans une <Etape>. En mode questionnaire,
- * les étapes apparaissent l'une après l'autre au fur et à mesure que la
- * consultation avance ; les étapes déjà faites se replient (on peut les rouvrir).
- * En mode « formulaire complet », <Etape> n'ajoute rien : tout s'affiche comme avant.
+ * chaque bloc est enveloppé dans une <Etape>. En mode questionnaire, une seule
+ * étape s'affiche à la fois dans un grand panneau ; la frise du parcours patient
+ * (<RailEtapes>) montre les étapes faites, en cours et à venir, et permet de
+ * revenir sur une étape déjà faite. En mode « formulaire complet », <Etape>
+ * n'ajoute rien : tout s'affiche comme avant.
+ *
+ * L'habillage des champs (libellés, cases de saisie) est dans src/index.css (.qx).
  */
-import React, { useEffect, useRef, useState } from "react";
-import { CheckCircle, ChevronDown, ChevronUp, ArrowRight, ArrowLeft } from "lucide-react";
+import React, { useEffect, useRef } from "react";
+import {
+  Check, ArrowLeft, ArrowRight, UserRound, HeartPulse, Stethoscope, Lightbulb,
+  FlaskConical, ClipboardCheck, Signpost, Pill, type LucideIcon,
+} from "lucide-react";
 
 export type ModeConsultation = "complet" | "questionnaire";
+
+/** Une icône par étape, dans l'ordre de TITRES_ETAPES. */
+const ICONES: LucideIcon[] = [UserRound, HeartPulse, Stethoscope, Lightbulb, FlaskConical, ClipboardCheck, Signpost, Pill];
+const icone = (i: number) => ICONES[i] || ClipboardCheck;
 
 interface EtapeProps {
   index: number;
@@ -19,109 +29,148 @@ interface EtapeProps {
   etape: number;
   total: number;
   setEtape: (n: number) => void;
-  /** Texte d'aide affiché sous le titre de l'étape en cours. */
+  /** Titre de l'étape suivante (bouton « Continuer »). */
+  titres?: string[];
   aide?: string;
+  /** Classes ajoutées au panneau (placement dans la grille). */
+  className?: string;
+  /** Le contenu est déjà une carte : on retire son cadre dans le panneau. */
+  plat?: boolean;
   children: React.ReactNode;
 }
 
-export function Etape({ index, titre, mode, etape, total, setEtape, aide, children }: EtapeProps) {
-  const [rouverte, setRouverte] = useState(false);
+export function Etape({ index, titre, mode, etape, total, setEtape, titres, aide, className = "", plat, children }: EtapeProps) {
   const ref = useRef<HTMLDivElement>(null);
   const courante = index === etape;
 
-  // L'étape qui vient d'apparaître est amenée à l'écran.
+  // À chaque changement d'étape, le haut du panneau revient à l'écran.
   useEffect(() => {
-    if (mode === "questionnaire" && courante && index > 0) {
-      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (mode === "questionnaire" && courante) {
+      const r = ref.current?.getBoundingClientRect();
+      if (r && r.top < 0) ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-    if (!courante) setRouverte(false);
-  }, [courante, mode, index]);
+  }, [courante, mode]);
 
   if (mode !== "questionnaire") return <>{children}</>;
-  if (index > etape) return null;
+  if (!courante) return null;
 
-  // Étape déjà faite : repliée, on peut la rouvrir pour corriger.
-  if (index < etape) {
-    return (
-      <div className="rounded-xl border border-success-200 bg-success-50/40">
-        <button type="button" onClick={() => setRouverte(!rouverte)} className="w-full px-3 py-2 flex items-center justify-between text-left">
-          <span className="text-xs font-bold text-success-800 flex items-center gap-1.5">
-            <CheckCircle className="w-4 h-4" /> {index + 1}. {titre}
-          </span>
-          <span className="text-2xs font-semibold text-stone-500 flex items-center gap-1">
-            {rouverte ? <>Refermer <ChevronUp className="w-3.5 h-3.5" /></> : <>Revoir / corriger <ChevronDown className="w-3.5 h-3.5" /></>}
-          </span>
-        </button>
-        {rouverte && <div className="p-3 pt-0 space-y-3">{children}</div>}
-      </div>
-    );
-  }
-
-  // Étape en cours.
+  const Icone = icone(index);
   const derniere = index === total - 1;
+  const suivante = titres?.[index + 1];
+
   return (
-    <div ref={ref} className="rounded-2xl border-2 border-primary-300 bg-white p-4 space-y-3 shadow-sm scroll-mt-4">
-      <div className="flex items-baseline justify-between gap-2 border-b border-stone-100 pb-2">
-        <h4 className="text-sm font-bold text-primary-800">
-          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary-600 text-white text-xs mr-2">{index + 1}</span>
-          {titre}
-        </h4>
-        <span className="text-2xs font-semibold text-stone-500 whitespace-nowrap">Étape {index + 1} / {total}</span>
-      </div>
-      {aide && <p className="text-2xs text-stone-500 -mt-1">{aide}</p>}
-      <div className="space-y-3">{children}</div>
-      <div className="flex items-center justify-between gap-2 pt-2 border-t border-stone-100">
-        {index > 0 ? (
-          <button type="button" onClick={() => setEtape(index - 1)} className="px-3 py-2 text-xs font-bold rounded-lg border border-stone-300 text-stone-600 flex items-center gap-1.5">
-            <ArrowLeft className="w-4 h-4" /> Précédent
-          </button>
-        ) : <span />}
-        {!derniere && (
-          <button type="button" onClick={() => setEtape(index + 1)} className="px-4 py-2 text-xs font-bold rounded-lg bg-primary-600 hover:bg-primary-700 text-white flex items-center gap-1.5">
-            Suivant <ArrowRight className="w-4 h-4" />
-          </button>
-        )}
-      </div>
-    </div>
+    <section
+      ref={ref}
+      key={index}
+      aria-labelledby={`qx-titre-${index}`}
+      className={`qx qx-panneau scroll-mt-24 rounded-[1.75rem] bg-white border border-stone-200/80 shadow-[0_1px_2px_rgba(15,23,42,.04),0_12px_32px_-16px_rgba(15,118,110,.25)] ${className}`}
+    >
+      <header className="px-5 sm:px-8 pt-6 sm:pt-7 pb-5 flex items-start gap-4">
+        <span className="shrink-0 w-12 h-12 rounded-2xl bg-primary-50 text-primary-700 flex items-center justify-center ring-1 ring-primary-100">
+          <Icone className="w-6 h-6" strokeWidth={1.75} />
+        </span>
+        <div className="min-w-0">
+          <p className="text-2xs font-semibold text-primary-700">Étape {index + 1} sur {total}</p>
+          <h4 id={`qx-titre-${index}`} className="text-xl sm:text-2xl font-semibold text-stone-900 leading-tight tracking-tight">{titre}</h4>
+          {aide && <p className="text-xs text-stone-500 mt-1 max-w-prose">{aide}</p>}
+        </div>
+      </header>
+
+      <div className={`px-5 sm:px-8 pb-6 space-y-4 ${plat ? "qx-plat" : ""}`}>{children}</div>
+
+      {(index > 0 || !derniere) && (
+        <footer className="sticky bottom-0 z-10 px-5 sm:px-8 py-4 border-t border-stone-100 bg-white/90 backdrop-blur rounded-b-[1.75rem] flex items-center justify-between gap-3">
+          {index > 0 ? (
+            <button type="button" onClick={() => setEtape(index - 1)} className="qx-btn-retour">
+              <ArrowLeft className="w-4 h-4" /> Retour
+            </button>
+          ) : <span />}
+          {!derniere && (
+            <button type="button" onClick={() => setEtape(index + 1)} className="qx-btn-suivant">
+              <span className="flex flex-col items-start leading-tight">
+                <span>Continuer</span>
+                {suivante && <span className="text-2xs font-normal text-primary-100">{suivante}</span>}
+              </span>
+              <ArrowRight className="w-5 h-5" />
+            </button>
+          )}
+        </footer>
+      )}
+    </section>
   );
 }
 
-/** Barre de progression + choix de la présentation. */
-export function ChoixPresentation({ mode, setMode, etape, titres, setEtape }: {
-  mode: ModeConsultation;
-  setMode: (m: ModeConsultation) => void;
-  etape: number;
+/**
+ * Frise du parcours patient : verticale sur ordinateur (à gauche, reste visible),
+ * horizontale et défilante sur téléphone. Les étapes faites sont cliquables.
+ */
+export function RailEtapes({ titres, etape, setEtape, patient, className = "" }: {
   titres: string[];
+  etape: number;
   setEtape: (n: number) => void;
+  patient?: string;
+  className?: string;
 }) {
+  const pct = Math.round((etape / Math.max(1, titres.length - 1)) * 100);
+  return (
+    <nav aria-label="Étapes de la consultation" className={`lg:sticky lg:top-24 self-start ${className}`}>
+      <div className="rounded-[1.75rem] bg-white/70 border border-stone-200/80 p-4 lg:p-5">
+        <p className="text-2xs text-stone-500">Consultation de médecine générale</p>
+        <p className="text-base font-semibold text-stone-900 truncate" title={patient || undefined}>{patient?.trim() || "Nouveau patient"}</p>
+        <div className="mt-3 h-1.5 rounded-full bg-stone-100 overflow-hidden" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+          <div className="h-full rounded-full bg-primary-600 transition-[width] duration-500" style={{ width: `${pct}%` }} />
+        </div>
+
+        <ol className="mt-4 flex lg:flex-col gap-2 lg:gap-0 overflow-x-auto lg:overflow-visible -mx-1 px-1 pb-1 lg:pb-0">
+          {titres.map((t, i) => {
+            const faite = i < etape, enCours = i === etape;
+            const Icone = icone(i);
+            return (
+              <li key={t} className="relative shrink-0 lg:shrink">
+                {/* trait reliant les étapes (ordinateur) */}
+                {i < titres.length - 1 && (
+                  <span aria-hidden className={`hidden lg:block absolute left-[19px] top-10 bottom-0 w-0.5 ${faite ? "bg-primary-500" : "bg-stone-200"}`} />
+                )}
+                <button
+                  type="button"
+                  disabled={i > etape}
+                  onClick={() => setEtape(i)}
+                  aria-current={enCours ? "step" : undefined}
+                  className={`relative w-full flex items-center gap-3 rounded-2xl lg:py-2 pr-3 pl-0.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500
+                    ${enCours ? "lg:bg-primary-50/70" : faite ? "hover:bg-stone-50" : "cursor-default"}`}
+                >
+                  <span className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center border-2 transition-colors
+                    ${faite ? "bg-primary-600 border-primary-600 text-white" : enCours ? "bg-white border-primary-600 text-primary-700" : "bg-white border-stone-200 text-stone-400"}`}>
+                    {faite ? <Check className="w-5 h-5" strokeWidth={2.5} /> : <Icone className="w-[18px] h-[18px]" strokeWidth={1.75} />}
+                  </span>
+                  <span className={`hidden lg:block text-xs leading-snug ${enCours ? "font-semibold text-primary-800" : faite ? "text-stone-700" : "text-stone-400"}`}>{t}</span>
+                  {enCours && <span className="lg:hidden text-xs font-semibold text-primary-800 whitespace-nowrap">{t}</span>}
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+    </nav>
+  );
+}
+
+/** Choix de la présentation (questionnaire / formulaire complet). */
+export function ChoixPresentation({ mode, setMode }: { mode: ModeConsultation; setMode: (m: ModeConsultation) => void }) {
   const btn = (m: ModeConsultation, label: string) => (
     <button
       type="button"
       onClick={() => setMode(m)}
-      className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${mode === m ? "bg-primary-600 text-white shadow-xs" : "text-stone-600 hover:bg-stone-100"}`}
+      aria-pressed={mode === m}
+      className={`px-3.5 py-1.5 text-xs font-semibold rounded-full transition-colors ${mode === m ? "bg-white text-primary-800 shadow-sm ring-1 ring-stone-200" : "text-stone-500 hover:text-stone-800"}`}
     >
       {label}
     </button>
   );
   return (
-    <div className="space-y-2">
-      <div className="inline-flex p-1 rounded-xl bg-stone-50 border border-stone-200 gap-1">
-        {btn("questionnaire", "Questionnaire pas à pas")}
-        {btn("complet", "Formulaire complet")}
-      </div>
-      {mode === "questionnaire" && (
-        <div className="flex gap-1" aria-label="Avancement de la consultation">
-          {titres.map((t, i) => (
-            <button
-              key={t}
-              type="button"
-              title={`${i + 1}. ${t}`}
-              onClick={() => i <= etape && setEtape(i)}
-              className={`h-2 flex-1 rounded-full transition-all ${i < etape ? "bg-success-500 cursor-pointer" : i === etape ? "bg-primary-600" : "bg-stone-200 cursor-default"}`}
-            />
-          ))}
-        </div>
-      )}
+    <div className="inline-flex p-1 rounded-full bg-stone-100 gap-0.5">
+      {btn("questionnaire", "Pas à pas")}
+      {btn("complet", "Formulaire complet")}
     </div>
   );
 }
