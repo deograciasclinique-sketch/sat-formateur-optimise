@@ -20,7 +20,7 @@ import { NATIF } from "../lib/natif";
 import { blocGardeHtml, lirePharmaciesLocal, texteGardeZone, nomZone, zoneCabinet } from "../lib/pharmacies";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
-import { Etape, ChoixPresentation, type ModeConsultation } from "./EtapeQuestionnaire";
+import { Etape, ChoixPresentation, RailEtapes, type ModeConsultation } from "./EtapeQuestionnaire";
 import EpidemioAssistant from "./EpidemioAssistant";
 import { ConduiteATenirEditor, ConduiteATenirListe, catASoinsInfirmiers, conduiteEnLignes, PrescInjectable, enListeCAT } from "./ConduiteATenir";
 import { MDODiseaseOverview } from "../modules/epidemio/mdoData";
@@ -309,7 +309,7 @@ export default function TabConsultation({
     try { localStorage.setItem(CLE_MODE_CONSULT, m); } catch { /* stockage indisponible */ }
   };
   const [etapeConsult, setEtapeConsult] = useState(0);
-  const propsEtape = { mode: modeConsult, etape: etapeConsult, total: TITRES_ETAPES.length, setEtape: setEtapeConsult };
+  const propsEtape = { mode: modeConsult, etape: etapeConsult, total: TITRES_ETAPES.length, setEtape: setEtapeConsult, titres: TITRES_ETAPES };
   const [editPlainte, setEditPlainte] = useState("");
   const [editExamenPhysique, setEditExamenPhysique] = useState("");
   const [editDiagnostic, setEditDiagnostic] = useState("");
@@ -2070,14 +2070,29 @@ export default function TabConsultation({
         </div>
       )}
 
-      <div className={`grid grid-cols-1 ${modeConsult === "questionnaire" ? "max-w-3xl mx-auto" : "lg:grid-cols-2"} gap-6`}>
+      {modeConsult === "questionnaire" && (
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h3 className="text-lg font-semibold text-stone-900 tracking-tight">Nouvelle consultation</h3>
+          <ChoixPresentation mode={modeConsult} setMode={setModeConsult} />
+        </div>
+      )}
+      <div className={modeConsult === "questionnaire"
+        ? "grid grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)] gap-5 lg:gap-8 max-w-6xl"
+        : "grid grid-cols-1 lg:grid-cols-2 gap-6"}>
+        {modeConsult === "questionnaire" && (
+          <RailEtapes titres={TITRES_ETAPES} etape={etapeConsult} setEtape={setEtapeConsult} patient={consPatient} className="lg:row-span-2" />
+        )}
         {/* Core Consultation form wizard */}
-        <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4">
-          <h3 className="text-base font-serif font-bold text-stone-900 border-b border-stone-100 pb-3 flex items-center gap-2">
-            <Plus className="w-5 h-5 text-primary-700" />
-            Nouvelle Consultation de Médecine Générale
-          </h3>
-          <ChoixPresentation mode={modeConsult} setMode={setModeConsult} etape={etapeConsult} titres={TITRES_ETAPES} setEtape={setEtapeConsult} />
+        <div className={modeConsult === "questionnaire" ? "lg:col-start-2 space-y-4 min-w-0" : "bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4"}>
+          {modeConsult !== "questionnaire" && (
+            <div className="flex items-center justify-between gap-3 flex-wrap border-b border-stone-100 pb-3">
+              <h3 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
+                <Plus className="w-5 h-5 text-primary-700" />
+                Nouvelle Consultation de Médecine Générale
+              </h3>
+              <ChoixPresentation mode={modeConsult} setMode={setModeConsult} />
+            </div>
+          )}
 
           {suiviDe && !pendingSource && (
             <div className="bg-info-50 border border-info-200 text-info-900 px-3 py-2.5 rounded-xl text-xs space-y-1">
@@ -3195,7 +3210,7 @@ export default function TabConsultation({
         </div>
 
         {/* Prescription details builder */}
-        <Etape index={7} titre={TITRES_ETAPES[7]} aide="Rédigez l'ordonnance puis validez la fiche." {...propsEtape}>
+        <Etape index={7} titre={TITRES_ETAPES[7]} aide="Rédigez l'ordonnance puis validez la fiche." className="lg:col-start-2" plat {...propsEtape}>
         <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4 self-start">
           <h3 className="text-base font-serif font-bold text-stone-900 border-b border-stone-100 pb-3 flex items-center gap-2">
             <FileText className="w-5 h-5 text-primary-700" />
