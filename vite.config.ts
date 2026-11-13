@@ -28,6 +28,8 @@ const REMPLACEMENTS: [RegExp, string][] = [
   [/acheteur@deogracias\.com/g, 'acheteur@clinique.bf'],
   [/cabinet-deogracias-/g, 'clinique-'],
   [/deogracias_sauvegarde_/g, 'sauvegarde_'],
+  [/DEO - GRACIAS/g, 'DÉMO'],
+  [/Secteur 10 Yeguere/g, 'Secteur ……'],
   [/DEO[ -]GRACIAS/g, 'DÉMO'],
   [/Deo[ -]Gracias/g, 'Démo'],
 ];
