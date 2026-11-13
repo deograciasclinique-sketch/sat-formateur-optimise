@@ -8,7 +8,7 @@ import { ConsultationPrenatale, Accouchement, Staff, ExamenLabo, EchographieCPN,
 import SalleAccouchement from "./SalleAccouchement";
 import { alertesEnCours, taElevee } from "../lib/lcg";
 import { generateUid, getTodayStr } from "../data";
-import DeclarationNaissanceModal, { imprimerDeclaration, imprimerDeclarationVierge } from "./DeclarationNaissance";
+import DeclarationNaissanceModal, { imprimerDeclaration, imprimerDeclarationVierge, partagerPdfDeclaration } from "./DeclarationNaissance";
 import { Plus, Trash2, Calendar, Clipboard, Heart, HelpCircle, CheckCircle, FlaskConical, Upload, Image, Download, Eye, X, AlertTriangle, FolderOpen, UserPlus, Pencil } from "lucide-react";
 import { logActivity } from "../lib/activityLogger";
 
@@ -1214,6 +1214,7 @@ export default function TabMaternite({
                             <div className="flex gap-2">
                               <button type="button" onClick={() => setDeclarationAccId(a.id)} className="text-xs font-semibold text-pink-700 hover:underline">Voir / modifier</button>
                               <button type="button" onClick={() => imprimerDeclaration(a, a.declarationNaissance!, staff)} className="text-xs font-semibold text-stone-600 hover:underline">Imprimer</button>
+                              <button type="button" onClick={() => partagerPdfDeclaration(a, a.declarationNaissance!, staff)} title="Envoyer ou télécharger la déclaration en PDF" className="text-xs font-semibold text-blue-700 hover:underline">PDF</button>
                             </div>
                           </div>
                         ) : (

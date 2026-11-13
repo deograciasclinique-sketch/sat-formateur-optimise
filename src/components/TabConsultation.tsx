@@ -20,6 +20,7 @@ import { NATIF } from "../lib/natif";
 import { blocGardeHtml, lirePharmaciesLocal, texteGardeZone, nomZone, zoneCabinet } from "../lib/pharmacies";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
+import { Etape, ChoixPresentation, type ModeConsultation } from "./EtapeQuestionnaire";
 import EpidemioAssistant from "./EpidemioAssistant";
 import { ConduiteATenirEditor, ConduiteATenirListe, catASoinsInfirmiers, conduiteEnLignes, PrescInjectable, enListeCAT } from "./ConduiteATenir";
 import { MDODiseaseOverview } from "../modules/epidemio/mdoData";
@@ -99,6 +100,10 @@ interface TabConsultationProps {
   // à la prescription, avec leur prix, pour un report automatique en facture.
   actes?: ActeTarifaire[];
 }
+
+/** Étapes de la présentation « questionnaire pas à pas » (même contenu que le formulaire complet). */
+const TITRES_ETAPES = ["Patient & prestataire", "Constantes à l'admission", "Motif, anamnèse & examen clinique", "Diagnostic de présomption", "Examens, laboratoire & documents", "Diagnostic final, conduite à tenir & conseils", "Décision", "Ordonnance & enregistrement"];
+const CLE_MODE_CONSULT = "dg_mode_consultation";
 
 export default function TabConsultation({
   consultations,
@@ -294,6 +299,17 @@ export default function TabConsultation({
 
   // --- Mode édition d'un dossier déjà enregistré ---
   const [isEditingDetail, setIsEditingDetail] = useState(false);
+  // Présentation de la consultation : questionnaire pas à pas (par défaut) ou formulaire complet.
+  // Choix mémorisé sur l'appareil.
+  const [modeConsult, setModeConsultState] = useState<ModeConsultation>(() => {
+    try { return localStorage.getItem(CLE_MODE_CONSULT) === "complet" ? "complet" : "questionnaire"; } catch { return "questionnaire"; }
+  });
+  const setModeConsult = (m: ModeConsultation) => {
+    setModeConsultState(m);
+    try { localStorage.setItem(CLE_MODE_CONSULT, m); } catch { /* stockage indisponible */ }
+  };
+  const [etapeConsult, setEtapeConsult] = useState(0);
+  const propsEtape = { mode: modeConsult, etape: etapeConsult, total: TITRES_ETAPES.length, setEtape: setEtapeConsult };
   const [editPlainte, setEditPlainte] = useState("");
   const [editExamenPhysique, setEditExamenPhysique] = useState("");
   const [editDiagnostic, setEditDiagnostic] = useState("");
@@ -792,6 +808,7 @@ export default function TabConsultation({
   );
 
   const resetConsultationForm = () => {
+    setEtapeConsult(0);
     setSuiviDe(null);
     setConsPatient("");
     setConsDate(getTodayStr());
@@ -848,6 +865,7 @@ export default function TabConsultation({
   };
 
   const handleReprendreDossierInfirmier = (c: Consultation) => {
+    setEtapeConsult(0);
     setSuiviDe(null);
     setPendingSource(c);
     setConsPatient(c.patient || "");
@@ -926,6 +944,7 @@ export default function TabConsultation({
    * la nouvelle fiche est rattachée à la précédente (suiteDe) et apparaît dans le même dossier.
    */
   const handleContinuerDossier = (c: Consultation, modeSuivi = true) => {
+    setEtapeConsult(0);
     // Depuis l'alerte « Patient similaire » pendant qu'un dossier transféré (ou une consultation
     // en cours) est ouvert : on ne fait que reprendre l'identité, SANS abandonner ce dossier
     // (sinon l'enregistrement créait une nouvelle fiche et le dossier restait dans la file).
@@ -2051,13 +2070,14 @@ export default function TabConsultation({
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className={`grid grid-cols-1 ${modeConsult === "questionnaire" ? "max-w-3xl mx-auto" : "lg:grid-cols-2"} gap-6`}>
         {/* Core Consultation form wizard */}
         <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4">
           <h3 className="text-base font-serif font-bold text-stone-900 border-b border-stone-100 pb-3 flex items-center gap-2">
             <Plus className="w-5 h-5 text-primary-700" />
             Nouvelle Consultation de Médecine Générale
           </h3>
+          <ChoixPresentation mode={modeConsult} setMode={setModeConsult} etape={etapeConsult} titres={TITRES_ETAPES} setEtape={setEtapeConsult} />
 
           {suiviDe && !pendingSource && (
             <div className="bg-info-50 border border-info-200 text-info-900 px-3 py-2.5 rounded-xl text-xs space-y-1">
@@ -2094,6 +2114,7 @@ export default function TabConsultation({
           )}
 
           <div className="space-y-3">
+            <Etape index={0} titre={TITRES_ETAPES[0]} aide="Identité du patient, date, praticien et téléphone." {...propsEtape}>
             <div className="grid grid-cols-4 gap-2">
               <div className="col-span-2">
                 <div className="flex justify-between items-end mb-1">
@@ -2371,7 +2392,9 @@ export default function TabConsultation({
               />
               {!consContact.trim() && <p className="text-2xs text-amber-700 mt-0.5">Numéro absent : à demander au patient ou au secrétariat.</p>}
             </div>
+            </Etape>
 
+            <Etape index={1} titre={TITRES_ETAPES[1]} aide="Prenez ou vérifiez les constantes." {...propsEtape}>
             {/* Vitals sub-panel */}
             <div className="bg-stone-50 p-3 rounded-xl border border-stone-150 space-y-2">
               <span className="text-xs uppercase font-semibold tracking-wider text-primary-800 flex items-center gap-1">
@@ -2477,7 +2500,9 @@ export default function TabConsultation({
                 </div>
               )}
             </div>
+            </Etape>
 
+            <Etape index={2} titre={TITRES_ETAPES[2]} aide="Signes dominants, histoire de la maladie, antécédents et examen physique." {...propsEtape}>
             {/* Assistant de Surveillance Épidémiologique & Aide au Diagnostic
                 (module fusionné : évaluation immédiate des constantes selon
                 seuils SIMR/PCIME, catalogue de pathologies, registre MDO) */}
@@ -2626,7 +2651,9 @@ export default function TabConsultation({
                 className={`w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none resize-y ${consExamen.includes("\n") ? "h-40" : "h-16"}`}
               />
             </div>
+            </Etape>
 
+            <Etape index={3} titre={TITRES_ETAPES[3]} aide="Posez le diagnostic de présomption (l'assistant peut aider)." {...propsEtape}>
             {/* AI Smart Assistant Trigger */}
             <div className="flex justify-end">
               <button
@@ -2746,7 +2773,9 @@ export default function TabConsultation({
                 Le diagnostic final / de sortie pourra être ajouté plus tard depuis le dossier (bouton "Modifier"), une fois les résultats du laboratoire disponibles.
               </p>
             </div>
+            </Etape>
 
+            <Etape index={4} titre={TITRES_ETAPES[4]} aide="Prescrivez les examens, joignez les résultats, photos ou documents." {...propsEtape}>
             {/* Direct Camera module during consultation creation */}
             <div className="pt-3 border-t border-stone-100">
               <div className="flex items-center justify-between mb-2">
@@ -3037,7 +3066,9 @@ export default function TabConsultation({
                 </div>
               </div>
             )}
+            </Etape>
 
+            <Etape index={5} titre={TITRES_ETAPES[5]} aide="Après les résultats : diagnostic final, conduite à tenir, conseils et visite de contrôle." {...propsEtape}>
             {/* Diagnostic de certitude / final, après examens du labo */}
             <div className="pt-3 border-t border-stone-100">
               <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1">
@@ -3093,7 +3124,9 @@ export default function TabConsultation({
               </div>
               {consDateControle && <p className="text-2xs text-stone-500">Un rendez-vous « Suivi » sera créé dans l'onglet Rendez-vous.</p>}
             </div>
+            </Etape>
 
+            <Etape index={6} titre={TITRES_ETAPES[6]} aide="Orientation du patient (domicile, observation, soins, référence…)." {...propsEtape}>
             {/* Décision de Consultation Générale (cahier des charges, points 1-3) */}
             <div className="pt-3 border-t border-stone-100">
               <label className="text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-2">
@@ -3157,10 +3190,12 @@ export default function TabConsultation({
                 </p>
               )}
             </div>
+            </Etape>
           </div>
         </div>
 
         {/* Prescription details builder */}
+        <Etape index={7} titre={TITRES_ETAPES[7]} aide="Rédigez l'ordonnance puis validez la fiche." {...propsEtape}>
         <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs space-y-4 self-start">
           <h3 className="text-base font-serif font-bold text-stone-900 border-b border-stone-100 pb-3 flex items-center gap-2">
             <FileText className="w-5 h-5 text-primary-700" />
@@ -3373,6 +3408,7 @@ export default function TabConsultation({
             </button>
           </div>
         </div>
+        </Etape>
       </div>
 
       {/* Consultations medical ledger */}
