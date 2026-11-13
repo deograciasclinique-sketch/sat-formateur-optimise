@@ -11,7 +11,7 @@
  */
 
 import React, { useMemo, useState } from "react";
-import { X, Printer, Save, FileText, ChevronDown, ChevronUp, Send, Settings2, RotateCcw } from "lucide-react";
+import { X, Printer, Save, FileText, ChevronDown, ChevronUp, Send, Settings2, RotateCcw, Share2, Download } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { Accouchement, ConsultationPrenatale, DeclarationNaissance, PersonneDeclaration, Staff } from "../types";
 import { getTodayStr, getClinicProfile, safeGet } from "../data";
@@ -248,10 +248,10 @@ export function genererPdfDeclaration(a: Accouchement, d: DeclarationNaissance, 
 }
 
 /** Message WhatsApp accompagnant la déclaration. */
-export function messageWhatsAppDeclaration(a: Accouchement, d: DeclarationNaissance, staff: Staff[], pour: "famille" | "etat", modele?: ModeleDeclaration): string {
+export function messageWhatsAppDeclaration(a: Accouchement, d: DeclarationNaissance, staff: Staff[], pour: "famille" | "etat" | "autre", modele?: ModeleDeclaration): string {
   const c = contenu(a, d, staff, modele || lireModele());
   return [
-    pour === "famille" ? "Bonjour," : "Bonjour, à l'attention du service de l'état civil,",
+    pour === "etat" ? "Bonjour, à l'attention du service de l'état civil," : "Bonjour,",
     "",
     ...lignesEnTete(c.m),
     `${c.m.pays} — ${c.m.devise}`,
@@ -263,8 +263,33 @@ export function messageWhatsAppDeclaration(a: Accouchement, d: DeclarationNaissa
     "",
     pour === "famille"
       ? "Présentez l'original signé et cacheté au centre d'état civil pour établir l'acte de naissance de l'enfant."
-      : "Le document est joint (PDF).",
+      : "La déclaration est jointe (PDF).",
   ].join("\n");
+}
+
+/**
+ * Envoie la déclaration en PDF à n'importe qui :
+ *  • téléphone / tablette : menu de partage (WhatsApp, Gmail, Bluetooth, Messenger…) ;
+ *  • ordinateur (ou partage refusé) : le PDF est téléchargé.
+ * Renvoie "partage" | "telecharge" | "annule".
+ */
+export async function partagerPdfDeclaration(a: Accouchement, d: DeclarationNaissance, staff: Staff[], modele?: ModeleDeclaration, telechargerSeulement = false): Promise<"partage" | "telecharge" | "annule"> {
+  const nomFichier = `Declaration_naissance_${d.numero || "sans_numero"}.pdf`;
+  const pdf = new File([genererPdfDeclaration(a, d, staff, modele)], nomFichier, { type: "application/pdf" });
+  if (!telechargerSeulement && (navigator as any).canShare?.({ files: [pdf] })) {
+    try {
+      await navigator.share({ files: [pdf], title: `Déclaration de naissance N° ${d.numero}`, text: messageWhatsAppDeclaration(a, d, staff, "autre", modele) });
+      return "partage";
+    } catch (e: any) {
+      if (e?.name === "AbortError") return "annule";
+    }
+  }
+  const url = URL.createObjectURL(pdf);
+  const lien = document.createElement("a");
+  lien.href = url; lien.download = nomFichier;
+  document.body.appendChild(lien); lien.click(); lien.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  return "telecharge";
 }
 
 /** Un exemplaire de la déclaration en HTML (impression et aperçu). */
@@ -500,6 +525,18 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
   };
 
   const peutPartager = typeof navigator !== "undefined" && !!(navigator as any).canShare;
+
+  /** PDF après remplissage : enregistre puis partage (téléphone) ou télécharge (ordinateur). */
+  const envoyerPdf = async (telechargerSeulement: boolean) => {
+    const ok = valider();
+    if (!ok) return;
+    onSave(ok);
+    setD(ok);
+    const r = await partagerPdfDeclaration(a, ok, staff, modele, telechargerSeulement);
+    if (r === "telecharge" && !telechargerSeulement) {
+      alert(`Le PDF « Declaration_naissance_${ok.numero}.pdf » a été téléchargé.\nVous pouvez maintenant le joindre à un e-mail, un message WhatsApp, etc.`);
+    }
+  };
 
   const input = "w-full text-xs border border-stone-200 rounded-lg px-3 py-2 bg-stone-50 focus:bg-white focus:outline-none";
   const lbl = "text-xs uppercase font-semibold tracking-wider text-stone-500 block mb-1";
@@ -773,7 +810,11 @@ export default function DeclarationNaissanceModal({ accouchement: a, accouchemen
 
         <div className="p-4 border-t border-stone-100 flex flex-wrap justify-end gap-2">
           <button type="button" onClick={() => ouvrirEnvoi("famille")} className="px-3 py-2 text-xs font-bold rounded-lg border border-[#25D366] text-emerald-800 flex items-center gap-1.5"><Send className="w-4 h-4" /> WhatsApp famille</button>
-          <button type="button" onClick={() => ouvrirEnvoi("etat")} className="px-3 py-2 text-xs font-bold rounded-lg border border-[#25D366] text-emerald-800 flex items-center gap-1.5 mr-auto"><Send className="w-4 h-4" /> WhatsApp état civil</button>
+          <button type="button" onClick={() => ouvrirEnvoi("etat")} className="px-3 py-2 text-xs font-bold rounded-lg border border-[#25D366] text-emerald-800 flex items-center gap-1.5"><Send className="w-4 h-4" /> WhatsApp état civil</button>
+          {peutPartager && (
+            <button type="button" onClick={() => envoyerPdf(false)} title="Envoyer le PDF à la patiente ou à quelqu'un d'autre (WhatsApp, e-mail, Bluetooth…)" className="px-3 py-2 text-xs font-bold rounded-lg border border-blue-600 text-blue-700 flex items-center gap-1.5"><Share2 className="w-4 h-4" /> Envoyer le PDF à…</button>
+          )}
+          <button type="button" onClick={() => envoyerPdf(true)} title="Télécharger la déclaration en PDF" className="px-3 py-2 text-xs font-bold rounded-lg border border-blue-600 text-blue-700 flex items-center gap-1.5 mr-auto"><Download className="w-4 h-4" /> PDF</button>
           <button type="button" onClick={onClose} className="px-3 py-2 text-xs font-bold rounded-lg border border-stone-300 text-stone-700">Fermer</button>
           <button type="button" onClick={() => enregistrer(false)} className="px-3 py-2 text-xs font-bold rounded-lg border border-pink-600 text-pink-700 flex items-center gap-1.5"><Save className="w-4 h-4" /> Enregistrer</button>
           <button type="button" onClick={() => enregistrer(true)} className="px-3 py-2 text-xs font-bold rounded-lg bg-pink-600 hover:bg-pink-700 text-white flex items-center gap-1.5"><Printer className="w-4 h-4" /> Enregistrer et imprimer</button>
