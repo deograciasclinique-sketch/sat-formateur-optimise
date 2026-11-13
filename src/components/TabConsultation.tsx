@@ -18,6 +18,7 @@ import { SYMPTOMES_DOMINANTS, DIAGNOSTICS, alertePaludismeNomenclature, estDansN
 import GdtPanneau, { CibleDoc, ouvrirDocExterne } from "./GdtPanneau";
 import { NATIF } from "../lib/natif";
 import { blocGardeHtml, lirePharmaciesLocal, texteGardeZone, nomZone, zoneCabinet } from "../lib/pharmacies";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { Plus, Trash2, Search, FileText, Activity, Clock, MessageCircle, Heart, Eye, CheckCircle, Printer, X, Download, Camera, Upload, FlaskConical, ArrowRight , Mic, MicOff, Calendar} from "lucide-react";
 import CameraCapture from "./CameraCapture";
 import { Etape, ChoixPresentation, RailEtapes, type ModeConsultation } from "./EtapeQuestionnaire";
@@ -309,6 +310,10 @@ export default function TabConsultation({
     try { localStorage.setItem(CLE_MODE_CONSULT, m); } catch { /* stockage indisponible */ }
   };
   const [etapeConsult, setEtapeConsult] = useState(0);
+  // Registre général des consultations : replié par défaut, ouvert sur demande.
+  const [registreOuvert, setRegistreOuvert] = useState(false);
+  // Une recherche lancée depuis le formulaire (bouton « Historique ») ouvre le registre.
+  useEffect(() => { if (searchQuery.trim()) setRegistreOuvert(true); }, [searchQuery]);
   const propsEtape = { mode: modeConsult, etape: etapeConsult, total: TITRES_ETAPES.length, setEtape: setEtapeConsult, titres: TITRES_ETAPES };
   const [editPlainte, setEditPlainte] = useState("");
   const [editExamenPhysique, setEditExamenPhysique] = useState("");
@@ -3427,11 +3432,32 @@ export default function TabConsultation({
       </div>
 
       {/* Consultations medical ledger */}
+      {/* Registre replié par défaut : il s'ouvre sur demande (libère la place sous la consultation). */}
+      {!registreOuvert && (
+        <button
+          type="button"
+          onClick={() => setRegistreOuvert(true)}
+          className="w-full bg-white border border-stone-200 rounded-2xl px-5 py-4 shadow-xs flex items-center justify-between gap-3 text-left hover:border-primary-300 hover:bg-primary-50/30 transition-colors"
+        >
+          <span className="flex items-center gap-3 min-w-0">
+            <span className="shrink-0 w-10 h-10 rounded-xl bg-primary-50 text-primary-700 flex items-center justify-center"><FileText className="w-5 h-5" /></span>
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-stone-900">Registre général des consultations</span>
+              <span className="block text-2xs text-stone-500">{patientDossiers.length} patient{patientDossiers.length > 1 ? "s" : ""} · {consultations.length} consultation{consultations.length > 1 ? "s" : ""} — recherche, dossiers, impression du registre</span>
+            </span>
+          </span>
+          <span className="shrink-0 text-xs font-semibold text-primary-700 flex items-center gap-1">Ouvrir le registre <ChevronDown className="w-4 h-4" /></span>
+        </button>
+      )}
+      {registreOuvert && (
       <div className="bg-white border border-stone-200 rounded-2xl p-6 shadow-xs">
         <div className="border-b border-stone-100 pb-3 mb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <h3 className="text-base font-serif font-bold text-stone-900 flex items-center gap-2">
             <FileText className="w-5 h-5 text-primary-700" />
             Registre Général des Consultation Médicales Archivées
+            <button type="button" onClick={() => setRegistreOuvert(false)} className="ml-2 font-sans text-xs font-semibold text-stone-500 hover:text-stone-800 flex items-center gap-1">
+              Replier <ChevronUp className="w-4 h-4" />
+            </button>
           </h3>
 
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -3534,6 +3560,7 @@ export default function TabConsultation({
           </div>
         )}
       </div>
+      )}
 
       {/* Dossier Patient Modal : suite chronologique des consultations, examens labo et documents scannés */}
       {viewingPatientDossier && (
