@@ -8,7 +8,7 @@ import { ConsultationPrenatale, Accouchement, Staff, ExamenLabo, EchographieCPN,
 import SalleAccouchement from "./SalleAccouchement";
 import { alertesEnCours, taElevee } from "../lib/lcg";
 import { generateUid, getTodayStr } from "../data";
-import DeclarationNaissanceModal, { imprimerDeclaration } from "./DeclarationNaissance";
+import DeclarationNaissanceModal, { imprimerDeclaration, imprimerDeclarationVierge } from "./DeclarationNaissance";
 import { Plus, Trash2, Calendar, Clipboard, Heart, HelpCircle, CheckCircle, FlaskConical, Upload, Image, Download, Eye, X, AlertTriangle, FolderOpen, UserPlus, Pencil } from "lucide-react";
 import { logActivity } from "../lib/activityLogger";
 
@@ -1157,6 +1157,9 @@ export default function TabMaternite({
         <h3 className="text-base font-serif font-bold text-stone-900 border-b border-stone-100 pb-3 mb-4 flex items-center gap-2">
           <Heart className="w-5 h-5 text-pink-600" />
           Grand Registre d'Accouchements Réalisés à la Maternité
+          <button type="button" onClick={() => imprimerDeclarationVierge()} className="ml-auto px-3 py-1.5 text-xs font-sans font-bold rounded-lg border border-pink-600 text-pink-700 hover:bg-pink-50" title="Imprimer une déclaration de naissance vierge, à remplir à la main">
+            Déclaration vierge (à remplir)
+          </button>
         </h3>
         {accouchements.length === 0 ? (
           <p className="text-xs text-stone-500 dark:text-stone-400 py-6 text-center italic">Aucun accouchement répertorié dans ce registre.</p>

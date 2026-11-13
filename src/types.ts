@@ -392,6 +392,7 @@ export interface PersonneDeclaration {
 
 export interface DeclarationNaissance {
   numero: string;            // "07032026" (date de naissance, suffixe -2, -3… si plusieurs le même jour)
+  codePatientMere?: string;  // code patient de la maman (registre des patients) = N° par défaut
   // Agent qui signe la déclaration (sage-femme / accoucheur).
   declarantAgentId?: string;
   declarantAgentNom?: string;
