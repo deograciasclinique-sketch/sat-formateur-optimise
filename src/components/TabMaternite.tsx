@@ -8,6 +8,7 @@ import { ConsultationPrenatale, Accouchement, Staff, ExamenLabo, EchographieCPN,
 import SalleAccouchement from "./SalleAccouchement";
 import { alertesEnCours, taElevee } from "../lib/lcg";
 import { generateUid, getTodayStr } from "../data";
+import { lieuParDefaut } from "../lib/examensInfirmier";
 import DeclarationNaissanceModal, { imprimerDeclaration, imprimerDeclarationVierge, partagerPdfDeclaration } from "./DeclarationNaissance";
 import { Plus, Trash2, Calendar, Clipboard, Heart, HelpCircle, CheckCircle, FlaskConical, Upload, Image, Download, Eye, X, AlertTriangle, FolderOpen, UserPlus, Pencil } from "lucide-react";
 import { logActivity } from "../lib/activityLogger";
@@ -182,8 +183,9 @@ export default function TabMaternite({
       createdAt: new Date().toISOString()
     };
     if (onUpdateLaboExamens) {
+      newExam.lieuExecution = lieuParDefaut(newExam.analyses);
       onUpdateLaboExamens([newExam, ...laboExamens]);
-      alert(`Examen prescrit (${cpnPrescriptionAnalyse}) et envoyé directement au laboratoire !`);
+      alert(`Examen prescrit (${cpnPrescriptionAnalyse}) et envoyé ${newExam.lieuExecution === "Salle infirmier" ? "en salle infirmier (test rapide)" : "directement au laboratoire"} !`);
       setCpnPrescriptionAnalyse("");
     }
   };

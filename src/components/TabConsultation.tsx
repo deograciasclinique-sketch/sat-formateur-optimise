@@ -12,6 +12,7 @@ import { logActivity } from "../lib/activityLogger";
 import { interpreterDengue, dengueComplet } from "../modules/thlo/tdr";
 import { AntecedentsPatient, Consultation, FicheReference, RendezVous, LigneOrdonnance, Medicament, Staff, ExamenLabo, Hospitalisation, PatientUrgence, MouvementStock, DocumentArchive, ActeTarifaire } from "../types";
 import { generateUid, getTodayStr } from "../data";
+import { lieuParDefaut } from "../lib/examensInfirmier";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
 import { imprimerRegistreConsultation, lignesRegistre } from "../lib/registreConsultation";
 import { SYMPTOMES_DOMINANTS, DIAGNOSTICS, alertePaludismeNomenclature, estDansNomenclature, PLAN_EXAMEN_GDT, PAGE_ORDINOGRAMME, pagePdf, referencesPour } from "../modules/nomenclature/gdt";
@@ -504,10 +505,20 @@ export default function TabConsultation({
       });
     }
     if (onUpdateLaboExamens) {
+      // Tests rapides (TDR, glycémie capillaire, test de grossesse…) : faits
+      // en salle infirmier puis renvoyés au prescripteur ; le reste au labo.
+      nouveauxExamens.forEach((e) => { e.lieuExecution = lieuParDefaut(e.analyses, e.bilan); });
       onUpdateLaboExamens([...nouveauxExamens, ...laboExamens]);
-      const noms = nouveauxExamens.map((e) => e.bilan || e.analyses).join(", ");
+      const nomsDe = (l: ExamenLabo[]) => l.map((e) => e.bilan || e.analyses).join(", ");
+      const auLabo = nouveauxExamens.filter((e) => e.lieuExecution !== "Salle infirmier");
+      const enSalle = nouveauxExamens.filter((e) => e.lieuExecution === "Salle infirmier");
       const total = nouveauxExamens.reduce((s, e) => s + (e.prix || 0), 0);
-      alert(`Examen(s) prescrit(s) (${noms}) — Total ${total.toLocaleString("fr-FR")} F.\nEnvoyé(s) au laboratoire ET mis à disposition dans l'onglet Facturation (avec leur prix) pour le patient "${consPatient}".`);
+      alert(
+        `Examen(s) prescrit(s) — Total ${total.toLocaleString("fr-FR")} F.\n` +
+        (auLabo.length ? `• Laboratoire : ${nomsDe(auLabo)}\n` : "") +
+        (enSalle.length ? `• Salle infirmier (tests rapides) : ${nomsDe(enSalle)}\n` : "") +
+        `Mis à disposition dans l'onglet Facturation (avec leur prix) pour le patient "${consPatient}". Les résultats vous reviendront ici.`
+      );
       setSelectedExamenIds([]);
       setBilansChoisis({});
       setConsPrescriptionAutre("");
@@ -2985,13 +2996,16 @@ export default function TabConsultation({
                                 <span className={`font-black ${exam.statut === "Prêt" || exam.statut === "Résultat disponible" || exam.statut === "Validé" ? "text-primary-600" : "text-warning-500"}`}>
                                   {exam.statut}
                                 </span>
+                                {exam.lieuExecution === "Salle infirmier" && (
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">Salle infirmier{exam.technicien ? ` · ${exam.technicien}` : ""}</span>
+                                )}
                               </div>
                             </div>
                                                         <button
                               type="button"
                               onClick={() => {
                                 if (exam.statut !== "Prêt" && exam.statut !== "Validé" && exam.statut !== "Résultat disponible") {
-                                  alert("Le laboratoire n'a pas encore validé les résultats pour cet examen. Veuillez patienter.");
+                                  alert(exam.lieuExecution === "Salle infirmier" ? "La salle infirmier n'a pas encore renvoyé le résultat de cet examen. Veuillez patienter." : "Le laboratoire n'a pas encore validé les résultats pour cet examen. Veuillez patienter.");
                                   return;
                                 }
                                 handleLinkLabExamenToTemp(exam);

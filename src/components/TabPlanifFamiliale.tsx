@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from "react";
 import { FichePlanifFamiliale, Staff, ExamenLabo } from "../types";
 import { generateUid, getTodayStr, safeGet, safeSet } from "../data";
+import { lieuParDefaut } from "../lib/examensInfirmier";
 import RetraitsContraception from "./RetraitsContraception";
 import InjectablesPF from "./InjectablesPF";
 import { useCloudSyncedState } from "../lib/useCloudSyncedState";
@@ -354,8 +355,9 @@ export default function TabPlanifFamiliale({ staff, theme = "light", laboExamens
       createdAt: new Date().toISOString()
     };
     if (onUpdateLaboExamens) {
+      newExam.lieuExecution = lieuParDefaut(newExam.analyses);
       onUpdateLaboExamens([newExam, ...laboExamens]);
-      alert(`Examen prescrit (${pfPrescriptionAnalyse}) et envoyé directement au laboratoire !`);
+      alert(`Examen prescrit (${pfPrescriptionAnalyse}) et envoyé ${newExam.lieuExecution === "Salle infirmier" ? "en salle infirmier (test rapide)" : "directement au laboratoire"} !`);
       setPfPrescriptionAnalyse("");
     }
   };
