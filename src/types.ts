@@ -325,6 +325,22 @@ export interface ExamenLabo {
     igg?: "Positif" | "Négatif";
     jourFievre?: number;
   };
+  // Lieu d'exécution : une partie des examens (tests rapides) est faite en
+  // salle infirmier puis renvoyée au médecin prescripteur. Absent = Laboratoire.
+  lieuExecution?: "Laboratoire" | "Salle infirmier";
+  // Fiche remplie en salle infirmier (valeurs structurées).
+  ficheInfirmier?: {
+    glycemie?: number; // g/L
+    aJeun?: boolean;
+    hemoglobine?: number; // g/dL
+    testGrossesse?: "Positif" | "Négatif";
+    testRapide?: "Positif" | "Négatif";
+    bandelette?: Record<string, string>;
+    heure?: string;
+    observations?: string;
+  };
+  // Date/heure du renvoi du résultat au médecin prescripteur.
+  renvoyeAuMedecinLe?: string;
 }
 
 export interface CpnMaternite {

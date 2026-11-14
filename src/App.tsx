@@ -2579,6 +2579,8 @@ export default function App() {
               agentNom={currentUser?.nom || ""}
               actes={actesTarifaires}
               demandeSoin={demandeSoin}
+              laboExamens={laboExamens}
+              onUpdateLaboExamens={handleUpdateLaboExamens}
             />
           )}
 

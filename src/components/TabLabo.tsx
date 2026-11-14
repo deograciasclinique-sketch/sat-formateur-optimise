@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { ExamenLabo, Staff, Consultation, Medicament, MouvementStock, ActeTarifaire } from "../types";
 import { SelecteurBilans, DetailBilan, bilansAPrescrire, type ChoixBilans } from "./BilansLabo";
 import { generateUid, getTodayStr } from "../data";
+import { enSalleInfirmier, realisableEnSalleInfirmier } from "../lib/examensInfirmier";
 import { ResultatTDR, TdrDengue, demandeTdrPalu, demandeTdrDengue, dengueComplet, interpreterDengue, alerteDengue, texteResultatTdr } from "../modules/thlo/tdr";
 import { Plus, Trash2, Printer, MessageCircle, Search, FlaskConical, CheckCircle, FileText, X, Beaker, AlertTriangle, Eye, Upload, Download } from "lucide-react";
 
@@ -44,8 +45,8 @@ export default function TabLabo({ examens, staff, onUpdateExamens, consultations
   useEffect(() => {
     // Check for newly added urgent exams in "En attente"
     const prevExamens = prevExamensRef.current;
-    const currentUrgentPending = examens.filter(e => e.statut === "En attente" && e.priorite === "urgente");
-    const prevUrgentPendingIds = prevExamens.filter(e => e.statut === "En attente" && e.priorite === "urgente").map(e => e.id);
+    const currentUrgentPending = examens.filter(e => e.statut === "En attente" && e.priorite === "urgente" && !enSalleInfirmier(e));
+    const prevUrgentPendingIds = prevExamens.filter(e => e.statut === "En attente" && e.priorite === "urgente" && !enSalleInfirmier(e)).map(e => e.id);
     
     const newUrgentExams = currentUrgentPending.filter(e => !prevUrgentPendingIds.includes(e.id));
     
@@ -695,7 +696,10 @@ ${examen.composants?.length ? htmlBilan(examen) : (examen.analyses || "Aucune an
   };
 
   // Calculations
-  const totalInQueue = examens.filter((e) => e.statut !== "Prêt" && e.statut !== "Validé" && e.statut !== "Résultat disponible").length;
+  const totalInQueue = examens.filter((e) => e.statut !== "Prêt" && e.statut !== "Validé" && e.statut !== "Résultat disponible" && !enSalleInfirmier(e)).length;
+  const deplacerExamen = (e: ExamenLabo, lieu: "Laboratoire" | "Salle infirmier") => {
+    onUpdateExamens(examens.map((x) => (x.id === e.id ? { ...x, lieuExecution: lieu } : x)));
+  };
   const readyResultsCount = examens.filter((e) => e.statut === "Prêt").length;
   const currentMonth = getTodayStr().slice(0, 7);
   const examTodayCount = examens.filter((e) => e.dateDemande === getTodayStr()).length;
@@ -1004,7 +1008,7 @@ ${examen.composants?.length ? htmlBilan(examen) : (examen.analyses || "Aucune an
               >
                 <option value="">— Choisir —</option>
                 {examens
-                  .filter((e) => e.statut !== "Prêt" && e.statut !== "Validé" && e.statut !== "Résultat disponible")
+                  .filter((e) => e.statut !== "Prêt" && e.statut !== "Validé" && e.statut !== "Résultat disponible" && !enSalleInfirmier(e))
                   .map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.patient} — {e.analyses}
@@ -1214,6 +1218,9 @@ ${examen.composants?.length ? htmlBilan(examen) : (examen.analyses || "Aucune an
                         >
                           {e.statut}
                         </span>
+                        {enSalleInfirmier(e) && (
+                          <div className="mt-1 text-2xs font-bold text-emerald-700">Salle infirmier{e.technicien && (e.statut === "Prêt" || e.statut === "Validé") ? ` · ${e.technicien}` : ""}</div>
+                        )}
                       </td>
                       <td className="p-3 font-mono text-sm text-stone-600 max-w-[200px] truncate" title={e.resultat}>
                         {e.resultat || <span className="text-stone-500 dark:text-stone-400 italic">Analyse biologique en cours...</span>}
@@ -1236,7 +1243,27 @@ ${examen.composants?.length ? htmlBilan(examen) : (examen.analyses || "Aucune an
                             }
                             return null;
                           })()}
-                          {(e.statut === "En attente" || e.statut === "Demandé") && (
+                          {(e.statut === "En attente" || e.statut === "Demandé") && enSalleInfirmier(e) && (
+                            <button
+                              type="button"
+                              onClick={() => deplacerExamen(e, "Laboratoire")}
+                              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-2xs font-bold px-2 py-1.5 rounded-lg border border-emerald-200 transition-all w-full"
+                              title="Faire cet examen au laboratoire plutôt qu'en salle infirmier"
+                            >
+                              ← Reprendre au labo
+                            </button>
+                          )}
+                          {(e.statut === "En attente" || e.statut === "Demandé") && !enSalleInfirmier(e) && realisableEnSalleInfirmier(e.analyses, e.bilan) && (
+                            <button
+                              type="button"
+                              onClick={() => deplacerExamen(e, "Salle infirmier")}
+                              className="bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-2xs font-bold px-2 py-1.5 rounded-lg border border-emerald-200 transition-all w-full"
+                              title="Test rapide : le confier à la salle infirmier"
+                            >
+                              → Salle infirmier
+                            </button>
+                          )}
+                          {(e.statut === "En attente" || e.statut === "Demandé") && !enSalleInfirmier(e) && (
                             <button
                               type="button"
                               onClick={() => {

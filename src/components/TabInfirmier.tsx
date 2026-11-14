@@ -4,17 +4,19 @@
  */
 
 import React, { useState, useMemo, useEffect } from "react";
-import { Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv, Facture, SoinRealise, PlanSoins, ActeTarifaire } from "../types";
+import { ExamenLabo, Consultation, Staff, LigneOrdonnance, Hospitalisation, PatientUrgence, Medicament, MouvementStock, RendezVous, ConstantesRdv, Facture, SoinRealise, PlanSoins, ActeTarifaire } from "../types";
 import SalleDesSoins, { FormulaireSoin, PreRemplissageSoin, cloturerPlansComplets, prisesAFaireAujourdhui, dureeDepuisTexte } from "./SalleDesSoins";
 import { recuValide, dernierRecu, dateCourteFr } from "../lib/recuConsultation";
 import {
   construireDossiers, trouverDossier, ConstantesRdvForm, NouveauRdvForm, DossierPatientView, RdvDuJour, ListeDossiers,
 } from "./InfirmierDossiers";
 import ComplementsSoins from "./ComplementsSoins";
+import ExamensSalleInfirmier from "./ExamensSalleInfirmier";
+import { enSalleInfirmier, examenTermine } from "../lib/examensInfirmier";
 import { ConduiteATenirListe, catASoinsInfirmiers, TYPES_INFIRMIER, conduiteEnLignes, enListeCAT } from "./ConduiteATenir";
 import { generateUid } from "../data";
 import { getConsultationWhatsAppLink } from "../lib/whatsapp";
-import { Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send, CalendarDays, FolderOpen, CalendarPlus } from "lucide-react";
+import { FlaskConical, Activity, ArrowRight, Stethoscope, Syringe, CheckCircle2, ClipboardCheck, Plus, Trash2, Send, CalendarDays, FolderOpen, CalendarPlus } from "lucide-react";
 
 interface TabInfirmierProps {
   consultations: Consultation[];
@@ -58,6 +60,10 @@ interface TabInfirmierProps {
   actes?: ActeTarifaire[];
   // Alerte « Faire le soin » (bandeau des alertes) : plan + médicaments à faire.
   demandeSoin?: { planId: string; lignes: string[]; n: number } | null;
+  // Examens de laboratoire : les tests rapides orientés « Salle infirmier »
+  // sont faits ici puis renvoyés au médecin prescripteur.
+  laboExamens?: ExamenLabo[];
+  onUpdateLaboExamens?: (e: ExamenLabo[]) => void;
 }
 
 type ModeCloture = "transfert" | "moimeme";
@@ -92,11 +98,13 @@ export default function TabInfirmier({
   agentNom = "",
   actes = [],
   demandeSoin = null,
+  laboExamens = [],
+  onUpdateLaboExamens,
 }: TabInfirmierProps) {
   const isDark = theme === "dark";
 
   // --- Rendez-vous et dossiers patients ---------------------------------
-  const [vueInf, setVueInf] = useState<"attente" | "decisions" | "soins" | "rdv" | "dossiers">("attente");
+  const [vueInf, setVueInf] = useState<"attente" | "decisions" | "soins" | "examens" | "rdv" | "dossiers">("attente");
   // Formulaire « Enregistrer un soin » : pré-rempli éventuellement, et
   // consultation à clôturer une fois le soin noté (depuis « Soins à exécuter »).
   const [formSoin, setFormSoin] = useState<null | { pre: PreRemplissageSoin | null; terminerConsultationId?: string }>(null);
@@ -599,6 +607,7 @@ export default function TabInfirmier({
     ["attente", `Patients en attente (${enAttente.length})`, <Activity key="a" className="w-4 h-4" />],
     ["decisions", `Décisions du médecin (${actesAExecuter.length})`, <Stethoscope key="m" className="w-4 h-4" />],
     ["soins", (() => { const n = prisesAFaireAujourdhui(plansSoins, soins); return n ? `Salle des soins (${n} à faire)` : "Salle des soins"; })(), <Syringe key="s" className="w-4 h-4" />],
+    ["examens", (() => { const n = laboExamens.filter((e) => enSalleInfirmier(e) && !examenTermine(e)).length; return n ? `Examens (${n} à faire)` : "Examens"; })(), <FlaskConical key="x" className="w-4 h-4" />],
     ["rdv", `Rendez-vous du jour (${rdvsDuJour.length})`, <CalendarDays key="r" className="w-4 h-4" />],
     ["dossiers", "Dossiers patients", <FolderOpen key="d" className="w-4 h-4" />],
   ];
@@ -761,6 +770,16 @@ export default function TabInfirmier({
             );
           })}
         </div>
+      )}
+
+      {vueInf === "examens" && (
+        <ExamensSalleInfirmier
+          examens={laboExamens}
+          onUpdateExamens={(e) => onUpdateLaboExamens && onUpdateLaboExamens(e)}
+          consultations={consultations}
+          agentNom={agentNom}
+          isDark={isDark}
+        />
       )}
 
       {vueInf === "soins" && (
