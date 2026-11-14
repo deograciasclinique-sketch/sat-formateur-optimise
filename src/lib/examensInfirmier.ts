@@ -34,7 +34,7 @@ interface RegleTest {
 export const TESTS_SALLE_INFIRMIER: RegleTest[] = [
   { type: "tdr_palu", libelle: "TDR Paludisme", match: (_t, brut) => demandeTdrPalu(brut) },
   { type: "tdr_dengue", libelle: "TDR Dengue (NS1 / IgM / IgG)", match: (_t, brut) => demandeTdrDengue(brut) },
-  { type: "glycemie", libelle: "Glycémie capillaire", match: (t) => /glyc[ea]mie|dextro|glucometre|glucose capillaire/.test(t) && !/hb ?a1c|hemoglobine glyquee|hgpo|provoquee/.test(t) },
+  { type: "glycemie", libelle: "Glycémie capillaire", match: (t) => (/glyc[ea]mie|dextro|glucometre/.test(t) || (/glucose/.test(t) && !/urin/.test(t))) && !/hb ?a1c|hemoglobine glyquee|hgpo|provoquee/.test(t) },
   { type: "grossesse", libelle: "Test de grossesse urinaire", match: (t) => /test (de )?grossesse|beta ?hcg urinaire|hcg urinaire|tig\b/.test(t) },
   { type: "hemoglobine", libelle: "Hémoglobine (Hemocue)", match: (t) => /hemocue|taux d'?hemoglobine|\bhb capillaire|hemoglobine capillaire/.test(t) },
   { type: "bandelette", libelle: "Bandelette urinaire", match: (t) => /bandelette|labstix|multistix|combur/.test(t) },
