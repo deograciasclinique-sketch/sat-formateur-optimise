@@ -37,7 +37,10 @@ export const TESTS_SALLE_INFIRMIER: RegleTest[] = [
   { type: "glycemie", libelle: "Glycémie capillaire", match: (t) => (/glyc[ea]mie|dextro|glucometre/.test(t) || (/glucose/.test(t) && !/urin/.test(t))) && !/hb ?a1c|hemoglobine glyquee|hgpo|provoquee/.test(t) },
   { type: "grossesse", libelle: "Test de grossesse urinaire", match: (t) => /test (de )?grossesse|beta ?hcg urinaire|hcg urinaire|tig\b/.test(t) },
   { type: "hemoglobine", libelle: "Hémoglobine (Hemocue)", match: (t) => /hemocue|taux d'?hemoglobine|\bhb capillaire|hemoglobine capillaire/.test(t) },
-  { type: "bandelette", libelle: "Bandelette urinaire", match: (t) => /bandelette|labstix|multistix|combur/.test(t) },
+  { type: "bandelette", libelle: "Bandelette urinaire", match: (t) => !/24 ?h|des 24|quantitati|microalbumin|rapport|ratio/.test(t) && (
+      /bandelette|labstix|multistix|combur|proteinurie|glycosurie|albuminurie|cetonurie|hematurie|leucocyturie/.test(t) ||
+      /(glucose|sucre|proteine|albumine|ph|cetone|corps cetoniques|sang|nitrites?|leucocytes|densite).{0,12}urin/.test(t) ||
+      /urin.{0,12}(glucose|sucre|proteine|albumine|\bph\b|cetone|nitrites?|leucocytes|densite)/.test(t)) },
   { type: "rapide", libelle: "Test rapide", match: (t) => /(test|tdr|trod).*(vih|hiv|syphilis|bw|ag ?hbs|hepatite b|vhc|hepatite c)|(vih|hiv|syphilis|ag ?hbs|vhc).*(rapide|tdr|trod)/.test(t) },
 ];
 
